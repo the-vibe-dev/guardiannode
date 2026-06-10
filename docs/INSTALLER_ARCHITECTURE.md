@@ -26,16 +26,24 @@ Linux dev machine
 ```
 Page 1: Welcome + privacy summary
 Page 2: Choose mode (All-in-one / Connect to existing server)
-Page 3: Parent account (display name + password + recovery code)
-Page 4: Child profile (display name + age group)
-Page 5: Server connection (mDNS browse / manual entry) — only if separated
-Page 6: Monitored apps selection
-Page 7: Hardware detection + model preset — only if all-in-one
-Page 8: Install + progress
-Page 9: Self-test + dashboard link
+Page 3: Child profile (display name + age group)
+Page 4: Server connection + pairing code — only if separated
+Page 5: Hardware detection + model preset — only if all-in-one
+Page 6: Install + progress
+Page 7: Dashboard link
 ```
 
 Pascal scripts in `installer/child-device-windows/wizard_pages.iss` implement the custom pages on top of Inno Setup's wizard framework.
+
+At install time, the child installer writes `agent.yaml`, completes or stages
+pairing credentials, installs service/watchdog backstops, adds Start Menu
+entries, adds all-user Startup entries for `GuardianNodeAgent.exe` and
+`GuardianNodeTray.exe`, pins the tray shortcut when Windows allows it, and starts
+the interactive agent/tray as the original installing user.
+
+Desktop capture runs from the user session, not from service session 0. The
+service is a resilience component; the agent that screenshots the visible
+desktop must run after each Windows account signs in.
 
 ## Anti-tamper components
 

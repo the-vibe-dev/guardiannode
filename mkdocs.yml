@@ -78,6 +78,7 @@ nav:
       - Dashboard: DASHBOARD.md
       - Windows agent: AGENT_WINDOWS.md
       - Installer architecture: INSTALLER_ARCHITECTURE.md
+      - Power-user/source install: POWER_USER_INSTALL.md
       - End-to-end testing: E2E_TESTING.md
       - Reproducible builds: REPRODUCIBLE_BUILDS.md
   - Safety & Trust:

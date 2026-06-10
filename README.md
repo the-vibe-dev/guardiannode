@@ -88,17 +88,15 @@ On the kid PC: first open your parent dashboard → **Devices → Add device** t
 
 ## What it watches
 
-By default, GuardianNode collects from these monitored apps and browsers only — never system-wide:
-
-- Browsers: Chrome, Edge, Brave, Firefox
-- Games: Roblox, Minecraft, Steam, Epic Games
-- Chat: Discord, Teams
-- Email: Outlook, Gmail (web)
+By default, GuardianNode reviews the visible screen in the signed-in Windows
+session. The monitored-app list is kept as context for app/window names, not as
+the capture gate, so plain apps such as Notepad are covered too.
 
 What it captures:
-- Visible on-screen text from the monitored/active window, read by OCR on the captured screenshot
+- Visible on-screen text from screenshots, read by OCR and/or the local vision model
 - App and window titles for context
-- Screenshots — captured for monitored apps; full-screen capture is an explicit opt-in. Raw bytes are stored (encrypted at rest) only for events flagged as risky
+- Screenshots of the visible desktop. Raw bytes are stored, encrypted at rest,
+  only for events flagged as risky
 
 What it does **not** do:
 - No system-wide raw keystroke capture
@@ -142,6 +140,7 @@ For developers:
 - [Backend setup](docs/BACKEND_SETUP.md)
 - [Windows agent](docs/AGENT_WINDOWS.md)
 - [Dashboard](docs/DASHBOARD.md)
+- [Power-user/source install](docs/POWER_USER_INSTALL.md)
 - [OCR pipeline](docs/OCR.md)
 - [Image safety](docs/IMAGE_SAFETY.md)
 - [Text classifier](docs/CLASSIFIER.md)

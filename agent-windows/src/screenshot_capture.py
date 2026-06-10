@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from dataclasses import dataclass
 
 try:
@@ -9,6 +10,12 @@ try:
     _HAS_MSS = True
 except ImportError:
     _HAS_MSS = False
+
+
+log = logging.getLogger("guardiannode.agent.capture")
+_warned_no_mss = False
+_warned_active_error = False
+_warned_full_error = False
 
 
 @dataclass
@@ -68,7 +75,11 @@ def hamming(a: int, b: int) -> int:
 
 
 def capture_active(rect: tuple[int, int, int, int] | None) -> Screenshot | None:
+    global _warned_no_mss, _warned_active_error
     if not _HAS_MSS or not rect:
+        if not _HAS_MSS and not _warned_no_mss:
+            log.warning("screen capture unavailable: mss is not installed")
+            _warned_no_mss = True
         return None
     left, top, right, bottom = rect
     w, h = max(1, right - left), max(1, bottom - top)
@@ -81,7 +92,10 @@ def capture_active(rect: tuple[int, int, int, int] | None) -> Screenshot | None:
             phash = _dhash(img)
             jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
             return Screenshot(width=w, height=h, jpeg_bytes=jpeg, phash=phash)
-    except Exception:
+    except Exception as e:
+        if not _warned_active_error:
+            log.warning("active-window capture failed: %s", e)
+            _warned_active_error = True
         return None
 
 
@@ -98,7 +112,11 @@ def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screen
     would otherwise be invisible at full-screen 8x8 dHash resolution. The
     encoded JPEG remains the full screen.
     """
+    global _warned_no_mss, _warned_full_error
     if not _HAS_MSS:
+        if not _warned_no_mss:
+            log.warning("screen capture unavailable: mss is not installed")
+            _warned_no_mss = True
         return None
     try:
         from PIL import Image
@@ -129,5 +147,8 @@ def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screen
                 jpeg_bytes=jpeg,
                 phash=phash,
             )
-    except Exception:
+    except Exception as e:
+        if not _warned_full_error:
+            log.warning("full-screen capture failed: %s", e)
+            _warned_full_error = True
         return None

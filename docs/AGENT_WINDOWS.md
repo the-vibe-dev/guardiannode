@@ -1,6 +1,14 @@
 # Windows Agent
 
-Runs as a Windows service on the child's PC. Watches monitored apps, OCRs visible text, sends events to the backend.
+Runs on the child's PC in the signed-in Windows desktop session. It captures the
+visible screen, OCRs visible text, sends screenshots to the backend for local
+classification, and keeps a tray icon visible for pause/status actions.
+
+The installer also registers service/watchdog components for resilience, but
+desktop capture must happen in the user's interactive session. Windows service
+session 0 cannot reliably see the child's desktop, so the installer starts the
+agent with `runasoriginaluser` and adds all-user Startup entries for future
+logins.
 
 ## Development setup
 
@@ -14,21 +22,45 @@ python -m src.main --dry-run
 
 `--dry-run` prints what would be sent without making network calls.
 
+To pair and run from Python source on a Windows child PC:
+
+```powershell
+cd agent-windows
+py -3 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install -e ".[windows]"
+.\.venv\Scripts\python -m src.main --pair --server http://<server-ip>:8787 --code <pair-code>
+.\.venv\Scripts\python -m src.main
+```
+
+Run the tray in a second terminal while testing from source:
+
+```powershell
+.\.venv\Scripts\python -m src.tray_app
+```
+
 ## Configuration
 
 Local config at `C:\ProgramData\GuardianNode\agent.yaml`:
 
 ```yaml
 backend_url: http://127.0.0.1:8787
-device_id: child-laptop-01
-device_token: <encrypted>
-ocr_engine: paddle
-monitored_apps:
-  - Roblox.exe
-  - Discord.exe
-  - chrome.exe
+age_group: 10_13
+ocr_engine: tesseract
 ocr_cadence_seconds: 5
+ocr_min_confidence: 0.5
+phash_threshold: 2
+full_screen_capture_enabled: true
+monitored_apps:
+  - notepad.exe
+  - chrome.exe
+  - msedge.exe
+  - firefox.exe
+  - brave.exe
 ```
+
+Pairing credentials live separately in
+`C:\ProgramData\GuardianNode\device.json`.
 
 ## Components
 
@@ -55,9 +87,16 @@ Some tests require Windows (`pywin32`); use the dry-run path on Linux.
 
 ## PyInstaller build
 
-```bash
+```powershell
 cd agent-windows
-pyinstaller --noconfirm --windowed --name GuardianNodeAgent src/main.py
+py -3 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install -e ".[windows]" pyinstaller
+.\.venv\Scripts\pyinstaller --noconfirm --windowed --name GuardianNodeAgent src\main.py
+.\.venv\Scripts\pyinstaller --noconfirm --windowed --name GuardianNodeTray src\tray_app.py
+.\.venv\Scripts\pyinstaller --noconfirm --console --name GuardianNodeWatchdog src\watchdog.py
 ```
 
-Output in `dist/GuardianNodeAgent/`.
+Output is written under `dist/`. The release installer expects the agent bundle
+under `installer/build/prebuilt/agent`; see
+[`POWER_USER_INSTALL.md`](POWER_USER_INSTALL.md) for the full installer build.

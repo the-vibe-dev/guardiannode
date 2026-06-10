@@ -41,9 +41,15 @@ On the second wizard page, choose the **first** option. This installs:
 - Enter the child's name (or a nickname — no real personal info needed)
 - Pick the age group: **Under 10**, **10–13**, or **14–17**. This controls how sensitive the alerts are.
 
-## Step 6 — Pick monitored apps
+## Step 6 — Review what will be monitored
 
-The installer preselects common apps: Roblox, Discord, Chrome, Edge, Outlook, Steam, Minecraft, Epic Games. You can add or remove apps. GuardianNode only watches the apps in this list — never anything else.
+GuardianNode runs in the signed-in Windows session and reviews the visible
+screen by default. This means it can catch risky text in simple apps such as
+Notepad, browsers, games, chat apps, and any other window that is actually on
+screen. App names and window titles are recorded as context for alerts.
+
+It does not collect raw keystrokes, does not read password fields directly, and
+does not upload child data to a vendor cloud.
 
 ## Step 7 — Hardware detection
 
@@ -61,6 +67,10 @@ The installer runs a synthetic test to make sure everything works. If any check 
 ## Step 9 — Open the dashboard
 
 Click **Open Parent Dashboard**. Your browser opens to `http://127.0.0.1:8787`. Sign in with your parent password.
+
+The installer starts the monitoring agent and the tray icon for the current
+Windows user. It also adds all-user Startup entries so the agent and tray launch
+again whenever any Windows account signs in.
 
 ## Pausing monitoring when you use the PC
 
