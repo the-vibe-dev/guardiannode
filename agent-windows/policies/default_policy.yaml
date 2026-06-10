@@ -1,0 +1,51 @@
+policy_id: default
+policy_version: 0.1.0
+profile_id: null  # filled in by installer
+age_group: 10_13
+
+monitored_apps:
+  - Roblox.exe
+  - Discord.exe
+  - chrome.exe
+  - msedge.exe
+  - firefox.exe
+  - brave.exe
+  - outlook.exe
+  - Teams.exe
+  - Steam.exe
+  - EpicGamesLauncher.exe
+  - MinecraftLauncher.exe
+  - javaw.exe
+
+monitored_domains:
+  - mail.google.com
+  - outlook.live.com
+  - outlook.office.com
+  - discord.com
+  - roblox.com
+  - tiktok.com
+
+ocr_cadence_seconds: 5
+image_safety_enabled: true
+clipboard_monitoring_enabled: false
+full_screen_capture_enabled: false
+
+severity_thresholds:
+  alert_at: medium
+  notify_at: high
+
+enforcement:
+  on_critical:
+    - notify_parent
+  on_high:
+    - notify_parent
+  on_medium:
+    - notify_parent_digest
+  on_low:
+    - log_only
+
+retention_days:
+  critical: 90
+  high: 90
+  medium: 30
+  low: 1

@@ -1,0 +1,110 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+/build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.yarn-integrity
+
+# Build outputs
+dashboard/dist/
+agent-windows/dist/
+agent-windows/build/
+# backend/app/static/ is committed on purpose: the Linux installer serves the
+# dashboard from this prebuilt copy (install.sh does not run npm).
+# installer/build/ sources (build_all.sh, winsw_templates/) are committed;
+# only its staging/output artifacts are ignored.
+installer/build/stage/
+installer/build/dist/
+installer/build/prebuilt/
+*.exe
+*.msi
+!installer/**/*.iss
+
+# Databases & local data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+evidence/
+keys/
+local_config/
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Wine prefix for installer builds
+.wine/
+wineprefix/
+
+# Inno Setup downloads (bundled in installer build)
+installer/build/innosetup-*.exe
+installer/build/innosetup/
+
+# Ollama models (never commit weights)
+models/
+*.gguf
+
+# Secrets (defense in depth)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+master.key
+recovery.txt
+
+# Test artifacts
+.coverage
+htmlcov/
+test-results/
+playwright-report/

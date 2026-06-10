@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/child_profile.json",
+  "title": "ChildProfile",
+  "type": "object",
+  "required": ["profile_id", "display_name", "age_group"],
+  "properties": {
+    "profile_id": {"type": "string"},
+    "display_name": {"type": "string", "maxLength": 128},
+    "age_group": {
+      "type": "string",
+      "enum": ["under_10", "10_13", "14_17"]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "notes": {"type": ["string", "null"], "maxLength": 2048}
+  },
+  "additionalProperties": false
+}

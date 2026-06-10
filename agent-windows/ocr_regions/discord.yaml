@@ -1,0 +1,7 @@
+app: Discord.exe
+regions:
+  message_pane:
+    x_pct: 0.20
+    y_pct: 0.05
+    w_pct: 0.75
+    h_pct: 0.85

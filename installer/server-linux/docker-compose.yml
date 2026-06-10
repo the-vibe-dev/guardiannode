@@ -1,0 +1,61 @@
+# GuardianNode self-hosted server via Docker Compose.
+#
+# Two containers: ollama for local LLM, backend for the GuardianNode API + dashboard.
+#
+# Usage:
+#   docker compose up -d
+#   # then open http://<server-ip>:8787 in your browser
+#
+# Persistent state:
+#   - ollama_models   : downloaded model weights
+#   - gn_data         : SQLite DB, encrypted blobs, encryption keys
+#
+# GPU support:
+#   To enable nvidia GPU for Ollama, install nvidia-container-toolkit on the
+#   host then uncomment the deploy.resources block under the ollama service.
+
+version: "3.9"
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: guardiannode_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"   # only expose on loopback by default
+    # Uncomment for NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: installer/server-linux/Dockerfile.backend
+    container_name: guardiannode_backend
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      - GUARDIANNODE_OLLAMA_URL=http://ollama:11434
+      - GUARDIANNODE_BIND_HOST=0.0.0.0
+      - GUARDIANNODE_BIND_PORT=8787
+      - GUARDIANNODE_MDNS_ENABLED=true
+    ports:
+      - "8787:8787"
+    volumes:
+      - gn_data:/data
+    network_mode: "host"
+    # NOTE: network_mode: host is needed for mDNS to be visible on the LAN.
+    # If you don't need auto-discovery, comment out network_mode: host and
+    # rely on the explicit port mapping above.
+
+volumes:
+  ollama_models:
+  gn_data:

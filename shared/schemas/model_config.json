@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/model_config.json",
+  "title": "ModelConfig",
+  "type": "object",
+  "required": ["name", "runtime", "role"],
+  "properties": {
+    "name": {"type": "string"},
+    "runtime": {"type": "string", "enum": ["ollama"]},
+    "role": {
+      "type": "string",
+      "enum": ["text_safety_classifier", "image_safety_classifier"]
+    },
+    "params": {
+      "type": "object",
+      "properties": {
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+        "top_p": {"type": "number"},
+        "num_ctx": {"type": "integer"},
+        "seed": {"type": "integer"}
+      }
+    },
+    "active": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,133 @@
+"""Screen capture via mss + perceptual-hash based change detection."""
+from __future__ import annotations
+
+import io
+from dataclasses import dataclass
+
+try:
+    import mss  # type: ignore
+    _HAS_MSS = True
+except ImportError:
+    _HAS_MSS = False
+
+
+@dataclass
+class Screenshot:
+    width: int
+    height: int
+    jpeg_bytes: bytes
+    phash: int  # 64-bit dHash for cheap change detection (region-scoped when available)
+
+
+def _encode_jpeg(img, quality: int = 80, max_dim: int = 1600) -> bytes:
+    if max(img.size) > max_dim:
+        img.thumbnail((max_dim, max_dim))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
+def _dhash(img) -> int:
+    """8x8 difference hash. Returns a 64-bit int.
+
+    Robust to compression and small content shifts; sensitive to genuine scene
+    changes. Distance is Hamming distance between two hashes.
+    """
+    from PIL import Image
+    g = img.convert("L").resize((9, 8), Image.LANCZOS)
+    px = list(g.getdata())
+    h = 0
+    for y in range(8):
+        row = y * 9
+        for x in range(8):
+            h = (h << 1) | (1 if px[row + x] < px[row + x + 1] else 0)
+    return h
+
+
+def _clamp_rect(
+    rect: tuple[int, int, int, int],
+    mon_left: int, mon_top: int, mon_w: int, mon_h: int,
+) -> tuple[int, int, int, int] | None:
+    """Clip an absolute-screen rect to monitor bounds, return (x, y, w, h)
+    relative to the monitor origin. Returns None if the rect is degenerate.
+    """
+    left, top, right, bottom = rect
+    # Translate to monitor-local
+    x0 = max(0, left - mon_left)
+    y0 = max(0, top - mon_top)
+    x1 = min(mon_w, right - mon_left)
+    y1 = min(mon_h, bottom - mon_top)
+    w, h = x1 - x0, y1 - y0
+    if w < 32 or h < 32:
+        return None
+    return x0, y0, w, h
+
+
+def hamming(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")
+
+
+def capture_active(rect: tuple[int, int, int, int] | None) -> Screenshot | None:
+    if not _HAS_MSS or not rect:
+        return None
+    left, top, right, bottom = rect
+    w, h = max(1, right - left), max(1, bottom - top)
+    region = {"left": left, "top": top, "width": w, "height": h}
+    try:
+        from PIL import Image
+        with mss.mss() as sct:
+            shot = sct.grab(region)
+            img = Image.frombytes("RGB", shot.size, shot.rgb)
+            phash = _dhash(img)
+            jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
+            return Screenshot(width=w, height=h, jpeg_bytes=jpeg, phash=phash)
+    except Exception:
+        return None
+
+
+def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screenshot | None:
+    """Whole-primary-monitor capture.
+
+    Catches content in background apps / wallpapers / picture viewers — anything
+    visually present on the user's desktop, not just the focused window.
+
+    If `active_rect` (absolute screen coordinates of the foreground window) is
+    given, the dedup phash is computed on that subregion of the captured frame
+    instead of the whole monitor. This makes the hash sensitive to small text
+    changes inside the active window (e.g. lines added/removed in Notepad) that
+    would otherwise be invisible at full-screen 8x8 dHash resolution. The
+    encoded JPEG remains the full screen.
+    """
+    if not _HAS_MSS:
+        return None
+    try:
+        from PIL import Image
+        with mss.mss() as sct:
+            mons = sct.monitors
+            # mons[0] is the union of all monitors; mons[1] is the primary.
+            # We prefer the primary to keep frame size manageable on multi-monitor setups.
+            mon = mons[1] if len(mons) > 1 else mons[0]
+            shot = sct.grab(mon)
+            img = Image.frombytes("RGB", shot.size, shot.rgb)
+
+            phash_img = img
+            if active_rect is not None:
+                clipped = _clamp_rect(
+                    active_rect,
+                    mon.get("left", 0), mon.get("top", 0),
+                    mon["width"], mon["height"],
+                )
+                if clipped is not None:
+                    x0, y0, w, h = clipped
+                    phash_img = img.crop((x0, y0, x0 + w, y0 + h))
+
+            phash = _dhash(phash_img)
+            jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
+            return Screenshot(
+                width=mon["width"],
+                height=mon["height"],
+                jpeg_bytes=jpeg,
+                phash=phash,
+            )
+    except Exception:
+        return None

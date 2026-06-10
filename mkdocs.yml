@@ -1,0 +1,86 @@
+site_name: GuardianNode
+site_description: >-
+  Local-first, open-source AI safety monitor for families. Detects grooming,
+  bullying, scams, explicit content, and self-harm signals — without sending
+  child data to the cloud.
+site_url: https://the-vibe-dev.github.io/guardiannode/
+repo_url: https://github.com/the-vibe-dev/guardiannode
+repo_name: the-vibe-dev/guardiannode
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: assets/brand/icon.png
+  favicon: assets/brand/favicon-32.png
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    scheme: default
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/brand.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.details
+
+validation:
+  links:
+    not_found: warn
+    absolute_links: ignore
+    unrecognized_links: ignore
+
+exclude_docs: |
+  overrides/
+
+nav:
+  - Home: index.md
+  - For Parents:
+      - Install on one PC: PARENT_GUIDES/install-on-one-pc.md
+      - Install a server + child PC: PARENT_GUIDES/install-server-and-child.md
+      - When Windows says "Protected your PC": PARENT_GUIDES/when-windows-says-protected-your-pc.md
+      - If you forget your password: PARENT_GUIDES/if-you-forget-your-password.md
+      - Pause monitoring: PARENT_GUIDES/pause-monitoring-when-you-use-the-pc.md
+      - Move the server to another PC: PARENT_GUIDES/move-server-to-another-pc.md
+      - Troubleshooting: PARENT_GUIDES/troubleshooting.md
+      - What this cannot stop: PARENT_GUIDES/what-this-cannot-stop.md
+  - How It Works:
+      - Architecture: ARCHITECTURE.md
+      - Text classifier: CLASSIFIER.md
+      - Image safety: IMAGE_SAFETY.md
+      - OCR pipeline: OCR.md
+      - Device pairing: DEVICE_PAIRING.md
+      - Notifications: NOTIFICATIONS.md
+      - Data retention: RETENTION.md
+      - Redaction: REDACTION.md
+      - Enforcement: ENFORCEMENT.md
+      - Event schema: EVENT_SCHEMA.md
+  - For Developers:
+      - Backend setup: BACKEND_SETUP.md
+      - Dashboard: DASHBOARD.md
+      - Windows agent: AGENT_WINDOWS.md
+      - Installer architecture: INSTALLER_ARCHITECTURE.md
+      - End-to-end testing: E2E_TESTING.md
+      - Reproducible builds: REPRODUCIBLE_BUILDS.md
+  - Safety & Trust:
+      - Safety boundaries: SAFETY_BOUNDARIES.md
+      - Threat model: THREAT_MODEL.md
+  - Roadmap: ROADMAP.md

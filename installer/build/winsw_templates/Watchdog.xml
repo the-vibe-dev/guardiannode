@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<service>
+  <id>GuardianNodeWatchdog</id>
+  <name>GuardianNode Watchdog</name>
+  <description>Restarts the GuardianNode agent if it's stopped</description>
+  <executable>%BASE%\agent\GuardianNodeWatchdog.exe</executable>
+  <arguments>--interval 5</arguments>
+  <workingdirectory>%BASE%\agent</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+</service>

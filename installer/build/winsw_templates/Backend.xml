@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<service>
+  <id>GuardianNodeBackend</id>
+  <name>GuardianNode Backend</name>
+  <description>GuardianNode FastAPI backend</description>
+  <executable>%BASE%\backend\GuardianNodeBackend.exe</executable>
+  <arguments></arguments>
+  <workingdirectory>%BASE%\backend</workingdirectory>
+  <env name="GUARDIANNODE_DATA_DIR" value="%ProgramData%\GuardianNode"/>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+</service>

@@ -1,0 +1,87 @@
+name: release-installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-windows-installers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine32 wine64 winetricks xvfb
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Windows installers
+        env:
+          DISPLAY: ":99"
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          sleep 2
+          ./installer/build/build_all.sh
+
+      - name: Compute SHA-256 hashes
+        working-directory: installer/build/dist
+        run: |
+          sha256sum *.exe > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: installer/build/dist/*
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/build/dist/*.exe
+            installer/build/dist/SHA256SUMS
+          body_path: docs/PARENT_GUIDES/when-windows-says-protected-your-pc.md
+          draft: true
+          prerelease: true
+
+  build-linux-docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: installer/server-linux/Dockerfile.backend
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }}
