@@ -55,6 +55,44 @@ def _should_store(severity: str) -> bool:
     return _SEVERITY_ORDER.get(severity, 0) >= _SEVERITY_ORDER[_STORE_THRESHOLD]
 
 
+def _rules_result_from_matches(matches: list[risk_rules.RuleMatch]) -> dict[str, Any]:
+    rules_severity = risk_rules.max_severity(matches)
+    return {
+        "risk_level": rules_severity,
+        "score": _SCORE_BY_LEVEL.get(rules_severity, 0),
+        "categories": risk_rules.aggregated_categories(matches),
+        "summary": "",
+        "evidence": [m.matched_text for m in matches],
+        "recommended_action": "emergency_review" if rules_severity == "critical" else "alert_parent",
+        "rules_triggered": [m.rule_id for m in matches],
+        "confidence": max(m.confidence for m in matches),
+        "rules_version": risk_rules.RULES_VERSION,
+    }
+
+
+def _apply_rules_floor(current: dict[str, Any], rules_result: dict[str, Any]) -> dict[str, Any]:
+    """Merge deterministic rules into a text result as a minimum severity floor."""
+    if not rules_result:
+        return current
+    if not current:
+        return rules_result
+
+    current_level = current.get("risk_level", "none")
+    rules_level = rules_result.get("risk_level", "none")
+    rules_are_higher = _SEVERITY_ORDER.get(rules_level, 0) > _SEVERITY_ORDER.get(current_level, 0)
+    base = dict(rules_result if rules_are_higher else current)
+    other = current if rules_are_higher else rules_result
+
+    base["categories"] = sorted(set((base.get("categories") or []) + (other.get("categories") or [])))
+    base["evidence"] = list(dict.fromkeys((base.get("evidence") or []) + (other.get("evidence") or [])))[:10]
+    base["rules_triggered"] = sorted(set((current.get("rules_triggered") or []) + (rules_result.get("rules_triggered") or [])))
+    base["rules_version"] = rules_result.get("rules_version") or current.get("rules_version")
+    base["confidence"] = max(float(current.get("confidence", 0.0) or 0.0), float(rules_result.get("confidence", 0.0) or 0.0))
+    if rules_are_higher:
+        base["summary"] = current.get("summary", "") or rules_result.get("summary", "")
+    return base
+
+
 def _blob_path(blob_id: str) -> Path:
     # Shard into subdirs by hash prefix to avoid one big directory
     return settings.evidence_dir / blob_id[:2] / f"{blob_id}.enc"
@@ -222,17 +260,7 @@ async def _ingest_inner(
             matches = risk_rules.evaluate(extracted_text, custom_phrases=custom_phrases)
             if matches:
                 rules_only_severity = risk_rules.max_severity(matches)
-                text_result = {
-                    "risk_level": rules_only_severity,
-                    "score": _SCORE_BY_LEVEL.get(rules_only_severity, 0),
-                    "categories": risk_rules.aggregated_categories(matches),
-                    "summary": "",
-                    "evidence": [m.matched_text for m in matches],
-                    "recommended_action": "alert_parent" if rules_only_severity in ("critical","high","medium") else "log",
-                    "rules_triggered": [m.rule_id for m in matches],
-                    "confidence": max(m.confidence for m in matches),
-                    "rules_version": risk_rules.RULES_VERSION,
-                }
+                text_result = _rules_result_from_matches(matches)
 
     else:  # tier == "full"
         # GPU path: vision LLM + text LLM run in PARALLEL. Vision does OCR +
@@ -276,6 +304,15 @@ async def _ingest_inner(
         # Prefer vision LLM's OCR (better quality) if it produced text;
         # otherwise use Tesseract's.
         extracted_text = (vision_result.get("visible_text") or "").strip() or tess_text
+
+    # Apply deterministic rules to the final OCR text for every tier. In the
+    # full tier, Tesseract can miss text that the vision model reads correctly;
+    # this keeps known critical phrases from being softened by the LLM result.
+    if extracted_text:
+        pipeline_metrics.set_stage(event_id, "rules")
+        matches = risk_rules.evaluate(extracted_text, custom_phrases=custom_phrases)
+        if matches:
+            text_result = _apply_rules_floor(text_result, _rules_result_from_matches(matches))
 
     # ----- Merge -----
     merged = multimodal_risk.merge(

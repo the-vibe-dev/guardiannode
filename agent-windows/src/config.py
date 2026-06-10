@@ -40,6 +40,10 @@ class AgentConfig:
     # Perceptual hash Hamming threshold over the active-window dHash.
     # 2 catches a single-line text edit; 0-1 catches even cursor blink (too noisy).
     phash_threshold: int = 2
+    # Full-screen duplicate suppression. In full-screen mode, small focus/title
+    # changes can alter the active-window hash while the visible desktop is
+    # effectively unchanged. Do not resend near-identical full-screen frames.
+    full_screen_duplicate_threshold: int = 4
     # Default to the visible desktop so typed risk in simple apps such as
     # Notepad is still reviewed. App names remain useful context, not a gate.
     full_screen_capture_enabled: bool = True

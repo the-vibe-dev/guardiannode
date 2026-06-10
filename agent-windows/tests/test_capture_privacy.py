@@ -17,6 +17,17 @@ async def _stop_sleep(_seconds):
     raise StopLoop()
 
 
+def _stop_after(iterations: int):
+    state = {"count": 0}
+
+    async def _sleep(_seconds):
+        state["count"] += 1
+        if state["count"] >= iterations:
+            raise StopLoop()
+
+    return _sleep
+
+
 @pytest.mark.asyncio
 async def test_unmonitored_app_does_not_enqueue_screenshot(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=2)
@@ -79,3 +90,38 @@ async def test_monitored_app_enqueues_window_scoped_metadata(monkeypatch):
     assert payload["policy_version"] == "2"
     assert payload["capture_scope"] == "monitored_app"
     assert payload["in_monitored"] is True
+
+
+@pytest.mark.asyncio
+async def test_full_screen_mode_suppresses_unchanged_frame(monkeypatch):
+    q: asyncio.Queue = asyncio.Queue(maxsize=4)
+    cfg = AgentConfig(
+        monitored_apps=["notepad.exe"],
+        full_screen_capture_enabled=True,
+        phash_threshold=2,
+        full_screen_duplicate_threshold=4,
+    )
+
+    shots = iter([
+        Screenshot(width=800, height=600, jpeg_bytes=b"jpg-1", phash=0b00000000, full_phash=0b10101010),
+        # Active-region hash changes, but full-screen hash is identical.
+        Screenshot(width=800, height=600, jpeg_bytes=b"jpg-2", phash=0b11110000, full_phash=0b10101010),
+    ])
+
+    monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
+    monkeypatch.setattr(
+        "src.main.get_active_process",
+        lambda: ActiveProcess(pid=1, name="notepad.exe", exe=None),
+    )
+    monkeypatch.setattr(
+        "src.main.get_active_window",
+        lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200)),
+    )
+    monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: next(shots))
+    monkeypatch.setattr("src.main.capture_active", lambda _rect: pytest.fail("capture_active called"))
+    monkeypatch.setattr("src.main.asyncio.sleep", _stop_after(2))
+
+    with pytest.raises(StopLoop):
+        await capture_loop(cfg, q)
+
+    assert q.qsize() == 1

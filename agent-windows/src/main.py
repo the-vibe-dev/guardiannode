@@ -50,8 +50,10 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
     #  - 2..3  : a single-character / single-line edit in a text app: send
     #  - 4+    : clear scene change: send
     PHASH_THRESHOLD = int(getattr(cfg, "phash_threshold", 0) or 2)
+    FULL_DUP_THRESHOLD = int(getattr(cfg, "full_screen_duplicate_threshold", 0) or 3)
 
     last_phash: int | None = None
+    last_full_phash: int | None = None
     sent_count = 0
     skipped_count = 0
     last_log_summary = time.time()
@@ -88,16 +90,29 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             # Perceptual diff: only ship if the scene actually changed.
             # First frame always sends (dist=64 sentinel forces it).
             dist = 64 if last_phash is None else hamming(last_phash, shot.phash)
+            full_dist = 64
+            if shot.full_phash is not None and last_full_phash is not None:
+                full_dist = hamming(last_full_phash, shot.full_phash)
             send = dist >= PHASH_THRESHOLD
+
+            if (
+                send
+                and cfg.full_screen_capture_enabled
+                and shot.full_phash is not None
+                and last_full_phash is not None
+                and full_dist < FULL_DUP_THRESHOLD
+            ):
+                send = False
 
             if cfg.dry_run:
                 log.info(
-                    "dry-run: app=%s monitored=%s phash_dist=%d send=%s bytes=%d",
-                    app_name, in_monitored, dist, send, len(shot.jpeg_bytes),
+                    "dry-run: app=%s monitored=%s phash_dist=%d full_phash_dist=%d send=%s bytes=%d",
+                    app_name, in_monitored, dist, full_dist, send, len(shot.jpeg_bytes),
                 )
 
             if send:
                 last_phash = shot.phash
+                last_full_phash = shot.full_phash
                 sent_count += 1
                 payload = {
                     "image_bytes": shot.jpeg_bytes,
@@ -111,14 +126,15 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                     "collector_version": __version__,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "phash_dist": dist,
+                    "full_phash_dist": full_dist,
                     "in_monitored": in_monitored,
                 }
                 if not cfg.dry_run:
                     try:
                         screenshot_queue.put_nowait(payload)
                         log.info(
-                            "queued frame: app=%s monitored=%s phash_dist=%d bytes=%d",
-                            app_name, in_monitored, dist, len(shot.jpeg_bytes),
+                            "queued frame: app=%s monitored=%s phash_dist=%d full_phash_dist=%d bytes=%d",
+                            app_name, in_monitored, dist, full_dist, len(shot.jpeg_bytes),
                         )
                     except asyncio.QueueFull:
                         log.warning("screenshot queue full; dropping frame")

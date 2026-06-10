@@ -24,6 +24,7 @@ class Screenshot:
     height: int
     jpeg_bytes: bytes
     phash: int  # 64-bit dHash for cheap change detection (region-scoped when available)
+    full_phash: int | None = None  # 64-bit dHash of the whole encoded frame
 
 
 def _encode_jpeg(img, quality: int = 80, max_dim: int = 1600) -> bytes:
@@ -34,19 +35,20 @@ def _encode_jpeg(img, quality: int = 80, max_dim: int = 1600) -> bytes:
     return buf.getvalue()
 
 
-def _dhash(img) -> int:
-    """8x8 difference hash. Returns a 64-bit int.
+def _dhash(img, hash_size: int = 8) -> int:
+    """Difference hash. With the default 8x8 grid, returns a 64-bit int.
 
     Robust to compression and small content shifts; sensitive to genuine scene
     changes. Distance is Hamming distance between two hashes.
     """
     from PIL import Image
-    g = img.convert("L").resize((9, 8), Image.LANCZOS)
+    g = img.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
     px = list(g.getdata())
     h = 0
-    for y in range(8):
-        row = y * 9
-        for x in range(8):
+    row_width = hash_size + 1
+    for y in range(hash_size):
+        row = y * row_width
+        for x in range(hash_size):
             h = (h << 1) | (1 if px[row + x] < px[row + x + 1] else 0)
     return h
 
@@ -91,7 +93,7 @@ def capture_active(rect: tuple[int, int, int, int] | None) -> Screenshot | None:
             img = Image.frombytes("RGB", shot.size, shot.rgb)
             phash = _dhash(img)
             jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
-            return Screenshot(width=w, height=h, jpeg_bytes=jpeg, phash=phash)
+            return Screenshot(width=w, height=h, jpeg_bytes=jpeg, phash=phash, full_phash=phash)
     except Exception as e:
         if not _warned_active_error:
             log.warning("active-window capture failed: %s", e)
@@ -139,6 +141,7 @@ def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screen
                     x0, y0, w, h = clipped
                     phash_img = img.crop((x0, y0, x0 + w, y0 + h))
 
+            full_phash = _dhash(img, hash_size=16)
             phash = _dhash(phash_img)
             jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
             return Screenshot(
@@ -146,6 +149,7 @@ def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screen
                 height=mon["height"],
                 jpeg_bytes=jpeg,
                 phash=phash,
+                full_phash=full_phash,
             )
     except Exception as e:
         if not _warned_full_error:
