@@ -106,7 +106,7 @@ def load_credentials(path: Path | None = None) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text("utf-8"))
+        return json.loads(path.read_text("utf-8-sig"))
     except Exception:
         return None
 

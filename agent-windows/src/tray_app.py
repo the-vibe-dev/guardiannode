@@ -30,7 +30,10 @@ DURATIONS = [
 
 def _backend_url() -> str:
     creds = load_credentials() or {}
-    return creds.get("backend_url", "http://127.0.0.1:8787")
+    if creds.get("backend_url"):
+        return creds["backend_url"]
+    cfg = AgentConfig.from_path(default_config_path())
+    return cfg.backend_url
 
 
 def _device_id() -> str | None:
@@ -180,7 +183,7 @@ def _try_pystray() -> Callable[[], None] | None:
 
 def _open_dashboard() -> None:
     import webbrowser
-    url = _backend_url()
+    url = _backend_url().rstrip("/")
     webbrowser.open(url)
 
 

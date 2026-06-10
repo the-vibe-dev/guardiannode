@@ -78,9 +78,11 @@ Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 
 [Icons]
 Name: "{commonprograms}\{#MyAppName}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"
+Name: "{commonprograms}\{#MyAppName}\GuardianNode Agent"; Filename: "{app}\agent\GuardianNodeAgent.exe"
 Name: "{commonprograms}\{#MyAppName}\Open Dashboard"; Filename: "{code:GetDashboardUrl}"
 Name: "{commonprograms}\{#MyAppName}\Uninstall GuardianNode"; Filename: "{app}\GuardianNodeUninstall.exe"; Parameters: """{uninstallexe}"""
 Name: "{commonstartup}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"
+Name: "{commonstartup}\GuardianNode Agent"; Filename: "{app}\agent\GuardianNodeAgent.exe"
 
 [Run]
 ; ---- Restrict install dir ACL (before anything starts) ----
@@ -106,6 +108,11 @@ Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend D:(D;;DCLCWPDTSD;;;IU
 
 ; ---- Pin Tray app to the parent user's taskbar (runs as original user so HKCU = parent's hive) ----
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\pin_to_taskbar.ps1"" -Target ""{app}\agent\GuardianNodeTray.exe"""; Flags: runhidden waituntilterminated runasoriginaluser; StatusMsg: "Pinning GuardianNode to the taskbar..."
+
+; ---- Start an interactive capture agent in the installing user's desktop session.
+; The service remains as a restart/backstop, but Windows services run in session 0
+; and cannot reliably capture every logged-in user's desktop.
+Filename: "{app}\agent\GuardianNodeAgent.exe"; Flags: nowait runasoriginaluser; StatusMsg: "Starting GuardianNode monitoring..."
 
 ; ---- Launch dashboard at the end (first-run web setup creates the parent account + recovery code) ----
 Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; Description: "Open Parent Dashboard to finish setup"
@@ -328,7 +335,7 @@ begin
 
     // Write the agent config based on wizard inputs
     CfgPath := ExpandConstant('{commonappdata}\GuardianNode\agent.yaml');
-    SetArrayLength(CfgFile, 8);
+    SetArrayLength(CfgFile, 9);
     if IsAllInOne or (ServerUrl = '') then
       CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
     else
@@ -340,6 +347,7 @@ begin
     CfgFile[5] := 'phash_threshold: 2';
     CfgFile[6] := 'log_level: INFO';
     CfgFile[7] := 'dry_run: false';
+    CfgFile[8] := 'full_screen_capture_enabled: true';
     SaveStringsToFile(CfgPath, CfgFile, False);
 
     // Drop the pending pairing handshake for the agent to complete on first

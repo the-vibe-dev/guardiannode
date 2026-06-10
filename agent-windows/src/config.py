@@ -40,11 +40,11 @@ class AgentConfig:
     # Perceptual hash Hamming threshold over the active-window dHash.
     # 2 catches a single-line text edit; 0-1 catches even cursor blink (too noisy).
     phash_threshold: int = 2
-    # Privacy-first default: capture only the active monitored window. Parents
-    # can explicitly opt into full-screen/background capture in policy.
-    full_screen_capture_enabled: bool = False
+    # Default to the visible desktop so typed risk in simple apps such as
+    # Notepad is still reviewed. App names remain useful context, not a gate.
+    full_screen_capture_enabled: bool = True
     monitored_apps: list[str] = field(default_factory=lambda: [
-        "Roblox.exe", "Discord.exe", "chrome.exe", "msedge.exe",
+        "Roblox.exe", "Discord.exe", "notepad.exe", "chrome.exe", "msedge.exe",
         "firefox.exe", "brave.exe", "outlook.exe", "Teams.exe",
         "Steam.exe", "EpicGamesLauncher.exe", "MinecraftLauncher.exe",
         "javaw.exe",
