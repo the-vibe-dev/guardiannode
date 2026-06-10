@@ -7,6 +7,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Builder notes
+- Codex was the primary builder for this release train, covering the backend,
+  installer, agent, documentation, release-hardening, and test work.
+- Claude/Fable contributed UI polish and supporting product/documentation
+  updates across the dashboard and release materials.
+
 ### Added
 - **Branding applied everywhere** from the kit in `assets/`: optimized logos,
   icons, favicons, and an Open Graph card generated into `assets/brand/` (with a
