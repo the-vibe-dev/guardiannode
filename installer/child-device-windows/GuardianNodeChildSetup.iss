@@ -205,6 +205,11 @@ begin
   Result := DetectedVisionModel;
 end;
 
+function InstallerParam(Name: String): String;
+begin
+  Result := Trim(ExpandConstant('{param:' + Name + '|}'));
+end;
+
 function GetDashboardUrl(Param: String): String;
 begin
   if IsAllInOne then
@@ -228,8 +233,14 @@ begin
 end;
 
 procedure InitializeWizard;
+var
+  ModeParam, ServerUrlParam, PairCodeParam: String;
 begin
   ProbeHardware;
+  ModeParam := Lowercase(InstallerParam('MODE'));
+  ServerUrlParam := InstallerParam('SERVERURL');
+  PairCodeParam := InstallerParam('PAIRCODE');
+
   // -- Mode selection --
   ModePage := CreateInputOptionPage(wpWelcome,
     'Choose installation mode',
@@ -239,6 +250,9 @@ begin
   ModePage.Add('Install everything on this PC  (recommended for single-PC families)');
   ModePage.Add('This is the child''s PC — connect to an existing GuardianNode server');
   ModePage.SelectedValueIndex := 0;
+  if (ModeParam = 'separated') or (ModeParam = 'child') or
+     (ServerUrlParam <> '') or (PairCodeParam <> '') then
+    ModePage.SelectedValueIndex := 1;
 
   // -- Child profile --
   ChildProfilePage := CreateInputOptionPage(ModePage.ID,
@@ -258,6 +272,8 @@ begin
     'Leave the server URL blank to search your home network automatically.');
   ServerConnectionPage.Add('Server URL (e.g. http://192.168.1.42:8787, or blank to auto-discover):', False);
   ServerConnectionPage.Add('6-digit pairing code:', False);
+  ServerConnectionPage.Values[0] := ServerUrlParam;
+  ServerConnectionPage.Values[1] := PairCodeParam;
 
   // -- Hardware summary (only used in all-in-one mode) --
   HardwareSummaryPage := CreateOutputMsgPage(ServerConnectionPage.ID,
