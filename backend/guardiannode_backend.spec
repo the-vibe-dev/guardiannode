@@ -7,7 +7,6 @@ hiddenimports = (
     collect_submodules("app")
     + collect_submodules("uvicorn")
     + [
-        "passlib.handlers.argon2",
         "argon2",
         "pydantic_settings",
         "zeroconf",

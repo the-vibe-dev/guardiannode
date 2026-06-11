@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-# A small embedded BIP39-style word list for the recovery code.
+# A BIP39-style word list for the recovery code.
 # This is NOT the official BIP39 list (which is 2048 words and licensed under
-# specific terms). It is a project-specific list of 2048 short, easy-to-spell
-# English words generated for GuardianNode. For brevity we ship the list as
-# a separate resource file; see app/data/wordlist.txt.
-# The recovery code is 12 words, ~132 bits of entropy.
+# specific terms). It is a project-specific list of ~1,350 short, easy-to-spell
+# English words shipped as a resource file; see app/data/wordlist.txt.
+# The recovery code is 12 words drawn from it: ~124 bits of entropy
+# (12 × log2(1345) ≈ 124.7).
 
 import os
 from functools import lru_cache
