@@ -23,6 +23,7 @@ from app.db.models import Alert, Device, Event, RiskResult
 from app.db.session import get_sessionmaker
 from app.services import notifications
 from app.services.audit import log_action
+from app.services.device_state import is_device_paused
 from app.settings import settings
 
 log = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ def check_once(session: Session, *, now: datetime | None = None) -> list[str]:
     )
     for device in devices:
         # Honor an active pause without flagging it as a tamper gap.
-        if device.paused_until is not None and device.paused_until > now:
+        if is_device_paused(device, now=now):
             continue
         last = device.last_seen
         if last is None:

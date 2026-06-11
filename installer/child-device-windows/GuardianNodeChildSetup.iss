@@ -62,9 +62,11 @@ Source: "..\..\README.md";   DestDir: "{app}"; Flags: ignoreversion
 ; watchdog (tamper resistance) and the backend (all-in-one) are services.
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Watchdog.xml";    DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.xml"; Flags: ignoreversion
-; Secondary, obscurely-named watchdog (mutual resurrection — see Helper.xml)
-Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "EndpointHealthAgentService.exe"; Flags: ignoreversion
-Source: "..\build\stage\winsw\Helper.xml";      DestDir: "{app}"; DestName: "EndpointHealthAgentService.xml"; Flags: ignoreversion
+; Secondary watchdog (mutual resurrection — see Helper.xml). GuardianNode-branded
+; on purpose: transparent naming is a product requirement; tamper resistance
+; comes from the service ACL (admin-only stop), not from hiding the name.
+Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdog2Service.exe"; Flags: ignoreversion
+Source: "..\build\stage\winsw\Helper.xml";      DestDir: "{app}"; DestName: "GuardianNodeWatchdog2Service.xml"; Flags: ignoreversion
 ; Backend service only exists in all-in-one mode
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBackendService.exe"; Flags: ignoreversion; Check: IsAllInOne
 Source: "..\build\stage\winsw\Backend.xml";     DestDir: "{app}"; DestName: "GuardianNodeBackendService.xml"; Flags: ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
@@ -126,12 +128,16 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 ; ---- Install + start BOTH watchdog services (each revives the other + the agent/tray tasks) ----
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
-Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
+Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
+Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
 ; ---- Restrict the service ACLs: deny stop/delete to non-admin ----
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
-Filename: "sc.exe"; Parameters: "sdset EndpointHealthAgent D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog2 D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
+
+; ---- Remove the legacy obscurely-named secondary watchdog from older installs ----
+Filename: "sc.exe"; Parameters: "stop EndpointHealthAgent"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "delete EndpointHealthAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated; Check: IsAllInOne
 
 ; ---- Start the tray now for the installing user (per-session mutex prevents duplicates) ----
@@ -142,12 +148,19 @@ Filename: "{app}\agent\GuardianNodeTray.exe"; Flags: nowait runasoriginaluser
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\pin_to_taskbar.ps1"" -Target ""{commonprograms}\{#MyAppName}\GuardianNode Tray.lnk"""; Flags: runhidden waituntilterminated runasoriginaluser; StatusMsg: "Pinning GuardianNode to the taskbar..."
 
 ; ---- Launch dashboard at the end (first-run web setup creates the parent account + recovery code) ----
-Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; Description: "Open Parent Dashboard to finish setup"
+; Child-only installs with auto-discovery have no known dashboard URL — there is
+; no local backend, so opening http://127.0.0.1:8787 would be wrong. In that case
+; the checkbox is skipped and the finish page tells the parent to manage the
+; device from the parent computer (see UpdateReadyMemo/CurPageChanged below).
+Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; Description: "Open Parent Dashboard to finish setup"; Check: ShouldOpenDashboard
 
 [UninstallRun]
 ; Both watchdogs first, or they would revive each other / the tasks mid-uninstall.
-Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
-Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
+; Legacy name from older installs
+Filename: "sc.exe"; Parameters: "stop EndpointHealthAgent"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "delete EndpointHealthAgent"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeAgent"; Flags: runhidden waituntilterminated
@@ -249,7 +262,9 @@ begin
   // Free locked binaries before the file-copy stage so upgrades don't roll back
   // with "file in use". Stop BOTH watchdogs first (they revive each other), then
   // the legacy agent service, the scheduled tasks, and finally the processes.
-  RunHidden('{sys}\sc.exe', 'stop EndpointHealthAgent');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog2');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog2');
+  RunHidden('{sys}\sc.exe', 'stop EndpointHealthAgent');   // legacy name (pre-rename installs)
   RunHidden('{sys}\sc.exe', 'delete EndpointHealthAgent');
   RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog');
   RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog');
@@ -287,11 +302,17 @@ function GetDashboardUrl(Param: String): String;
 begin
   if IsAllInOne then
     Result := 'http://127.0.0.1:8787'
-  else begin
+  else
+    // Child-only: the dashboard lives on the parent server. Never fall back
+    // to 127.0.0.1 here — there is no local backend on a child-only machine.
     Result := Trim(ServerConnectionPage.Values[0]);
-    if Result = '' then
-      Result := 'http://127.0.0.1:8787';
-  end;
+end;
+
+function ShouldOpenDashboard: Boolean;
+begin
+  // Open the dashboard only when we actually know where it is: all-in-one
+  // (local backend) or child-only with an explicitly entered server URL.
+  Result := IsAllInOne or (Trim(ServerConnectionPage.Values[0]) <> '');
 end;
 
 function AgeGroupValue: String;

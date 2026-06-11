@@ -14,10 +14,13 @@ interface InFlight {
 interface Health {
   status: string;
   tier: string;
+  protection?: { level: "full" | "reduced" | "rules_only"; warnings: string[] };
+  tesseract_available?: boolean;
   queue: {
     in_flight_count: number;
     in_flight: InFlight[];
     window_seconds: number;
+    last_classified_at?: string | null;
     throughput: {
       frames_in_window: number;
       avg_latency_ms: number;
@@ -84,8 +87,31 @@ export default function PipelineHealth() {
   const backlogTotal = backlog.reduce((sum, q) => sum + q.queued_frames, 0);
   const pending = h.pending_classification || 0;
 
+  const protection = h.protection;
+
   return (
     <div className="bg-white shadow rounded p-4">
+      {/* Protection banner: is the AI actually judging frames right now? */}
+      {protection && protection.level !== "full" && (
+        <div
+          className={`mb-3 rounded border p-3 text-sm ${
+            protection.level === "rules_only"
+              ? "bg-red-50 border-red-200 text-red-800"
+              : "bg-yellow-50 border-yellow-300 text-yellow-800"
+          }`}
+        >
+          <div className="font-semibold mb-1">
+            {protection.level === "rules_only"
+              ? "Reduced protection — running on safety rules only"
+              : "Reduced protection"}
+          </div>
+          <ul className="list-disc ml-5 space-y-0.5">
+            {protection.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-semibold">Pipeline status</h2>
         <div className="flex items-center gap-2 text-xs">
@@ -146,11 +172,12 @@ export default function PipelineHealth() {
       )}
 
       {/* Throughput */}
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs lg:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs lg:grid-cols-5">
         <Stat label="Frames (5m)" value={String(h.queue.throughput.frames_in_window)} />
         <Stat label="Avg latency" value={fmtMs(h.queue.throughput.avg_latency_ms)} />
         <Stat label="P95 latency" value={fmtMs(h.queue.throughput.p95_latency_ms)} />
         <Stat label="Severity" value={fmtSev(h.queue.throughput.severity_counts)} />
+        <Stat label="Last classified" value={fmtWhen(h.queue.last_classified_at)} />
       </div>
 
       {/* Ollama models */}
@@ -202,6 +229,14 @@ function fmtMs(ms: number): string {
   if (ms === 0) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function fmtWhen(iso: string | null | undefined): string {
+  if (!iso) return "never";
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 90) return `${Math.round(seconds)}s ago`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
 }
 
 function fmtSev(counts: Record<string, number>): string {

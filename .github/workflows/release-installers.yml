@@ -1,64 +1,184 @@
 name: release-installers
 
+# Release artifacts are fail-closed: tagged builds carry RELEASE_BUILD=1 and
+# refuse to ship dev stubs. Real PyInstaller bundles are built on
+# windows-latest so no parent or child machine ever needs Python installed.
+
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
 
+env:
+  WINSW_URL: "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
+  WINSW_SHA256: "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+
 jobs:
-  build-windows-installers:
+  build-dashboard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Install Wine
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends wine wine32 wine64 winetricks xvfb
-
       - name: Build dashboard
         working-directory: dashboard
         run: |
           npm ci
           npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard/dist/
 
-      - name: Build Windows installers
-        env:
-          DISPLAY: ":99"
+  build-backend-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend + PyInstaller
+        working-directory: backend
         run: |
-          Xvfb :99 -screen 0 1024x768x24 &
-          sleep 2
-          ./installer/build/build_all.sh
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+      - name: Build backend bundle
+        working-directory: backend
+        run: pyinstaller --noconfirm guardiannode_backend.spec
+      - name: Smoke-test bundle exists
+        working-directory: backend
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/GuardianNodeBackend/GuardianNodeBackend.exe")) {
+            throw "backend bundle missing"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-bundle
+          path: backend/dist/GuardianNodeBackend/
 
-      - name: Compute SHA-256 hashes
+  build-agent-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install agent + PyInstaller
+        working-directory: agent-windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+      - name: Build agent bundle
+        working-directory: agent-windows
+        run: pyinstaller --noconfirm guardiannode_agent.spec
+      - name: Smoke-test bundle exists
+        working-directory: agent-windows
+        shell: pwsh
+        run: |
+          foreach ($exe in "GuardianNodeAgent.exe","GuardianNodeTray.exe","GuardianNodeWatchdog.exe") {
+            if (-not (Test-Path "dist/GuardianNodeAgent/$exe")) { throw "$exe missing" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-bundle
+          path: agent-windows/dist/GuardianNodeAgent/
+
+  build-installers:
+    runs-on: windows-latest
+    needs: [build-dashboard, build-backend-exe, build-agent-exe]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: installer/build/stage/dashboard
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-bundle
+          path: installer/build/stage/backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-bundle
+          path: installer/build/stage/agent
+
+      - name: Fail closed if bundles are not real executables
+        shell: pwsh
+        run: |
+          # RELEASE_BUILD equivalent for the Windows path: never compile an
+          # installer around missing/stub payloads.
+          if (-not (Test-Path "installer/build/stage/backend/GuardianNodeBackend.exe")) {
+            throw "Release build requires the PyInstaller backend bundle"
+          }
+          if (-not (Test-Path "installer/build/stage/agent/GuardianNodeAgent.exe")) {
+            throw "Release build requires the PyInstaller agent bundle"
+          }
+          if (Get-ChildItem "installer/build/stage" -Recurse -Filter "*.exe.bat") {
+            throw "Dev .bat stubs found in release staging - aborting"
+          }
+
+      - name: Stage WinSW (pinned SHA-256)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer/build/stage/winsw | Out-Null
+          Invoke-WebRequest -Uri $env:WINSW_URL -OutFile installer/build/stage/winsw/WinSW.exe
+          $actual = (Get-FileHash installer/build/stage/winsw/WinSW.exe -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:WINSW_SHA256) {
+            throw "WinSW SHA-256 mismatch: expected $env:WINSW_SHA256 got $actual"
+          }
+          Copy-Item installer/build/winsw_templates/Watchdog.xml installer/build/stage/winsw/
+          Copy-Item installer/build/winsw_templates/Helper.xml   installer/build/stage/winsw/
+          Copy-Item installer/build/winsw_templates/Backend.xml  installer/build/stage/winsw/
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer/build/dist | Out-Null
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc installer\child-device-windows\GuardianNodeChildSetup.iss
+          if ($LASTEXITCODE -ne 0) { throw "child installer compile failed" }
+          & $iscc installer\server-windows\GuardianNodeServerSetup.iss
+          if ($LASTEXITCODE -ne 0) { throw "server installer compile failed" }
+
+      - name: Generate checksums + release manifest
+        shell: pwsh
         working-directory: installer/build/dist
         run: |
-          sha256sum *.exe > SHA256SUMS
-          cat SHA256SUMS
+          $lines = @()
+          foreach ($f in Get-ChildItem *.exe) {
+            $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            $lines += "$h  $($f.Name)"
+          }
+          $lines | Set-Content -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS
+          @{
+            tag = "${{ github.ref_name }}"
+            commit = "${{ github.sha }}"
+            built_at = (Get-Date).ToUniversalTime().ToString("o")
+            artifacts = (Get-ChildItem *.exe | ForEach-Object { $_.Name })
+          } | ConvertTo-Json | Set-Content -Encoding ascii release-manifest.json
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-installers
           path: installer/build/dist/*
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (draft)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             installer/build/dist/*.exe
             installer/build/dist/SHA256SUMS
+            installer/build/dist/release-manifest.json
           body_path: docs/PARENT_GUIDES/when-windows-says-protected-your-pc.md
           draft: true
           prerelease: true

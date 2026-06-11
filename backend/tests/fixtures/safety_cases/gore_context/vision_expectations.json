@@ -1,0 +1,11 @@
+{
+  "name": "graphic gore imagery on screen",
+  "input_type": "synthetic_image",
+  "requires": "vision_tier",
+  "description": "A screenshot dominated by graphic violent imagery, no readable text.",
+  "expected": {
+    "min_severity": "high",
+    "categories_any": ["gore"],
+    "alert": true
+  }
+}

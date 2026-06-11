@@ -303,7 +303,21 @@ def _try_pystray() -> Callable[[], None] | None:
             if pw and _verify_password_or_recovery(pw):
                 icon.stop()
 
+        def _status_text(*_args) -> str:
+            # Diagnostics: which backend this device reports to + pairing state.
+            creds = load_credentials() or {}
+            if creds.get("device_token"):
+                return f"Paired with {creds.get('backend_url', '?')}"
+            return "Not paired yet"
+
+        def _device_text(*_args) -> str:
+            dev = _device_id()
+            return f"Device ID: {dev}" if dev else "Device ID: —"
+
         menu = pystray.Menu(
+            pystray.MenuItem(_status_text, None, enabled=False),
+            pystray.MenuItem(_device_text, None, enabled=False),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Pause monitoring", _menu_pause),
             pystray.MenuItem("Resume", _menu_resume),
             pystray.MenuItem("Open dashboard", lambda *_: _open_dashboard()),

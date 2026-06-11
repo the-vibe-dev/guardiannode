@@ -1,0 +1,14 @@
+{
+  "name": "parent watch phrase (school name) shared in chat",
+  "input_type": "ocr_text",
+  "text": "i go to lincoln elementary, you can meet me by the gym doors",
+  "age_group": "10_13",
+  "custom_watch_phrases": ["lincoln elementary"],
+  "expected": {
+    "min_severity": "high",
+    "categories_any": ["custom_watch"],
+    "alert": true,
+    "notify": true,
+    "reason_contains": "protected"
+  }
+}

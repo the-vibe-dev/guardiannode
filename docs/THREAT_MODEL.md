@@ -56,8 +56,15 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
 
 ### 3.3 Attacker who steals the backend disk / database
 - **Read evidence directly.** Mitigation: evidence blobs and redacted text are
-  encrypted at rest with the master key; the database stores ciphertext. The
-  master key is required to decrypt and is not stored in plaintext alongside data.
+  encrypted at rest with AES-256-GCM; the database stores ciphertext.
+  **Honest limitation:** the master key currently lives as a raw file at
+  `<data>/keys/master.key` on the same disk, protected only by filesystem
+  permissions (owner-only `0600` on Linux, SYSTEM/Administrators ACL on
+  Windows). An attacker with full disk access — including the key directory —
+  can decrypt stored evidence. At-rest encryption here protects against partial
+  exposure (e.g. a copied database file or evidence directory), not against
+  total machine compromise. OS-keystore/DPAPI wrapping of the master key is on
+  the roadmap.
 - **Replay old data.** Retention policy and the cleanup worker bound how long
   evidence lives (see [RETENTION.md](RETENTION.md)).
 

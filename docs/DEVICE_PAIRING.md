@@ -75,9 +75,13 @@ Parent dashboard          Backend                    Child PC
 
 ## Token
 
-- 32-byte random, base64-encoded
+- Format: `gn_dev_<device_id>_<random_secret>` (the embedded device id lets the
+  backend verify exactly one Argon2 hash per request instead of scanning all
+  devices; legacy opaque tokens from older pairings keep working)
 - Stored on child device at `C:\ProgramData\GuardianNode\device.json`, SYSTEM-only ACL
 - Used in `Authorization: Bearer <token>` header for all subsequent API calls
+- Backend stores only the Argon2 hash of the secret
+- Invalid-token requests are rate-limited per source IP
 - Revokable from the dashboard (Devices → ⋮ → Revoke)
 
 ## mDNS discovery
@@ -87,6 +91,12 @@ The backend advertises `_guardiannode._tcp.local` with TXT records:
 - `path=/api`
 
 The installer's mDNS browser shows discovered servers; parent picks one and enters the pairing code.
+
+**Ambiguity rule:** if the agent has no configured backend URL and discovers
+**more than one** GuardianNode server, it refuses to pick one automatically
+(a hostile or messy LAN could advertise a fake service). The parent must set
+the server URL explicitly in that case. After pairing, the paired backend URL
+is stored in `device.json`, logged, and shown in the tray menu diagnostics.
 
 ## Manual fallback
 

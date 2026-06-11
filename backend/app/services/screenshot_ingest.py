@@ -35,6 +35,7 @@ from ulid import ULID
 from app.db.models import ChildProfile, Device, EvidenceBlob, Event, RiskResult
 from app.services import classifier, encryption, image_safety, multimodal_risk, pipeline_metrics, risk_rules
 from app.services.audit import log_action
+from app.services.profile_resolution import resolve_profile
 from app.services.ollama_client import OllamaClient
 from app.settings import settings
 
@@ -51,7 +52,7 @@ def _ulid() -> str:
     return str(ULID())
 
 
-def _apply_policy(session, profile_id, severity, categories):
+def _apply_policy(session, profile_id, severity, categories, age_group="10_13"):
     """Resolve the child's privacy/threshold policy into an alert decision."""
     from app.services import profile_policy
     if severity == "none":
@@ -60,8 +61,8 @@ def _apply_policy(session, profile_id, severity, categories):
     if prof is not None:
         pol = profile_policy.normalize(prof.alert_policy or {}, prof.age_group)
     else:
-        # Unassigned device: balanced default (alert medium+, notify high+).
-        pol = profile_policy.default_policy_for_age("10_13")
+        # Unassigned device: age default (balanced for 10_13 — alert medium+, notify high+).
+        pol = profile_policy.default_policy_for_age(age_group)
     return profile_policy.decide(pol, severity, categories)
 
 
@@ -226,20 +227,18 @@ async def _ingest_inner(
     extracted_text = ""
     rules_only_severity = "none"
 
-    # Resolve the child profile: the agent may send one, but normally the
-    # parent assigns a profile to the DEVICE in the dashboard and we use that.
-    if not profile_id:
-        device = session.get(Device, device_id)
-        if device is not None and device.profile_id:
-            profile_id = device.profile_id
-
-    # Parent-configured per-child watch phrases (child's name, address, etc.).
-    # Loaded once and passed through whichever tier ends up running.
-    custom_phrases: list[str] = []
-    if profile_id:
-        prof = session.get(ChildProfile, profile_id)
-        if prof and prof.custom_watch_phrases:
-            custom_phrases = list(prof.custom_watch_phrases)
+    # Resolve the child profile the same way text-event ingest does (payload →
+    # device assignment → default). Also yields the parent's custom watch
+    # phrases, loaded once and passed through whichever tier ends up running.
+    resolved = resolve_profile(
+        session,
+        device_id=device_id,
+        payload_profile_id=profile_id,
+        payload_age_group=age_group,
+    )
+    profile_id = resolved.profile_id
+    age_group = resolved.age_group
+    custom_phrases = resolved.custom_phrases
 
     if tier == "text_only":
         # CPU path: Tesseract OCR + rules + small text LLM (e.g. llama3.2:1b)
@@ -418,13 +417,20 @@ async def _ingest_inner(
         false_positive_notes="",
         prompt_version=vision_result.get("prompt_version") or text_result.get("prompt_version"),
         rules_version=text_result.get("rules_version"),
+        # Reduced-protection marker: no model judged this frame (vision missing
+        # or failed AND the text LLM never produced a result). Rules still ran.
+        classifier_status=(
+            "ok"
+            if (vision_result.get("model") or text_result.get("model") or text_result.get("status") == "ok")
+            else "unclassified_model_unavailable"
+        ),
     )
     session.add(rr)
 
     # ----- Step 6: Alert per the child's privacy/threshold policy -----
     alert_id: str | None = None
     cats = merged.get("categories", [])
-    decision = _apply_policy(session, profile_id, severity, cats)
+    decision = _apply_policy(session, profile_id, severity, cats, age_group=age_group)
     if decision.create_alert:
         from app.services.alert_dedup import upsert_alert
         alert_id, _created = upsert_alert(

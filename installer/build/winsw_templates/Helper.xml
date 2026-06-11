@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Secondary tamper-resistance watchdog. Intentionally named generically so a
-     child can't kill every protective service by grepping for "GuardianNode".
-     It runs the same GuardianNodeWatchdog.exe (visible binary path under
-     C:\Program Files\GuardianNode) and revives the primary watchdog; the
-     primary revives this one. Monitoring stays transparent via the tray icon. -->
+<!-- Secondary watchdog. It runs the same GuardianNodeWatchdog.exe and revives
+     the primary watchdog; the primary revives this one. Stopping either
+     requires admin rights (see the sc sdset ACL in the installer), which is
+     the parent-controlled way to manage tamper resistance.
+     Transparency rule: every GuardianNode service is clearly GuardianNode-
+     branded. Do NOT give this (or any) service a generic/deceptive name. -->
 <service>
-  <id>EndpointHealthAgent</id>
-  <name>Endpoint Health Agent</name>
-  <description>Monitors local endpoint services and restarts them on failure.</description>
+  <id>GuardianNodeWatchdog2</id>
+  <name>GuardianNode Watchdog (secondary)</name>
+  <description>Part of GuardianNode parental safety monitoring. Restarts GuardianNode services if they stop. Managed by a parent/administrator.</description>
   <executable>%BASE%\agent\GuardianNodeWatchdog.exe</executable>
   <arguments>--interval 5 --peer-service GuardianNodeWatchdog</arguments>
   <workingdirectory>%BASE%\agent</workingdirectory>

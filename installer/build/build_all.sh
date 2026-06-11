@@ -20,15 +20,31 @@
 #   4. Stages WinSW wrapper exe
 #   5. Compiles .iss → .exe via wine iscc.exe
 #
-# Notes about the agent payload:
+# Notes about the agent/backend payload:
 #   The .iss expects pre-built PyInstaller bundles under build/stage/agent and
-#   build/stage/backend. PyInstaller can be run under Wine if you have a Python
-#   for Windows installed in the wine prefix. For a Linux-host build we ship
-#   the Python source plus a "launcher.exe" stub that re-execs Windows Python
-#   from the parent's PC. The official release builds run on a Windows runner
-#   in CI to produce real PyInstaller bundles.
+#   build/stage/backend (the WinSW services launch GuardianNodeAgent.exe /
+#   GuardianNodeBackend.exe). Drop real bundles at build/prebuilt/agent and
+#   build/prebuilt/backend (built on a Windows machine/runner) and this script
+#   stages them.
+#
+# Build modes (fail-closed):
+#   RELEASE_BUILD=1   — release/tag builds. The build FAILS unless real
+#                       PyInstaller bundles are present. Release artifacts must
+#                       never require Python on a parent or child machine.
+#   ALLOW_DEV_STUBS=1 — local developer iteration only. Missing bundles fall
+#                       back to staging Python source + .bat stubs (which need
+#                       a Python install on the target box).
+#   (neither set)     — missing bundles abort with instructions. Stubs are
+#                       never staged silently.
 
 set -euo pipefail
+
+RELEASE_BUILD="${RELEASE_BUILD:-0}"
+ALLOW_DEV_STUBS="${ALLOW_DEV_STUBS:-0}"
+if [[ "$RELEASE_BUILD" == "1" && "$ALLOW_DEV_STUBS" == "1" ]]; then
+  echo "RELEASE_BUILD=1 and ALLOW_DEV_STUBS=1 are mutually exclusive" >&2
+  exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 INST="$ROOT/installer"
@@ -38,8 +54,25 @@ DIST="$BUILD/dist"
 WINEPREFIX="$BUILD/.wine"
 INNO_INSTALLER_URL="https://github.com/jrsoftware/issrc/releases/download/is-6_7_1/innosetup-6.7.1.exe"
 INNO_INSTALLER="$BUILD/innosetup-6.7.1.exe"
+# Pinned SHA-256 of the exact tool versions above. Downloads (and cached
+# copies) that don't match are rejected — never build release artifacts from
+# unverified third-party binaries.
+INNO_INSTALLER_SHA256="4d11e8050b6185e0d49bd9e8cc661a7a59f44959a621d31d11033124c4e8a7b0"
 WINSW_URL="https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
 WINSW_EXE="$BUILD/WinSW-x64.exe"
+WINSW_SHA256="05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+
+verify_sha256() {
+  local file="$1" expected="$2"
+  local actual
+  actual="$(sha256sum "$file" | awk '{print $1}')"
+  if [ "$actual" != "$expected" ]; then
+    red "SHA-256 mismatch for $file"
+    red "  expected: $expected"
+    red "  actual:   $actual"
+    exit 1
+  fi
+}
 
 BUILD_CHILD=1
 BUILD_SERVER=1
@@ -66,6 +99,7 @@ if [ ! -f "$INNO_INSTALLER" ]; then
   blue "Downloading Inno Setup..."
   curl -fL --retry 3 -o "$INNO_INSTALLER" "$INNO_INSTALLER_URL"
 fi
+verify_sha256 "$INNO_INSTALLER" "$INNO_INSTALLER_SHA256"
 
 # ---- 2. Install Inno Setup into the project-local wine prefix ----
 export WINEPREFIX
@@ -104,6 +138,7 @@ if [ ! -f "$WINSW_EXE" ]; then
   blue "Downloading WinSW..."
   curl -fL --retry 3 -o "$WINSW_EXE" "$WINSW_URL"
 fi
+verify_sha256 "$WINSW_EXE" "$WINSW_SHA256"
 cp "$WINSW_EXE" "$STAGE/winsw/WinSW.exe"
 cp "$BUILD/winsw_templates/Watchdog.xml" "$STAGE/winsw/Watchdog.xml"
 cp "$BUILD/winsw_templates/Helper.xml"   "$STAGE/winsw/Helper.xml"
@@ -116,19 +151,19 @@ rm -rf "$STAGE/dashboard"
 mkdir -p "$STAGE/dashboard"
 cp -r "$ROOT/dashboard/dist/." "$STAGE/dashboard/"
 
-# ---- 5. Stage agent payload ----
-# If a real PyInstaller bundle has been dropped at build/prebuilt/agent (with
-# GuardianNodeAgent.exe + _internal/), use it. Otherwise fall back to staging
-# Python source + .bat stubs (which require Python on the target machine and
-# are only suitable for dev iteration, not real installs).
+# ---- 5. Stage agent + backend payloads (fail-closed) ----
+# Real PyInstaller bundles are expected at build/prebuilt/agent (with
+# GuardianNodeAgent.exe + _internal/) and build/prebuilt/backend (with
+# GuardianNodeBackend.exe). Dev stub fallback (Python source + .bat shims that
+# need a Python install on the target machine) is allowed ONLY with
+# ALLOW_DEV_STUBS=1 and never in release builds.
 rm -rf "$STAGE/agent" "$STAGE/backend"
 mkdir -p "$STAGE/agent" "$STAGE/backend"
 PREBUILT_AGENT="$BUILD/prebuilt/agent"
-if [ -f "$PREBUILT_AGENT/GuardianNodeAgent.exe" ] && [ -d "$PREBUILT_AGENT/_internal" ]; then
-  blue "Staging prebuilt agent bundle from $PREBUILT_AGENT..."
-  cp -r "$PREBUILT_AGENT/." "$STAGE/agent/"
-else
-  blue "Staging agent Python source + .bat stubs (no prebuilt bundle found)..."
+PREBUILT_BACKEND="$BUILD/prebuilt/backend"
+
+stage_agent_stubs() {
+  blue "Staging agent Python source + .bat stubs (ALLOW_DEV_STUBS=1; dev only)..."
   cp -r "$ROOT/agent-windows/src" "$STAGE/agent/src"
   cp -r "$ROOT/agent-windows/policies" "$STAGE/agent/policies"
   cp -r "$ROOT/agent-windows/ocr_regions" "$STAGE/agent/ocr_regions"
@@ -146,12 +181,47 @@ BAT
 @echo off
 "%~dp0..\..\..\python\python.exe" -m src.tray_app %*
 BAT
+}
+
+if [ $BUILD_CHILD -eq 1 ]; then
+  if [ -f "$PREBUILT_AGENT/GuardianNodeAgent.exe" ] && [ -d "$PREBUILT_AGENT/_internal" ]; then
+    blue "Staging prebuilt agent bundle from $PREBUILT_AGENT..."
+    cp -r "$PREBUILT_AGENT/." "$STAGE/agent/"
+  elif [ "$RELEASE_BUILD" == "1" ]; then
+    red "RELEASE_BUILD=1: release builds require a prebuilt PyInstaller agent bundle at"
+    red "  $PREBUILT_AGENT (GuardianNodeAgent.exe + _internal/)."
+    red "Refusing to ship .bat stubs that require Python on a child machine."
+    exit 1
+  elif [ "$ALLOW_DEV_STUBS" == "1" ]; then
+    stage_agent_stubs
+  else
+    red "No prebuilt agent bundle at $PREBUILT_AGENT."
+    red "Either drop a PyInstaller bundle there, or set ALLOW_DEV_STUBS=1 for a"
+    red "local dev build (target machine will need Python — never distribute it)."
+    exit 1
+  fi
 fi
 
-cp -r "$ROOT/backend/app" "$STAGE/backend/app"
-cp    "$ROOT/backend/pyproject.toml" "$STAGE/backend/pyproject.toml"
-cp    "$ROOT/backend/README.md" "$STAGE/backend/README.md"
-[ -f "$ROOT/backend/alembic.ini" ] && cp "$ROOT/backend/alembic.ini" "$STAGE/backend/alembic.ini" || true
+if [ -f "$PREBUILT_BACKEND/GuardianNodeBackend.exe" ]; then
+  blue "Staging prebuilt backend bundle from $PREBUILT_BACKEND..."
+  cp -r "$PREBUILT_BACKEND/." "$STAGE/backend/"
+elif [ "$RELEASE_BUILD" == "1" ]; then
+  red "RELEASE_BUILD=1: release builds require a prebuilt PyInstaller backend bundle at"
+  red "  $PREBUILT_BACKEND (GuardianNodeBackend.exe). The GuardianNodeBackend WinSW"
+  red "service launches that exe; staging Python source would ship a broken service."
+  exit 1
+elif [ "$ALLOW_DEV_STUBS" == "1" ]; then
+  blue "Staging backend Python source (ALLOW_DEV_STUBS=1; dev only)..."
+  cp -r "$ROOT/backend/app" "$STAGE/backend/app"
+  cp    "$ROOT/backend/pyproject.toml" "$STAGE/backend/pyproject.toml"
+  cp    "$ROOT/backend/README.md" "$STAGE/backend/README.md"
+  [ -f "$ROOT/backend/alembic.ini" ] && cp "$ROOT/backend/alembic.ini" "$STAGE/backend/alembic.ini" || true
+else
+  red "No prebuilt backend bundle at $PREBUILT_BACKEND."
+  red "Either drop a PyInstaller bundle there, or set ALLOW_DEV_STUBS=1 for a"
+  red "local dev build (target machine will need Python — never distribute it)."
+  exit 1
+fi
 
 # ---- 6. Ensure assets/icon.ico exists (placeholder) ----
 ICON="$INST/child-device-windows/assets/icon.ico"

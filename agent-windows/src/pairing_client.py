@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
 import time
 from dataclasses import dataclass
@@ -98,6 +99,14 @@ def save_credentials(device_id: str, token: str, backend_url: str, path: Path | 
         json.dumps({"device_id": device_id, "device_token": token, "backend_url": backend_url}),
         encoding="utf-8",
     )
+    # The device token authenticates this child PC to the backend; keep the
+    # file owner-only where the OS supports it (Windows relies on the
+    # installer's ProgramData ACL instead).
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     return path
 
 
@@ -161,8 +170,21 @@ def bootstrap_pairing(
         if not servers:
             log.warning("no backend URL in pending pairing and no server discovered via mDNS")
             return None
+        if len(servers) > 1:
+            # Never silently pick a server: on a messy (or hostile) LAN a fake
+            # service could advertise itself. Pairing requires an unambiguous
+            # target — the parent must set the backend URL explicitly.
+            log.error(
+                "multiple GuardianNode servers discovered via mDNS; refusing to choose "
+                "automatically. Set the backend URL explicitly in the installer. Found: %s",
+                ", ".join(f"{s.name} @ {s.host}:{s.port}" for s in servers),
+            )
+            return None
         backend_url = f"http://{servers[0].host}:{servers[0].port}"
-        log.info("discovered GuardianNode server at %s", backend_url)
+        log.info(
+            "discovered exactly one GuardianNode server via mDNS: %s @ %s",
+            servers[0].name, backend_url,
+        )
 
     for attempt in range(1, attempts + 1):
         try:

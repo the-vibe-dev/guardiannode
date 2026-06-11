@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, Event, User
 from app.services import event_ingest, encryption, screenshot_async, screenshot_ingest
+from app.services.device_state import is_device_paused
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -51,7 +52,7 @@ async def ingest(
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
-    if device.paused_until is not None:
+    if is_device_paused(device):
         # Quietly accept but don't store — pause behavior is honored server-side too
         return IngestResponse(
             event_id=req.event_id or "",
@@ -169,7 +170,7 @@ async def ingest_screenshot(
     """Receive a raw screenshot, persist it immediately, and queue it for
     background classification (vision LLM → rules → alert). Returns fast so the
     agent's local queue never backs up and frames aren't lost on power-off."""
-    if device.paused_until is not None:
+    if is_device_paused(device):
         # Honor pause server-side: drop quietly, don't store.
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
 

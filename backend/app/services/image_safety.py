@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.services import taxonomy
 from app.services.ollama_client import OllamaClient, OllamaError
 from app.settings import settings
 
@@ -124,20 +125,12 @@ async def classify_image(
         parsed = _extract_json(response)
         if parsed is None:
             return result
-        result.update(parsed)
+        # Strict allowlist normalization — the model's JSON is untrusted and is
+        # never merged wholesale into the result (hallucinated categories,
+        # bogus severities, or injected keys must not reach policy/storage).
+        result.update(taxonomy.normalize_vision_output(parsed))
         result["model"] = chosen
-        # Normalize
-        if result["risk_level"] not in {"none", "low", "medium", "high", "critical"}:
-            result["risk_level"] = "none"
-        try:
-            result["score"] = max(0, min(100, int(result.get("score", 0))))
-        except Exception:
-            result["score"] = 0
-        # Truncate visible_text to a sane max for downstream storage
-        if isinstance(result.get("visible_text"), str):
-            result["visible_text"] = result["visible_text"][:16384]
-        else:
-            result["visible_text"] = ""
+        result["prompt_version"] = _prompt_version()
     except OllamaError as e:
         log.warning("vision classifier ollama error: %s", e)
     except Exception as e:

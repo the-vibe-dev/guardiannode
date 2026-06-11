@@ -1,0 +1,11 @@
+{
+  "name": "free robux scam with shortened link",
+  "input_type": "ocr_text",
+  "text": "FREE ROBUX no scam!! just click this link bit.ly/freerbx2026 and verify your account now",
+  "age_group": "under_10",
+  "expected": {
+    "min_severity": "high",
+    "categories_any": ["scam", "phishing"],
+    "alert": true
+  }
+}

@@ -1,12 +1,16 @@
 """Shared FastAPI dependencies (auth + db)."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.models import Device, User
 from app.db.session import get_db
-from app.services.parent_auth import verify_password
+from app.services import device_tokens, rate_limit
+
+log = logging.getLogger(__name__)
 
 
 def get_db_dep() -> Session:  # pragma: no cover - thin wrapper
@@ -24,7 +28,21 @@ def current_user(request: Request, db: Session = Depends(get_db_dep)) -> User:
 
 
 def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Device:
-    """Authenticate a device via Authorization: Bearer <token>."""
+    """Authenticate a device via Authorization: Bearer <token>.
+
+    Invalid attempts are rate-limited per client IP: Argon2 verification is
+    expensive by design, so unauthenticated callers must not get to trigger it
+    repeatedly for free.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    blocked, retry_after = rate_limit.is_blocked("device_auth", client_ip)
+    if blocked:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed device authentication attempts.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -32,10 +50,11 @@ def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Devic
     if not token:
         raise HTTPException(status_code=401, detail="Empty token")
 
-    # Find device whose token_hash verifies against this token.
-    # Linear scan is OK for family-scale deployments.
-    devices = db.query(Device).filter(Device.token_hash.isnot(None), Device.paired.is_(True)).all()
-    for device in devices:
-        if device.token_hash and verify_password(token, device.token_hash):
-            return device
+    device = device_tokens.authenticate(db, token)
+    if device is not None:
+        rate_limit.reset("device_auth", client_ip)
+        return device
+
+    rate_limit.record_failure("device_auth", client_ip)
+    log.warning("invalid device token from %s", client_ip)
     raise HTTPException(status_code=401, detail="Invalid device token")

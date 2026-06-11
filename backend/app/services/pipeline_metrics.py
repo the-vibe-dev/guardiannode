@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
@@ -118,10 +119,17 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
     for c in recent_completed:
         severity_counts[c.severity] = severity_counts.get(c.severity, 0) + 1
 
+    with _lock:
+        last_finished = max((c.finished_at for c in _recent), default=None)
+
     return {
         "in_flight_count": len(items),
         "in_flight": items,
         "window_seconds": window_seconds,
+        "last_classified_at": (
+            datetime.fromtimestamp(last_finished, tz=timezone.utc).isoformat()
+            if last_finished else None
+        ),
         "throughput": {
             "frames_in_window": n,
             "avg_latency_ms": int(avg),

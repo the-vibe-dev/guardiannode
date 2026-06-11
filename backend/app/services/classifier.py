@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.services import risk_rules
+from app.services import risk_rules, taxonomy
 from app.services.ollama_client import OllamaClient, OllamaError
 from app.settings import settings
 
@@ -55,43 +55,8 @@ def _extract_json(s: str) -> dict[str, Any] | None:
 
 
 def _normalize_llm(parsed: dict[str, Any]) -> dict[str, Any]:
-    risk_level = parsed.get("risk_level", "none")
-    if risk_level not in _SEVERITY_ORDER:
-        risk_level = "none"
-    score = parsed.get("score", 0)
-    try:
-        score = int(score)
-    except Exception:
-        score = 0
-    score = max(0, min(100, score))
-    categories = parsed.get("categories") or []
-    if not isinstance(categories, list):
-        categories = []
-    summary = str(parsed.get("summary", ""))[:2048]
-    evidence = parsed.get("evidence") or []
-    if not isinstance(evidence, list):
-        evidence = []
-    evidence = [str(e)[:1024] for e in evidence[:10]]
-    action = parsed.get("recommended_action", "none")
-    if action not in {"none", "log", "alert_parent", "pause_app", "block_app", "emergency_review"}:
-        action = "none"
-    confidence = parsed.get("confidence", 0.0)
-    try:
-        confidence = float(confidence)
-    except Exception:
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, confidence))
-    notes = str(parsed.get("false_positive_notes", ""))[:2048]
-    return {
-        "risk_level": risk_level,
-        "score": score,
-        "categories": categories,
-        "summary": summary,
-        "evidence": evidence,
-        "recommended_action": action,
-        "confidence": confidence,
-        "false_positive_notes": notes,
-    }
+    # Strict schema + category allowlist — raw model output never drives policy.
+    return taxonomy.normalize_model_output(parsed)
 
 
 async def classify_text(
@@ -234,6 +199,15 @@ async def classify_text(
     else:
         summary = ""
 
+    # Status: never let a failed model call masquerade as a confident "safe".
+    # When the LLM should have run but didn't, the result is explicitly marked
+    # unclassified — deterministic rules still apply, and the dashboard health
+    # widgets surface the reduced-protection state.
+    if llm_used or not use_llm or not (redacted_text or "").strip():
+        status = "ok"
+    else:
+        status = "unclassified_model_unavailable"
+
     return {
         "risk_level": final_level,
         "score": max(0, min(100, final_score)),
@@ -250,6 +224,7 @@ async def classify_text(
         "false_positive_notes": llm["false_positive_notes"],
         "prompt_version": _prompt_version(),
         "rules_version": risk_rules.RULES_VERSION,
+        "status": status,
         "_llm_used": llm_used,
         "_llm_error": llm_error,
     }

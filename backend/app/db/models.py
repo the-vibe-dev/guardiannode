@@ -127,6 +127,10 @@ class RiskResult(Base):
     false_positive_notes: Mapped[str] = mapped_column(Text, default="")
     prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     rules_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # "ok" | "unclassified_model_unavailable" — the latter means the LLM never
+    # ran for this event; the stored result is rules-only and must not be read
+    # as a confident "safe".
+    classifier_status: Mapped[str] = mapped_column(String(48), default="ok")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

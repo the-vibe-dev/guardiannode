@@ -1,0 +1,11 @@
+{
+  "name": "watch phrase configured but absent: no alert",
+  "input_type": "ocr_text",
+  "text": "want to play another round after dinner?",
+  "age_group": "10_13",
+  "custom_watch_phrases": ["lincoln elementary", "402 maple street"],
+  "expected": {
+    "max_severity": "low",
+    "alert": false
+  }
+}

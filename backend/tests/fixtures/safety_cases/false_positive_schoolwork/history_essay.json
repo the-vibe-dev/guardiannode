@@ -1,0 +1,10 @@
+{
+  "name": "history schoolwork mentioning violence must not alert",
+  "input_type": "ocr_text",
+  "text": "The Civil War began in 1861. Soldiers carried muskets and casualties were severe at Gettysburg.",
+  "age_group": "10_13",
+  "expected": {
+    "max_severity": "low",
+    "alert": false
+  }
+}

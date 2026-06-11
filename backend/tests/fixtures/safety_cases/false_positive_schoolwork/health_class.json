@@ -1,0 +1,10 @@
+{
+  "name": "health class suicide-prevention homework should not be critical via rules",
+  "input_type": "ocr_text",
+  "text": "Chapter 7 review: list three warning signs of depression and where a student can find help, such as the 988 lifeline.",
+  "age_group": "14_17",
+  "expected": {
+    "max_severity": "low",
+    "alert": false
+  }
+}

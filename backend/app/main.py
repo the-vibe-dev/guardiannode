@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import sys
 import asyncio
@@ -50,6 +51,11 @@ def _ensure_session_secret() -> str:
         return path.read_text("utf-8").strip()
     secret = secrets.token_urlsafe(48)
     path.write_text(secret, encoding="utf-8")
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     return secret
 
 
@@ -105,6 +111,14 @@ def _patch_schema(engine) -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN profile_id VARCHAR(64)"))
             log.info("schema patch: added devices.profile_id")
+    if "risk_results" in tables:
+        cols = {c["name"] for c in insp.get_columns("risk_results")}
+        if "classifier_status" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE risk_results ADD COLUMN classifier_status VARCHAR(48) DEFAULT 'ok'"
+                ))
+            log.info("schema patch: added risk_results.classifier_status")
 
 
 @asynccontextmanager

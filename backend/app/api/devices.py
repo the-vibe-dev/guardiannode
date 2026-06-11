@@ -1,7 +1,6 @@
 """Device management + pairing endpoints."""
 from __future__ import annotations
 
-import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,9 +10,9 @@ from ulid import ULID
 
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, User
-from app.services import pairing as pairing_svc, rate_limit
+from app.services import device_tokens, pairing as pairing_svc, rate_limit
+from app.services.device_state import effective_paused_until, is_device_paused
 from app.services.audit import log_action
-from app.services.parent_auth import hash_password
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -83,6 +82,10 @@ def list_devices(
     _: User = Depends(current_user),
 ):
     rows = db.query(Device).order_by(Device.created_at.desc()).all()
+    # Clear any lapsed pauses so the dashboard never shows a stale "paused" badge.
+    had_pause = [d for d in rows if d.paused_until is not None]
+    if any(not is_device_paused(d) for d in had_pause):
+        db.commit()
     return [_to_dto(d) for d in rows]
 
 
@@ -165,13 +168,13 @@ def pair_complete(
     rate_limit.reset("pairing", client_ip)
 
     device_id = str(ULID())
-    token = secrets.token_urlsafe(32)
+    token, token_hash = device_tokens.issue_token(device_id)
     device = Device(
         device_id=device_id,
         hostname=req.hostname,
         platform=req.platform,
         agent_version=req.agent_version,
-        token_hash=hash_password(token),
+        token_hash=token_hash,
         paired=True,
         status="online",
         last_seen=datetime.now(timezone.utc),
@@ -205,7 +208,9 @@ def capture_config(
     policy = (prof.alert_policy or {}) if prof is not None else {}
     age = prof.age_group if prof is not None else "10_13"
     cfg = profile_policy.capture_settings(policy, age)
-    cfg["paused"] = device.paused_until is not None
+    cfg["paused"] = is_device_paused(device)
+    cfg["paused_until"] = device.paused_until.isoformat() if device.paused_until else None
+    db.commit()  # persist any expired-pause cleanup done by is_device_paused
     return cfg
 
 
@@ -222,6 +227,7 @@ def heartbeat(
 ):
     """Agent liveness + upload-backlog report (shown in the pipeline widget)."""
     from app.services import pipeline_metrics
+    paused_until = effective_paused_until(device)  # clears expired pauses
     device.last_seen = datetime.now(timezone.utc)
     if device.status not in ("paused", "disabled"):
         device.status = "online"
@@ -229,7 +235,7 @@ def heartbeat(
         device.agent_version = req.agent_version
     pipeline_metrics.record_agent_queue(device.device_id, device.hostname, req.queued_frames)
     db.commit()
-    return {"ok": True, "paused_until": device.paused_until}
+    return {"ok": True, "paused_until": paused_until}
 
 
 class PauseRequest(BaseModel):

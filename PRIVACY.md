@@ -39,8 +39,8 @@ Verify this yourself: the backend has zero outbound network code other than (a) 
 
 - Sensitive event fields (redacted text, screenshots, file paths) are encrypted at rest with **AES-256-GCM**.
 - The master key is generated locally on first run and never leaves the machine.
-- The 12-word recovery code derives the master key via PBKDF2/HKDF.
-- On Windows, the key is additionally wrapped with **DPAPI** so even root file-system access doesn't decrypt without the parent password.
+- The key file is protected by **filesystem permissions** (owner-only `0600` on Linux; a SYSTEM/Administrators-only ACL applied by the Windows installer). It is **not** currently wrapped with DPAPI or any OS keystore — an attacker with full file-system access to the server's key directory could decrypt stored evidence. DPAPI wrapping is on the roadmap.
+- The 12-word recovery code resets the **parent dashboard password** only; it does not protect or derive the evidence encryption key.
 
 ## Retention defaults
 
@@ -53,7 +53,7 @@ Verify this yourself: the backend has zero outbound network code other than (a) 
 | Raw OCR cache (unflagged) | 24 hours | ✅ |
 | Audit logs | 180 days | ✅ |
 
-You can wipe any of this from the dashboard at any time. Wipes are real (overwrite + vacuum), not soft-delete.
+You can wipe any of this from the dashboard at any time. Wipes delete the database rows and the encrypted evidence files immediately (not a soft-delete or recycle bin). As with any deletion on modern storage, freed disk sectors are not separately overwritten.
 
 ## Transparency to the child
 

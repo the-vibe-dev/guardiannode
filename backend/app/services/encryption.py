@@ -1,10 +1,10 @@
 """AES-GCM encryption for sensitive event fields and evidence blobs.
 
-The master key is generated on first run and stored in `settings.keys_dir / "master.key"`.
-On Windows, the file is additionally wrapped with DPAPI when available.
-
-Key file is restricted to SYSTEM-only ACL by the installer; this code does not
-attempt to set ACLs at runtime.
+The master key is generated on first run and stored as a raw key file at
+`settings.keys_dir / "master.key"`. It is protected by filesystem permissions
+only: 0600 on POSIX, and a SYSTEM/Administrators-only ACL applied by the
+Windows installer. DPAPI wrapping is NOT currently implemented — anyone who
+can read the key file can decrypt the evidence store. See docs/THREAT_MODEL.md.
 """
 from __future__ import annotations
 

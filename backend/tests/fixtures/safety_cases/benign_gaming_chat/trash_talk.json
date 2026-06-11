@@ -1,0 +1,10 @@
+{
+  "name": "normal competitive trash talk must not alert",
+  "input_type": "ocr_text",
+  "text": "gg ez. you got destroyed lol. rematch? my aim was insane that round",
+  "age_group": "10_13",
+  "expected": {
+    "max_severity": "low",
+    "alert": false
+  }
+}

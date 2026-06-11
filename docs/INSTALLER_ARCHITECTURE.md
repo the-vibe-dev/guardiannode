@@ -97,7 +97,34 @@ Inno Setup is a Windows tool but its CLI compiler `iscc.exe` runs reliably under
 3. Runs `wine iscc.exe child.iss` and `wine iscc.exe server.iss`.
 4. Copies output `.exe` files into `installer/build/dist/`.
 
-CI does the same in `.github/workflows/release-installers.yml` — but uses a Linux runner with Wine installed, so it's reproducible without a Windows VM in CI.
+The Wine path is for **local developer iteration only**. Release artifacts are
+built by `.github/workflows/release-installers.yml` on `windows-latest`:
+PyInstaller bundles for the backend (`GuardianNodeBackend.exe`) and agent
+(`GuardianNodeAgent/Tray/Watchdog.exe`) are built natively, then Inno Setup
+compiles the installers around them, generates `SHA256SUMS` plus a release
+manifest, and attaches everything to a draft GitHub release.
+
+### Fail-closed build modes
+
+`installer/build/build_all.sh` refuses to silently ship development stubs:
+
+| Mode | Behavior |
+|---|---|
+| `RELEASE_BUILD=1` | Fails the build unless real PyInstaller bundles exist at `installer/build/prebuilt/{agent,backend}`. Release installers must never require Python on a parent or child machine. |
+| `ALLOW_DEV_STUBS=1` | Stages Python source + `.bat` shims (target machine needs Python). Local dev only — never distribute. |
+| neither | Aborts with instructions. |
+
+Third-party build tools (Inno Setup, WinSW) are verified against pinned
+SHA-256 hashes before use, in both the script and the CI workflow.
+
+### Service naming (transparency)
+
+Every installed service is GuardianNode-branded: `GuardianNodeBackend`,
+`GuardianNodeWatchdog`, and `GuardianNodeWatchdog2` (the secondary watchdog of
+the mutual-resurrection pair). Earlier builds named the secondary watchdog
+`EndpointHealthAgent`; that deceptive generic name has been removed (installer
+upgrades delete the legacy service). Tamper resistance comes from the service
+ACL — stopping requires admin rights — not from hiding what the service is.
 
 ## Signing roadmap
 

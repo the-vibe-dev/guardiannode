@@ -45,11 +45,42 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
     text_present = settings.text_model in text_status.models if text_status.available else False
     vision_present = settings.vision_model in vision_status.models if vision_status.available else False
 
+    # Tesseract availability (text_only tier + fallback OCR path).
+    tesseract_available = False
+    try:
+        import pytesseract  # type: ignore
+        tesseract_available = bool(pytesseract.get_tesseract_version())
+    except Exception:
+        tesseract_available = False
+
+    # Parent-readable protection summary: full / reduced / rules_only.
+    warnings: list[str] = []
+    tier = settings.classifier_tier
+    if not (vision_status.available and text_status.available):
+        warnings.append("Ollama is not reachable — AI classification is offline; only deterministic rules are protecting right now.")
+    else:
+        if tier in ("full", "text_only") and not text_present:
+            warnings.append(f"Text model {settings.text_model} is not installed.")
+        if tier in ("full", "vision_only") and not vision_present:
+            warnings.append(f"Vision model {settings.vision_model} is not installed — image-only risks (nudity/gore/weapons) are not detected.")
+    if tier == "text_only":
+        warnings.append("text_only tier: image-only risks (nudity/gore/weapons) are not detected on this hardware.")
+        if not tesseract_available:
+            warnings.append("Tesseract OCR is not available — screenshots cannot be read at all in text_only tier.")
+    if not (vision_status.available and text_status.available):
+        protection_level = "rules_only"
+    elif warnings:
+        protection_level = "reduced"
+    else:
+        protection_level = "full"
+
     from app.services import screenshot_async
     return {
         "status": "ok",
         "version": __version__,
         "tier": settings.classifier_tier,
+        "protection": {"level": protection_level, "warnings": warnings},
+        "tesseract_available": tesseract_available,
         "queue": snap,
         "pending_classification": screenshot_async.pending_count(),
         "agent_queues": pipeline_metrics.agent_queues(),

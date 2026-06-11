@@ -8,9 +8,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import ChildProfile, Device, Event, RiskResult
+from app.db.models import Device, Event, RiskResult
 from app.services import classifier, encryption, redaction
 from app.services.audit import log_action
+from app.services.profile_resolution import resolve_profile
 
 log = logging.getLogger(__name__)
 
@@ -54,10 +55,19 @@ async def ingest_event(
         metadata["redaction"] = red_summary
         metadata["redaction_summary"] = red_summary
 
+    # Resolve the child profile the same way screenshot ingest does (payload →
+    # device assignment → default), so watch phrases and age policy match.
+    resolved = resolve_profile(
+        session,
+        device_id=device_id,
+        payload_profile_id=payload.get("profile_id"),
+        payload_age_group=payload.get("age_group") or payload.get("_age_group"),
+    )
+
     event = Event(
         event_id=event_id,
         device_id=device_id,
-        profile_id=payload.get("profile_id"),
+        profile_id=resolved.profile_id,
         source_type=payload.get("source_type", "ocr"),
         app_name=payload.get("app_name"),
         window_title=payload.get("window_title"),
@@ -80,22 +90,14 @@ async def ingest_event(
         device.status = "online"
 
     # Classify
-    profile_id = payload.get("profile_id")
-    age_group = payload.get("age_group") or payload.get("_age_group") or "10_13"
-    custom_phrases: list[str] = []
-    if profile_id:
-        prof = session.get(ChildProfile, profile_id)
-        if prof and prof.custom_watch_phrases:
-            custom_phrases = list(prof.custom_watch_phrases)
-
     cls_result = await classifier.classify_text(
         redacted_text=text,
         app_name=payload.get("app_name"),
         source_type=payload.get("source_type", "ocr"),
-        age_group=age_group,
+        age_group=resolved.age_group,
         timestamp=timestamp.isoformat(),
         url=payload.get("url"),
-        custom_phrases=custom_phrases,
+        custom_phrases=resolved.custom_phrases,
     )
 
     risk_id = _ulid()
@@ -114,21 +116,17 @@ async def ingest_event(
         false_positive_notes=cls_result["false_positive_notes"],
         prompt_version=cls_result["prompt_version"],
         rules_version=cls_result["rules_version"],
+        classifier_status=cls_result.get("status", "ok"),
     )
     session.add(rr)
 
     severity = cls_result["risk_level"]
     alert_id: str | None = None
-    pol_profile = payload.get("profile_id")
-    if not pol_profile:
-        dev = session.get(Device, device_id)
-        pol_profile = dev.profile_id if dev is not None else None
     from app.services import profile_policy
-    if pol_profile:
-        prof = session.get(ChildProfile, pol_profile)
-        pol = profile_policy.normalize(prof.alert_policy or {}, prof.age_group) if prof else profile_policy.default_policy_for_age("10_13")
+    if resolved.profile is not None:
+        pol = profile_policy.normalize(resolved.profile.alert_policy or {}, resolved.age_group)
     else:
-        pol = profile_policy.default_policy_for_age("10_13")
+        pol = profile_policy.default_policy_for_age(resolved.age_group)
     decision = profile_policy.decide(pol, severity, cls_result["categories"]) if severity != "none" else profile_policy.Decision(False, False, "no_risk")
     if decision.create_alert:
         from app.services.alert_dedup import upsert_alert
@@ -136,7 +134,7 @@ async def ingest_event(
             session,
             risk_id=risk_id,
             device_id=device_id,
-            profile_id=pol_profile,
+            profile_id=resolved.profile_id,
             severity=severity,
             categories=cls_result["categories"],
             source="text_event",

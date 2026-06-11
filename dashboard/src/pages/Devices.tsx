@@ -102,6 +102,11 @@ export default function Devices() {
                   d.status === "paused" ? "text-yellow-700" :
                   "text-gray-500"
                 }>{d.status}</span>
+                {d.status === "paused" && d.paused_until && (
+                  <div className="text-xs text-gray-500">
+                    until {formatDateTime(d.paused_until)}
+                  </div>
+                )}
               </td>
               <td className="p-3 text-sm text-gray-500">{formatDateTime(d.last_seen)}</td>
               <td className="p-3 text-right whitespace-nowrap space-x-3">
