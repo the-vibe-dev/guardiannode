@@ -69,9 +69,22 @@ def _device_token() -> str | None:
 
 
 def _verify_password_or_recovery(s: str) -> bool:
-    if verify_password(s):
+    # Local hash file (all-in-one installs that provisioned parent.json).
+    if verify_password(s) or verify_recovery_code(s):
         return True
-    return verify_recovery_code(s)
+    # Child-only installs have no local parent hash — verify against the
+    # parent server. A 200 on /api/auth/login means the password is right.
+    # (Server-side rate limiting applies, so this can't be brute-forced.)
+    try:
+        with httpx.Client(timeout=10.0) as c:
+            r = c.post(
+                f"{_backend_url().rstrip('/')}/api/auth/login",
+                json={"password": s},
+            )
+            return r.status_code == 200
+    except Exception as e:
+        log.warning("online parent-password check failed: %s", e)
+        return False
 
 
 def _ask_password() -> str | None:
