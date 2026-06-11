@@ -17,6 +17,35 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "vision_clas
 _JSON_RE = re.compile(r"\{[\s\S]*\}")
 
 
+def _downscale_for_vision(image_bytes: bytes, max_edge: int | None = None) -> bytes:
+    """Shrink the screenshot to a sane resolution for the vision model.
+
+    A full-res screenshot turns into a huge number of vision tokens, which
+    inflates the compute-graph/KV footprint and can push qwen2.5vl past a
+    12 GB GPU (→ Ollama 500 / OOM) and slows inference. Screen text stays
+    legible at ~1280px, which is plenty for classification. Only the model's
+    input copy is shrunk — the stored evidence blob keeps full resolution.
+    """
+    max_edge = max_edge or settings.vision_max_image_edge
+    if max_edge <= 0:
+        return image_bytes
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes))
+        w, h = img.size
+        if max(w, h) <= max_edge:
+            return image_bytes
+        scale = max_edge / float(max(w, h))
+        img = img.convert("RGB").resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=85)
+        return out.getvalue()
+    except Exception as e:
+        log.debug("vision downscale failed (%s); sending original", e)
+        return image_bytes
+
+
 def _prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
 
@@ -76,11 +105,13 @@ async def classify_image(
         "prompt_version": _prompt_version(),
     }
 
+    vision_image = _downscale_for_vision(image_bytes)
+
     try:
         response = await client.generate(
             model=chosen,
             prompt=prompt,
-            images=[image_bytes],
+            images=[vision_image],
             # num_ctx 4096 keeps KV-cache footprint small enough that a small
             # text LLM (e.g. llama3.2:3b ~2.6 GB) can co-reside on a 12 GB GPU.
             options={"temperature": 0.1, "num_ctx": 4096},

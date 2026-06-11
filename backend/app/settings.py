@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     device_offline_alert_enabled: bool = True
     device_offline_after_seconds: int = 180
     device_offline_check_interval_seconds: int = 60
+    # Max long-edge (px) the screenshot is downscaled to before the vision model.
+    # A full-res frame produces too many vision tokens and can OOM qwen2.5vl on
+    # a 12 GB GPU. 1280 keeps screen text legible. 0 disables downscaling.
+    vision_max_image_edge: int = 1280
 
     @property
     def keys_dir(self) -> Path:
