@@ -79,6 +79,11 @@ Source: "..\shared\configure_ollama_windows.ps1"; DestDir: "{app}"; Flags: ignor
 ; ---- Taskbar pin helper ----
 Source: "pin_to_taskbar.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+; Stale launchers from pre-scheduled-task installs (the mutex would collapse
+; them anyway, but don't leave dead shortcuts around).
+Type: files; Name: "{commonstartup}\GuardianNode Agent.lnk"
+
 [Dirs]
 Name: "{commonappdata}\GuardianNode"; Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\logs";  Permissions: system-modify
