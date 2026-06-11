@@ -65,6 +65,8 @@ installer/build/prebuilt/
 *.sqlite
 *.sqlite3
 data/
+# …but the recovery-code wordlist is application source, not local data:
+!backend/app/data/
 evidence/
 keys/
 local_config/
