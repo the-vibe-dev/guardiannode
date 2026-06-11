@@ -77,16 +77,20 @@ async def classify_image(
     age_group: str = "10_13",
     timestamp: str = "",
     related_ocr_text: str = "",
+    watch_phrases: list[str] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
     chosen = model or settings.vision_model
     client = OllamaClient(base_url=settings.vision_ollama_url_resolved, timeout=120.0)
+    phrases = [p.strip() for p in (watch_phrases or []) if p and p.strip()]
+    watch_str = "; ".join(f'"{p}"' for p in phrases) if phrases else "none"
     prompt = _prompt().format(
         app_name=app_name or "unknown",
         source_type=source_type,
         age_group=age_group,
         timestamp=timestamp,
         related_ocr_text=related_ocr_text[:1024] or "none",
+        watch_phrases=watch_str,
     )
 
     result: dict[str, Any] = {
@@ -112,9 +116,9 @@ async def classify_image(
             model=chosen,
             prompt=prompt,
             images=[vision_image],
-            # num_ctx 4096 keeps KV-cache footprint small enough that a small
-            # text LLM (e.g. llama3.2:3b ~2.6 GB) can co-reside on a 12 GB GPU.
-            options={"temperature": 0.1, "num_ctx": 4096},
+            # num_ctx bounds the vision compute-graph size (the thing that OOM'd
+            # qwen2.5vl on big frames). See settings.vision_num_ctx.
+            options={"temperature": 0.1, "num_ctx": settings.vision_num_ctx},
             format_json=True,
         )
         parsed = _extract_json(response)

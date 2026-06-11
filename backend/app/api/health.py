@@ -45,11 +45,13 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
     text_present = settings.text_model in text_status.models if text_status.available else False
     vision_present = settings.vision_model in vision_status.models if vision_status.available else False
 
+    from app.services import screenshot_async
     return {
         "status": "ok",
         "version": __version__,
         "tier": settings.classifier_tier,
         "queue": snap,
+        "pending_classification": screenshot_async.pending_count(),
         "agent_queues": pipeline_metrics.agent_queues(),
         "ollama": {
             "url": vision_status.base_url,

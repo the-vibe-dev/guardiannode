@@ -91,10 +91,10 @@ def _detect_gpu() -> tuple[str | None, str | None, int | None]:
 
 
 # Tier selection thresholds (VRAM in GB). Sizes are the REAL hot footprint:
-# qwen2.5vl:7b is ~7.5 GB of weights PLUS a ~3-4 GB compute-graph/KV workspace
+# qwen3-vl:8b-instruct is ~7.5 GB of weights PLUS a ~3-4 GB compute-graph/KV workspace
 # at num_ctx=4096, so it needs the better part of a 12 GB card on its own.
 #
-#   vision_only: qwen2.5vl:7b — the standard GPU path. The vision model does
+#   vision_only: qwen3-vl:8b-instruct — the standard GPU path. The vision model does
 #                OCR, image classification (nudity/gore/weapons/etc.), AND
 #                text-risk classification (grooming/self-harm/scam) in one call.
 #                Needs ~6 GB+; comfortable on 8-12 GB.
@@ -114,7 +114,7 @@ def _select_tier(ram_gb: int, vram_gb: int | None) -> tuple[str, str, str | None
             f"GPU has {v} GB VRAM — enough to keep the vision LLM and a separate text "
             "LLM hot together for a second opinion on extracted text.",
             "llama3.2:3b",
-            "qwen2.5vl:7b",
+            "qwen3-vl:8b-instruct",
             13.0,
         )
     if v >= 6:
@@ -124,7 +124,7 @@ def _select_tier(ram_gb: int, vram_gb: int | None) -> tuple[str, str, str | None
             "(nudity, gore, weapons, etc.), reads the on-screen text (OCR), and classifies "
             "that text (grooming, self-harm, scams) in a single pass. Full coverage.",
             None,
-            "qwen2.5vl:7b",
+            "qwen3-vl:8b-instruct",
             11.0,
         )
     if ram_gb >= 8:

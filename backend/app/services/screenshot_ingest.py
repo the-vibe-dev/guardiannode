@@ -246,7 +246,7 @@ async def _ingest_inner(
                 image_bytes=image_bytes,
                 app_name=app_name, source_type="image",
                 age_group=age_group, timestamp=timestamp.isoformat(),
-                related_ocr_text="", model=chosen,
+                related_ocr_text="", watch_phrases=custom_phrases, model=chosen,
             )
             extracted_text = (vision_result.get("visible_text") or "").strip()
         else:
@@ -281,7 +281,7 @@ async def _ingest_inner(
                 image_bytes=image_bytes,
                 app_name=app_name, source_type="image",
                 age_group=age_group, timestamp=timestamp.isoformat(),
-                related_ocr_text="", model=chosen_vision,
+                related_ocr_text="", watch_phrases=custom_phrases, model=chosen_vision,
             )
 
         async def _text_path() -> tuple[str, dict[str, Any]]:

@@ -184,7 +184,7 @@ var
 begin
   DetectedTier := 'vision_only';
   DetectedTextModel := '';
-  DetectedVisionModel := 'qwen2.5vl:7b';
+  DetectedVisionModel := 'qwen3-vl:8b-instruct';
   DetectedReasoning := 'Default tier; adjust later in dashboard.';
 
   TmpPath := ExpandConstant('{tmp}\hw_probe.txt');
@@ -212,12 +212,12 @@ begin
     if VramGB >= 16 then begin
       DetectedTier := 'full';
       DetectedTextModel := 'llama3.2:3b';
-      DetectedVisionModel := 'qwen2.5vl:7b';
+      DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — vision LLM plus a separate text LLM run together for a second opinion on extracted text.';
     end else if VramGB >= 6 then begin
       DetectedTier := 'vision_only';
       DetectedTextModel := '';
-      DetectedVisionModel := 'qwen2.5vl:7b';
+      DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — the vision model detects visual risks (nudity, gore, weapons, etc.), reads the on-screen text, and classifies it (grooming, self-harm, scams) in one pass. Full coverage.';
     end else if RamGB >= 8 then begin
       DetectedTier := 'text_only';

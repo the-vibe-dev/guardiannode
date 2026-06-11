@@ -38,7 +38,24 @@ class Settings(BaseSettings):
     mdns_enabled: bool = True
     cors_allow_origin: str | None = None  # for dashboard dev server
     text_model: str = "llama3.2:3b"
-    vision_model: str = "llava-phi3"
+    # qwen2.5vl:7b is fast (~2-3s warm per frame at the settings below) and reads
+    # on-screen text + classifies images in one pass. It nominally offloads ~2 GB
+    # to CPU on a 12 GB card, but that does not hurt warm latency; the earlier
+    # OOM *crashes* came from too-large a context/image (see vision_num_ctx +
+    # vision_max_image_edge), not the model itself. qwen3-vl:8b fits fully but is
+    # markedly slower per frame, so it's not the default.
+    # qwen3-vl:8b fits FULLY on a 12 GB GPU (~7.6 GB, no CPU offload), unlike
+    # qwen2.5vl:7b whose ~7.5 GB vision compute graph pushed it to ~14 GB and
+    # OOM-crashed the runner. The client already disables Qwen3 "thinking" mode
+    # (think:false), so it's fast as well as crash-free.
+    # qwen3-vl:8b-INSTRUCT (not the default thinking variant) — fits fully on a
+    # 12 GB GPU (~7.6 GB, no CPU offload), returns clean single-shot JSON, and
+    # runs ~4-5s warm. The plain `qwen3-vl:8b` tag is the *thinking* variant,
+    # whose reasoning output goes to a separate field leaving `response` empty
+    # (Ollama bug ollama/ollama#14798) — do not use it. qwen2.5vl:7b also works
+    # but offloads ~2 GB to CPU and runs ~30s.
+    vision_model: str = "qwen3-vl:8b-instruct"
+    vision_num_ctx: int = 4096
     classifier_timeout_seconds: int = 30
     rules_version: str = "0.1.0"
     # Classifier tier: governs which paths run per screenshot.
@@ -61,10 +78,11 @@ class Settings(BaseSettings):
     device_offline_alert_enabled: bool = True
     device_offline_after_seconds: int = 180
     device_offline_check_interval_seconds: int = 60
-    # Max long-edge (px) the screenshot is downscaled to before the vision model.
-    # A full-res frame produces too many vision tokens and can OOM qwen2.5vl on
-    # a 12 GB GPU. 1280 keeps screen text legible. 0 disables downscaling.
-    vision_max_image_edge: int = 1280
+    # Safety cap on the long edge (px) sent to the vision model. qwen3-vl:8b has
+    # ~4.6 GB headroom on a 12 GB card, so full-res frames OCR best and are left
+    # untouched; this only shrinks enormous 4K+ frames. Downscaling degrades OCR
+    # of small text (usernames, handles, addresses) — measured. 0 disables it.
+    vision_max_image_edge: int = 2560
 
     @property
     def keys_dir(self) -> Path:

@@ -29,7 +29,7 @@ if [ -z "$TEXT_MODEL" ]; then
 fi
 if [ -z "$VISION_MODEL" ]; then
   case "$TIER" in
-    full|vision_only) VISION_MODEL="qwen2.5vl:7b" ;;
+    full|vision_only) VISION_MODEL="qwen3-vl:8b-instruct" ;;
     text_only)        VISION_MODEL="" ;;
   esac
 fi

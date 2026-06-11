@@ -46,8 +46,8 @@ if (-not $TextModel) {
 }
 if (-not $VisionModel) {
     switch ($Tier) {
-        "full"        { $VisionModel = "qwen2.5vl:7b" }
-        "vision_only" { $VisionModel = "qwen2.5vl:7b" }
+        "full"        { $VisionModel = "qwen3-vl:8b-instruct" }
+        "vision_only" { $VisionModel = "qwen3-vl:8b-instruct" }
         "text_only"   { $VisionModel = "" }
     }
 }

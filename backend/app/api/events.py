@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, Event, User
-from app.services import event_ingest, encryption, screenshot_ingest
+from app.services import event_ingest, encryption, screenshot_async, screenshot_ingest
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -142,15 +142,11 @@ def get_event_text(
 
 
 class ScreenshotIngestResponse(BaseModel):
+    # The frame is stored the instant it arrives and classified by a background
+    # worker, so the agent gets a fast ack and frames survive a child power-off.
     event_id: str
-    risk_id: str
-    alert_id: str | None
-    risk_level: str
-    score: int
-    categories: list[str]
-    blob_stored: bool
-    vision_used: bool
-    extracted_text_chars: int
+    status: str  # "queued" | "paused"
+    queued: bool
 
 
 @router.post("/screenshot", response_model=ScreenshotIngestResponse)
@@ -170,24 +166,12 @@ async def ingest_screenshot(
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
-    """Receive a raw screenshot from the agent.
-
-    Pipeline: vision LLM → text classifier on extracted text → multimodal merge → alert.
-    Blob is encrypted and stored only when risk_level >= medium.
-    """
+    """Receive a raw screenshot, persist it immediately, and queue it for
+    background classification (vision LLM → rules → alert). Returns fast so the
+    agent's local queue never backs up and frames aren't lost on power-off."""
     if device.paused_until is not None:
-        # Honor pause server-side: drop quietly
-        return ScreenshotIngestResponse(
-            event_id="",
-            risk_id="",
-            alert_id=None,
-            risk_level="none",
-            score=0,
-            categories=[],
-            blob_stored=False,
-            vision_used=False,
-            extracted_text_chars=0,
-        )
+        # Honor pause server-side: drop quietly, don't store.
+        return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
 
     image_bytes = await image.read()
     if not image_bytes:
@@ -195,29 +179,31 @@ async def ingest_screenshot(
     if len(image_bytes) > 8 * 1024 * 1024:
         raise HTTPException(413, "Image too large (max 8 MB)")
 
-    try:
-        ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00")) if timestamp else datetime.now(timezone.utc)
-    except Exception:
-        ts = datetime.now(timezone.utc)
-
-    result = await screenshot_ingest.ingest_screenshot(
-        db,
-        image_bytes=image_bytes,
-        device_id=device.device_id,
-        app_name=app_name,
-        window_title=window_title,
-        url=url,
-        profile_id=profile_id,
-        age_group=age_group,
-        capture_scope=capture_scope,
-        policy_id=policy_id,
-        policy_version=policy_version,
-        collector_version=collector_version,
-        timestamp=ts,
-        source_ip=request.client.host if request.client else None,
-    )
+    # Update device liveness now (don't wait for classification).
+    device.last_seen = datetime.now(timezone.utc)
+    if device.status not in ("paused", "disabled"):
+        device.status = "online"
     db.commit()
-    return ScreenshotIngestResponse(**result)
+
+    token = screenshot_async.store_pending(
+        image_bytes,
+        {
+            "device_id": device.device_id,
+            "app_name": app_name,
+            "window_title": window_title,
+            "url": url,
+            "profile_id": profile_id,
+            "age_group": age_group,
+            "capture_scope": capture_scope,
+            "policy_id": policy_id,
+            "policy_version": policy_version,
+            "collector_version": collector_version,
+            "timestamp": timestamp,
+            "source_ip": request.client.host if request.client else None,
+        },
+    )
+    await screenshot_async.enqueue(token)
+    return ScreenshotIngestResponse(event_id=token, status="queued", queued=True)
 
 
 @router.get("/{event_id}/screenshot")

@@ -26,6 +26,7 @@ interface Health {
       severity_counts: Record<string, number>;
     };
   };
+  pending_classification?: number;
   agent_queues?: {
     device_id: string;
     hostname: string;
@@ -81,6 +82,7 @@ export default function PipelineHealth() {
   const ollamaOK = h.ollama.available;
   const backlog = (h.agent_queues || []).filter((q) => q.queued_frames > 0);
   const backlogTotal = backlog.reduce((sum, q) => sum + q.queued_frames, 0);
+  const pending = h.pending_classification || 0;
 
   return (
     <div className="bg-white shadow rounded p-4">
@@ -92,6 +94,9 @@ export default function PipelineHealth() {
             color="bg-yellow-400"
             label={busy ? `Processing ${h.queue.in_flight_count}` : "Idle"}
           />
+          {pending > 0 && (
+            <Pulse on color="bg-blue-400" label={`${pending} waiting to classify`} />
+          )}
           {backlogTotal > 0 && (
             <Pulse on color="bg-orange-400" label={`${backlogTotal} waiting upload`} />
           )}

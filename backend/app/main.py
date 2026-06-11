@@ -108,6 +108,10 @@ async def lifespan(app: FastAPI):
         except Exception as e:  # pragma: no cover
             log.warning("mDNS start failed: %s", e)
     background_tasks = []
+    # Single-consumer screenshot classification worker (stores on arrival,
+    # classifies one frame at a time so the vision model isn't hit concurrently).
+    from app.services import screenshot_async
+    background_tasks.append(asyncio.create_task(screenshot_async.loop()))
     if settings.retention_cleanup_enabled:
         background_tasks.append(asyncio.create_task(cleanup_worker.loop()))
     if settings.device_offline_alert_enabled:

@@ -70,6 +70,20 @@ Example output 4 (grooming text in chat, no person shown — high, do NOT mentio
 Example output 5 (anatomy diagram — clean, NOT nudity):
 {{"visible_text": "Human Skeletal System - Chapter 5", "persons_visible": false, "apparent_minor": false, "risk_level": "none", "score": 0, "categories": [], "summary": "Biology textbook illustration of human anatomy.", "visual_evidence": [], "recommended_action": "none", "confidence": 0.9, "false_positive_notes": "Educational anatomy content, not sexual."}}
 
+PARENT WATCH LIST (personal info specific to THIS child):
+The parent flagged these exact phrases as sensitive — typically the child's real
+name, home address, school name, or phone number. If ANY of them appears anywhere
+on screen (typed in a chat, in a document, printed on an image such as a school ID,
+a map, or a photo caption), you MUST:
+  - add the category "custom_watch" to categories,
+  - set risk_level to at least "high" (critical if it is being shared with an
+    apparent stranger or alongside a contact request),
+  - quote the exact matched phrase in visual_evidence (e.g. "watch phrase visible: <phrase>"),
+  - mention it in the summary as the child's personal information being visible/shared.
+Match case-insensitively. A partial address (just the street, or just the school
+name) still counts. If the list below is "none", ignore this section.
+Watch phrases: {watch_phrases}
+
 Context (use this when judging, do not echo it):
 - app_name: {app_name}
 - source_type: {source_type}

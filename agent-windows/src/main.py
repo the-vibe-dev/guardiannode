@@ -136,14 +136,27 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                     "in_monitored": in_monitored,
                 }
                 if not cfg.dry_run:
-                    try:
-                        screenshot_queue.put_nowait(payload)
-                        log.info(
-                            "queued frame: app=%s monitored=%s phash_dist=%d full_phash_dist=%d bytes=%d",
-                            app_name, in_monitored, dist, full_dist, len(shot.jpeg_bytes),
-                        )
-                    except asyncio.QueueFull:
-                        log.warning("screenshot queue full; dropping frame")
+                    # If the backend is slower than the capture rate, keep the
+                    # FRESHEST frames: drop the oldest queued frame to make room
+                    # rather than dropping this new one. Otherwise the parent
+                    # would see minutes-stale classifications.
+                    dropped = 0
+                    while True:
+                        try:
+                            screenshot_queue.put_nowait(payload)
+                            break
+                        except asyncio.QueueFull:
+                            try:
+                                screenshot_queue.get_nowait()
+                                screenshot_queue.task_done()
+                                dropped += 1
+                            except asyncio.QueueEmpty:
+                                break
+                    log.info(
+                        "queued frame: app=%s monitored=%s phash_dist=%d full_phash_dist=%d bytes=%d%s",
+                        app_name, in_monitored, dist, full_dist, len(shot.jpeg_bytes),
+                        f" (dropped {dropped} stale)" if dropped else "",
+                    )
             else:
                 skipped_count += 1
 
@@ -183,21 +196,28 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                     collector_version=payload.get("collector_version"),
                     timestamp=payload.get("timestamp"),
                 )
+                # The backend stores the frame and classifies it in the
+                # background, so this returns immediately with a queued ack.
                 log.info(
-                    "ship app=%s bytes=%d → severity=%s blob_stored=%s vision=%s",
+                    "ship app=%s bytes=%d → %s",
                     payload.get("app_name"),
                     len(payload["image_bytes"]),
-                    result.get("risk_level"),
-                    result.get("blob_stored"),
-                    result.get("vision_used"),
+                    result.get("status", "ok"),
                 )
                 backoff = 1.0
             except Exception as e:
                 log.warning("screenshot send failed (%s); requeueing", e)
-                try:
-                    screenshot_queue.put_nowait(payload)
-                except asyncio.QueueFull:
-                    pass
+                # Keep the freshest frames if a transient failure backs us up.
+                while True:
+                    try:
+                        screenshot_queue.put_nowait(payload)
+                        break
+                    except asyncio.QueueFull:
+                        try:
+                            screenshot_queue.get_nowait()
+                            screenshot_queue.task_done()
+                        except asyncio.QueueEmpty:
+                            break
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
         except Exception as e:

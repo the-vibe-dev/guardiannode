@@ -120,7 +120,7 @@ probe_hardware_and_pick_tier() {
     yellow "Hardware probe failed; defaulting to vision_only tier."
     GN_TIER="${GN_TIER:-vision_only}"
     GN_TEXT_MODEL="${GN_TEXT_MODEL:-}"
-    GN_VISION_MODEL="${GN_VISION_MODEL:-qwen2.5vl:7b}"
+    GN_VISION_MODEL="${GN_VISION_MODEL:-qwen3-vl:8b-instruct}"
     return
   fi
   GN_TIER="${GN_TIER:-$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["classifier_tier"])')}"
@@ -180,7 +180,7 @@ Environment="GUARDIANNODE_BIND_PORT=$GN_BIND_PORT"
 Environment="GUARDIANNODE_LOG_LEVEL=INFO"
 Environment="GUARDIANNODE_CLASSIFIER_TIER=$GN_TIER"
 Environment="GUARDIANNODE_TEXT_MODEL=${GN_TEXT_MODEL:-llama3.2:3b}"
-Environment="GUARDIANNODE_VISION_MODEL=${GN_VISION_MODEL:-qwen2.5vl:7b}"
+Environment="GUARDIANNODE_VISION_MODEL=${GN_VISION_MODEL:-qwen3-vl:8b-instruct}"
 Environment="GUARDIANNODE_OLLAMA_URL=${GN_OLLAMA_URL:-http://127.0.0.1:11434}"
 Environment="GUARDIANNODE_CLASSIFIER_TIMEOUT_SECONDS=120"
 WorkingDirectory=$GN_HOME/src/backend

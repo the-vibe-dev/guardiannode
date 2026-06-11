@@ -83,7 +83,7 @@ var
 begin
   DetectedTier := 'vision_only';
   DetectedTextModel := '';
-  DetectedVisionModel := 'qwen2.5vl:7b';
+  DetectedVisionModel := 'qwen3-vl:8b-instruct';
   DetectedReasoning := 'Default tier; adjust later in dashboard.';
 
   TmpPath := ExpandConstant('{tmp}\hw_probe.txt');
@@ -102,11 +102,11 @@ begin
     if VramGB >= 10 then begin
       DetectedTier := 'full';
       DetectedTextModel := 'llama3.2:3b';
-      DetectedVisionModel := 'qwen2.5vl:7b';
+      DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU — vision LLM + text LLM run together.';
     end else if VramGB >= 6 then begin
       DetectedTier := 'vision_only';
-      DetectedVisionModel := 'qwen2.5vl:7b';
+      DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU — vision LLM only.';
     end else if RamGB >= 8 then begin
       DetectedTier := 'text_only';
