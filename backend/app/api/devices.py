@@ -28,6 +28,7 @@ class DeviceDTO(BaseModel):
     created_at: datetime
     last_seen: datetime | None
     paused_until: datetime | None
+    profile_id: str | None
 
 
 def _to_dto(d: Device) -> DeviceDTO:
@@ -41,7 +42,39 @@ def _to_dto(d: Device) -> DeviceDTO:
         created_at=d.created_at,
         last_seen=d.last_seen,
         paused_until=d.paused_until,
+        profile_id=d.profile_id,
     )
+
+
+class AssignProfileRequest(BaseModel):
+    profile_id: str | None  # null clears the assignment
+
+
+@router.patch("/{device_id}/profile", response_model=DeviceDTO)
+def assign_profile(
+    device_id: str,
+    req: AssignProfileRequest,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+):
+    """Assign (or clear) the child profile a device belongs to. Frames from this
+    device are then tagged with the profile so its watch phrases/age apply."""
+    device = db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if req.profile_id:
+        from app.db.models import ChildProfile
+        if db.get(ChildProfile, req.profile_id) is None:
+            raise HTTPException(status_code=400, detail="Profile not found")
+    device.profile_id = req.profile_id
+    log_action(
+        db, actor=str(user.id), action="device.assign_profile",
+        target=device_id, details={"profile_id": req.profile_id},
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return _to_dto(device)
 
 
 @router.get("", response_model=list[DeviceDTO])

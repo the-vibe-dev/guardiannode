@@ -4,6 +4,7 @@ import { formatDateTime } from "../utils/datetime";
 
 export default function Devices() {
   const [devices, setDevices] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<any[]>([]);
   const [pairCode, setPairCode] = useState<{ code: string; expires_at: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -11,7 +12,18 @@ export default function Devices() {
     api.devices().then(setDevices).catch((e) => setError(e.message));
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+    api.profiles().then(setProfiles).catch(() => {});
+  }, []);
+
+  async function assignProfile(device_id: string, profile_id: string) {
+    setError(null);
+    try {
+      await api.assignDeviceProfile(device_id, profile_id || null);
+      reload();
+    } catch (e: any) { setError(e.message); }
+  }
 
   async function startPair() {
     setError(null);
@@ -59,7 +71,7 @@ export default function Devices() {
         <thead className="bg-gray-100 text-left text-xs uppercase text-gray-500">
           <tr>
             <th className="p-3">Hostname</th>
-            <th className="p-3">Platform</th>
+            <th className="p-3">Child</th>
             <th className="p-3">Status</th>
             <th className="p-3">Last seen</th>
             <th className="p-3"></th>
@@ -72,7 +84,18 @@ export default function Devices() {
           {devices.map((d) => (
             <tr key={d.device_id} className="border-t">
               <td className="p-3 font-medium">{d.hostname}</td>
-              <td className="p-3">{d.platform}</td>
+              <td className="p-3">
+                <select
+                  className="border rounded px-2 py-1 text-sm"
+                  value={d.profile_id || ""}
+                  onChange={(e) => assignProfile(d.device_id, e.target.value)}
+                >
+                  <option value="">— unassigned —</option>
+                  {profiles.map((p) => (
+                    <option key={p.profile_id} value={p.profile_id}>{p.display_name}</option>
+                  ))}
+                </select>
+              </td>
               <td className="p-3">
                 <span className={
                   d.status === "online" ? "text-green-700" :

@@ -56,6 +56,7 @@ nav:
   - For Parents:
       - Install on one PC: PARENT_GUIDES/install-on-one-pc.md
       - Install a server + child PC: PARENT_GUIDES/install-server-and-child.md
+      - Child profiles & watch phrases: PARENT_GUIDES/profiles-and-watch-phrases.md
       - When Windows says "Protected your PC": PARENT_GUIDES/when-windows-says-protected-your-pc.md
       - If you forget your password: PARENT_GUIDES/if-you-forget-your-password.md
       - Pause monitoring: PARENT_GUIDES/pause-monitoring-when-you-use-the-pc.md

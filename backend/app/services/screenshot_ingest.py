@@ -212,6 +212,13 @@ async def _ingest_inner(
     extracted_text = ""
     rules_only_severity = "none"
 
+    # Resolve the child profile: the agent may send one, but normally the
+    # parent assigns a profile to the DEVICE in the dashboard and we use that.
+    if not profile_id:
+        device = session.get(Device, device_id)
+        if device is not None and device.profile_id:
+            profile_id = device.profile_id
+
     # Parent-configured per-child watch phrases (child's name, address, etc.).
     # Loaded once and passed through whichever tier ends up running.
     custom_phrases: list[str] = []

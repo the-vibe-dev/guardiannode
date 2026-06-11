@@ -123,6 +123,16 @@ The full taxonomy is documented in [`docs/CLASSIFIER.md`](docs/CLASSIFIER.md) an
 
 ---
 
+## Child profiles & custom watch phrases
+
+Create a profile for each child in the dashboard (**Profiles**), then assign it to their device (**Devices → Child**). The profile sets the child's age group (which tunes detection sensitivity) and — importantly — lets you add **custom watch phrases**: your child's real name, home address, school name, phone number, or anything else you want flagged the instant it appears on screen.
+
+Watch phrases are fed to **both** the rules engine *and* the vision model, so they're caught whether they're typed in a chat, pasted in a document, or printed inside an image (e.g. a school ID in a photo). A match raises a **high-severity** `custom_watch` alert — this is how you catch a child sharing identifying details with a stranger.
+
+You assign the profile to the device in the dashboard, not on the child's PC — nothing to configure on the kid's machine. See the [profiles & watch phrases guide](docs/PARENT_GUIDES/profiles-and-watch-phrases.md).
+
+---
+
 ## Documentation
 
 **Browse everything at [the-vibe-dev.github.io/guardiannode](https://the-vibe-dev.github.io/guardiannode/)** — the same guides as below, searchable and readable on a phone.
@@ -130,6 +140,7 @@ The full taxonomy is documented in [`docs/CLASSIFIER.md`](docs/CLASSIFIER.md) an
 For parents:
 - [Install on one PC](docs/PARENT_GUIDES/install-on-one-pc.md)
 - [Install on a server + child PC](docs/PARENT_GUIDES/install-server-and-child.md)
+- [Child profiles & custom watch phrases](docs/PARENT_GUIDES/profiles-and-watch-phrases.md) — flag your child's name/address/school
 - [When Windows says "Protected your PC"](docs/PARENT_GUIDES/when-windows-says-protected-your-pc.md) — SmartScreen click-through
 - [If you forget your password](docs/PARENT_GUIDES/if-you-forget-your-password.md)
 - [Pause monitoring when you use the PC](docs/PARENT_GUIDES/pause-monitoring-when-you-use-the-pc.md)

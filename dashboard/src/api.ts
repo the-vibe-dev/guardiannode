@@ -43,6 +43,8 @@ export const api = {
     request<any>(`/devices/${device_id}/resume`, { method: "POST" }),
   revokeDevice: (device_id: string) =>
     request<any>(`/devices/${device_id}`, { method: "DELETE" }),
+  assignDeviceProfile: (device_id: string, profile_id: string | null) =>
+    request<any>(`/devices/${device_id}/profile`, { method: "PATCH", body: JSON.stringify({ profile_id }) }),
   alerts: (params: Record<string, string> = {}) => {
     const q = new URLSearchParams(params).toString();
     return request<any[]>(`/alerts${q ? `?${q}` : ""}`);

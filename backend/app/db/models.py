@@ -50,6 +50,10 @@ class Device(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Child profile this device belongs to. The parent assigns it in the
+    # dashboard; the backend tags frames from this device with it so custom
+    # watch phrases / age group apply without touching the child's PC.
+    profile_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class ChildProfile(Base):

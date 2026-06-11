@@ -93,6 +93,12 @@ def _patch_schema(engine) -> None:
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
                 log.info("schema patch: added alerts.%s", col)
+    if "devices" in tables:
+        cols = {c["name"] for c in insp.get_columns("devices")}
+        if "profile_id" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN profile_id VARCHAR(64)"))
+            log.info("schema patch: added devices.profile_id")
 
 
 @asynccontextmanager
