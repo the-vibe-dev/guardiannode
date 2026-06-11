@@ -204,24 +204,30 @@ begin
       VramGB := StrToIntDef(Trim(Copy(Output, Pos('vram_gb=', Output)+8, 99)), 0);
     end;
 
-    if VramGB >= 10 then begin
+    // NOTE: a single 12 GB GPU does NOT fit the "full" tier — qwen2.5vl alone
+    // wants ~11 GB once its compute graph is allocated, so adding a second
+    // (text) model thrashes VRAM and the vision model errors out. vision_only
+    // already does OCR + image + text classification, so we only pick "full"
+    // at 16 GB+ where both models genuinely fit hot.
+    if VramGB >= 16 then begin
       DetectedTier := 'full';
       DetectedTextModel := 'llama3.2:3b';
       DetectedVisionModel := 'qwen2.5vl:7b';
-      DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — vision LLM + small text LLM run together.';
+      DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — vision LLM plus a separate text LLM run together for a second opinion on extracted text.';
     end else if VramGB >= 6 then begin
       DetectedTier := 'vision_only';
+      DetectedTextModel := '';
       DetectedVisionModel := 'qwen2.5vl:7b';
-      DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — vision LLM only (handles OCR + classification).';
+      DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — the vision model detects visual risks (nudity, gore, weapons, etc.), reads the on-screen text, and classifies it (grooming, self-harm, scams) in one pass. Full coverage.';
     end else if RamGB >= 8 then begin
       DetectedTier := 'text_only';
       DetectedTextModel := 'llama3.2:1b';
       DetectedVisionModel := '';
-      DetectedReasoning := 'No GPU detected. Using Tesseract OCR + small text LLM on CPU. Visual-only risks (nudity/gore in images without text) will NOT be detected. Pair with a GPU server for full coverage.';
+      DetectedReasoning := 'No suitable GPU detected. Lower-power path: Tesseract OCR + a small text LLM on the CPU. This reads and classifies on-screen TEXT only — visual-only risks (nudity/gore/weapons in images without captions) will NOT be detected. For full coverage, pair this PC with a GPU-enabled GuardianNode server.';
     end else begin
       DetectedTier := 'text_only';
       DetectedTextModel := '';
-      DetectedReasoning := 'Limited RAM (' + IntToStr(RamGB) + ' GB). Rules engine only — no LLM nuance.';
+      DetectedReasoning := 'Limited RAM (' + IntToStr(RamGB) + ' GB). Rules engine only — no LLM nuance and no visual detection.';
     end;
   end;
 end;

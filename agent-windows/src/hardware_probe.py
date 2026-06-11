@@ -90,35 +90,51 @@ def _detect_gpu() -> tuple[str | None, str | None, int | None]:
     return None, None, None
 
 
-# Tier selection thresholds (VRAM in GB) — based on hot-loaded model sizes
-# with Q4_K_M quantization + KV cache headroom:
-#   full:        qwen2.5vl:7b (~7.5) + llama3.2:3b (~2.6) = ~10 GB → need 10+ GB
-#   vision_only: qwen2.5vl:7b (~7.5)                            → need 6+ GB
-#   text_only:   nothing on GPU; Tesseract + llama3.2:1b on CPU → need 8 GB RAM
+# Tier selection thresholds (VRAM in GB). Sizes are the REAL hot footprint:
+# qwen2.5vl:7b is ~7.5 GB of weights PLUS a ~3-4 GB compute-graph/KV workspace
+# at num_ctx=4096, so it needs the better part of a 12 GB card on its own.
+#
+#   vision_only: qwen2.5vl:7b — the standard GPU path. The vision model does
+#                OCR, image classification (nudity/gore/weapons/etc.), AND
+#                text-risk classification (grooming/self-harm/scam) in one call.
+#                Needs ~6 GB+; comfortable on 8-12 GB.
+#   full:        vision LLM + a separate text LLM kept hot together. This does
+#                NOT fit on a single 12 GB GPU (the vision model alone wants
+#                ~11 GB). Only auto-selected at 16 GB+; otherwise it thrashes
+#                VRAM and the vision model errors out. vision_only already
+#                covers text, so full is a marginal second-opinion upgrade.
+#   text_only:   no/low-VRAM GPU. Tesseract OCR + a small text LLM on CPU. This
+#                is the no-GPU fallback and CANNOT see visual-only risks
+#                (nudity/gore in images without on-screen text).
 def _select_tier(ram_gb: int, vram_gb: int | None) -> tuple[str, str, str | None, str | None, float]:
     v = vram_gb or 0
-    if v >= 10:
+    if v >= 16:
         return (
             "full",
-            f"GPU has {v} GB VRAM — vision LLM + small text LLM fit hot together; best detection.",
+            f"GPU has {v} GB VRAM — enough to keep the vision LLM and a separate text "
+            "LLM hot together for a second opinion on extracted text.",
             "llama3.2:3b",
             "qwen2.5vl:7b",
-            10.0,
+            13.0,
         )
     if v >= 6:
         return (
             "vision_only",
-            f"GPU has {v} GB VRAM — vision LLM fits alone; classifies image + extracts text in one call.",
+            f"GPU has {v} GB VRAM — runs the vision model, which detects visual risks "
+            "(nudity, gore, weapons, etc.), reads the on-screen text (OCR), and classifies "
+            "that text (grooming, self-harm, scams) in a single pass. Full coverage.",
             None,
             "qwen2.5vl:7b",
-            7.5,
+            11.0,
         )
     if ram_gb >= 8:
         return (
             "text_only",
-            "No GPU (or <6 GB VRAM). Text-based detection only: Tesseract OCR + small text LLM on CPU. "
-            "Visual-only risks (nudity/gore in images without captions) will NOT be detected. "
-            "Recommended: pair this PC with a GPU-enabled GuardianNode server for full coverage.",
+            "No GPU (or under 6 GB VRAM). Lower-power path: Tesseract OCR + a small text "
+            "LLM on the CPU, plus the rules engine. It reads and classifies on-screen TEXT "
+            "only — visual-only risks (nudity/gore/weapons in images without captions) will "
+            "NOT be detected. For full coverage, pair this PC with a GPU-enabled GuardianNode "
+            "server.",
             "llama3.2:1b",
             None,
             0.0,
@@ -126,8 +142,9 @@ def _select_tier(ram_gb: int, vram_gb: int | None) -> tuple[str, str, str | None
     # <8 GB RAM is below our supported floor
     return (
         "text_only",
-        f"Limited RAM ({ram_gb} GB). Running rules engine only — no LLM. "
-        "Detection will catch deterministic patterns but not nuanced grooming.",
+        f"Limited RAM ({ram_gb} GB). Running the rules engine only — no LLM. "
+        "Detection will catch deterministic patterns but not nuanced grooming or any "
+        "visual risks.",
         None,
         None,
         0.0,

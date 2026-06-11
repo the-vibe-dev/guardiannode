@@ -15,9 +15,36 @@ export default function ModelStatus() {
     finally { setBusy(false); }
   }
 
+  const info = status?.tier_info;
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Models</h1>
+
+      {status && info && (
+        <div className="bg-white shadow rounded p-4">
+          <h2 className="font-semibold mb-2">Detection mode</h2>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span className="rounded-full bg-brand-100 text-brand-700 text-xs font-semibold px-2 py-0.5">
+              {info.label || status.tier}
+            </span>
+            <Coverage on={info.detects_images} label="Images (nudity, gore, weapons)" />
+            <Coverage on={info.detects_text} label="On-screen text" />
+          </div>
+          <p className="text-sm text-gray-600">{info.summary}</p>
+          {info.detects_images === false && (
+            <p className="mt-2 text-sm text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+              This machine has no capable GPU, so visual-only risks aren't detected.
+              Pair it with a GPU-enabled GuardianNode server for full coverage.
+            </p>
+          )}
+          <div className="mt-2 text-xs text-gray-500">
+            Vision model: <code>{status.vision_model}</code>
+            {status.tier !== "text_only" ? null : <> · text model: <code>{status.text_model}</code></>}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white shadow rounded p-4">
         <h2 className="font-semibold mb-2">Ollama status</h2>
         {status ? (
@@ -43,5 +70,14 @@ export default function ModelStatus() {
         )}
       </div>
     </div>
+  );
+}
+
+function Coverage({ on, label }: { on: boolean; label: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs ${on ? "text-green-700" : "text-gray-400"}`}>
+      <span>{on ? "✓" : "✕"}</span>
+      {label}
+    </span>
   );
 }

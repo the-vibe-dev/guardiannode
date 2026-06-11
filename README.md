@@ -50,9 +50,11 @@ The installer probes your hardware and picks the strongest classifier tier it ca
 
 | Tier | Hardware needed | What runs | What it catches |
 |---|---|---|---|
-| **`full`** | NVIDIA GPU, 10+ GB VRAM (or two GPUs/endpoints) | Vision LLM + text LLM in parallel + rules engine | Everything below, with the most nuance on ambiguous chats |
-| **`vision_only`** (default) | NVIDIA GPU, 6–12 GB VRAM | Vision LLM (OCR + image understanding) + rules engine | Explicit imagery, grooming/self-harm/scam text, custom watch phrases |
-| **`text_only`** | No GPU, 8+ GB RAM | Tesseract OCR + small CPU LLM + rules engine | Text-based risks only — **visual-only risks (nudity/gore in images) are NOT detected** |
+| **`vision_only`** (recommended) | NVIDIA GPU, 6–12 GB VRAM | Vision model (image classification + OCR + text classification) + rules engine | **Full coverage** — visual risks (nudity, gore, weapons), plus grooming/self-harm/scam text and custom watch phrases, all in one pass |
+| **`text_only`** | No GPU / low VRAM, 8+ GB RAM | Tesseract OCR + small CPU text LLM + rules engine | On-screen **text only** — **visual-only risks (nudity/gore/weapons in images) are NOT detected**. Pair with a GPU server for full coverage |
+| **`full`** | NVIDIA GPU, **16+ GB VRAM** (or two GPUs/endpoints) | Vision model + a separate text model kept hot together | Same coverage as `vision_only` plus a second opinion on extracted text. **Does not fit a single 12 GB GPU** — `vision_only` is the right choice there |
+
+The vision model does everything a GPU machine needs in a single call, so **`vision_only` is the default and the right pick for almost everyone with a GPU.** `text_only` is the lower-power path for machines without a capable GPU and trades away visual detection. `full` is only worthwhile on a 16 GB+ card.
 
 All tiers: Windows 10/11 64-bit on the child PC; the server side runs on Windows or Linux (Ubuntu/Debian/Fedora/Arch/openSUSE tested). Disk: ~2 GB for the app + 3–6 GB per AI model. A low-power family PC pairs well with **Shape B** — put the GPU in the server, not the kid's machine.
 
