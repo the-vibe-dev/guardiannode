@@ -10,6 +10,7 @@ from ulid import ULID
 
 from app.api.deps import current_user, get_db_dep
 from app.db.models import ChildProfile, User
+from app.services import profile_policy
 from app.services.audit import log_action
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
@@ -22,6 +23,8 @@ class ProfileDTO(BaseModel):
     created_at: datetime
     notes: str | None
     custom_watch_phrases: list[str] = []
+    # Normalized (age-default-filled) policy so the UI always has a full object.
+    alert_policy: dict = {}
 
 
 def _to_dto(p: ChildProfile) -> ProfileDTO:
@@ -32,6 +35,7 @@ def _to_dto(p: ChildProfile) -> ProfileDTO:
         created_at=p.created_at,
         notes=p.notes,
         custom_watch_phrases=list(p.custom_watch_phrases or []),
+        alert_policy=profile_policy.normalize(p.alert_policy or {}, p.age_group),
     )
 
 
@@ -83,6 +87,8 @@ def create_profile(
         age_group=req.age_group,
         notes=req.notes,
         custom_watch_phrases=_clean_phrases(req.custom_watch_phrases),
+        # Seed with the age-appropriate default policy; parent tunes it after.
+        alert_policy=profile_policy.default_policy_for_age(req.age_group),
     )
     db.add(p)
     log_action(db, actor=str(user.id), action="profile.create", target=p.profile_id)
@@ -95,6 +101,9 @@ class UpdateProfileRequest(BaseModel):
     age_group: str | None = Field(default=None, pattern="^(under_10|10_13|14_17)$")
     notes: str | None = Field(default=None, max_length=2048)
     custom_watch_phrases: list[str] | None = Field(default=None)
+    alert_policy: dict | None = None
+    # If true, replace the policy with the default preset for the (new) age group.
+    reset_policy_to_age_default: bool = False
 
 
 @router.patch("/{profile_id}", response_model=ProfileDTO)
@@ -115,9 +124,34 @@ def update_profile(
         p.notes = req.notes
     if req.custom_watch_phrases is not None:
         p.custom_watch_phrases = _clean_phrases(req.custom_watch_phrases)
+    if req.reset_policy_to_age_default:
+        p.alert_policy = profile_policy.default_policy_for_age(p.age_group)
+    elif req.alert_policy is not None:
+        # Store the normalized policy so it's always complete/valid.
+        p.alert_policy = profile_policy.normalize(req.alert_policy, p.age_group)
     log_action(db, actor=str(user.id), action="profile.update", target=profile_id)
     db.commit()
     return _to_dto(p)
+
+
+class PolicyMeta(BaseModel):
+    tunable_categories: list[dict]
+    protected_categories: list[str]
+    modes: list[str]
+    severities: list[str]
+    capture_levels: list[str]
+
+
+@router.get("/policy/meta", response_model=PolicyMeta)
+def policy_meta(_: User = Depends(current_user)):
+    """Category labels + option lists so the dashboard can render the policy UI."""
+    return PolicyMeta(
+        tunable_categories=[{"key": k, "label": lbl} for k, lbl in profile_policy.TUNABLE_CATEGORIES],
+        protected_categories=sorted(profile_policy.PROTECTED_CATEGORIES),
+        modes=["alert", "monitor", "allow"],
+        severities=["low", "medium", "high", "critical"],
+        capture_levels=list(profile_policy.CAPTURE_LEVELS.keys()),
+    )
 
 
 @router.delete("/{profile_id}")

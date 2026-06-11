@@ -81,6 +81,12 @@ def _patch_schema(engine) -> None:
                     "ALTER TABLE child_profiles ADD COLUMN custom_watch_phrases TEXT DEFAULT '[]'"
                 ))
             log.info("schema patch: added child_profiles.custom_watch_phrases")
+        if "alert_policy" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE child_profiles ADD COLUMN alert_policy TEXT DEFAULT '{}'"
+                ))
+            log.info("schema patch: added child_profiles.alert_policy")
     if "alerts" in tables:
         cols = {c["name"] for c in insp.get_columns("alerts")}
         patches = {

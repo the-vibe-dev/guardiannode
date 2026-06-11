@@ -51,6 +51,20 @@ def _ulid() -> str:
     return str(ULID())
 
 
+def _apply_policy(session, profile_id, severity, categories):
+    """Resolve the child's privacy/threshold policy into an alert decision."""
+    from app.services import profile_policy
+    if severity == "none":
+        return profile_policy.Decision(False, False, "no_risk")
+    prof = session.get(ChildProfile, profile_id) if profile_id else None
+    if prof is not None:
+        pol = profile_policy.normalize(prof.alert_policy or {}, prof.age_group)
+    else:
+        # Unassigned device: balanced default (alert medium+, notify high+).
+        pol = profile_policy.default_policy_for_age("10_13")
+    return profile_policy.decide(pol, severity, categories)
+
+
 def _should_store(severity: str) -> bool:
     return _SEVERITY_ORDER.get(severity, 0) >= _SEVERITY_ORDER[_STORE_THRESHOLD]
 
@@ -407,9 +421,11 @@ async def _ingest_inner(
     )
     session.add(rr)
 
-    # ----- Step 6: Alert if severity warrants (repeats fold into one alert) -----
+    # ----- Step 6: Alert per the child's privacy/threshold policy -----
     alert_id: str | None = None
-    if severity in ("medium", "high", "critical"):
+    cats = merged.get("categories", [])
+    decision = _apply_policy(session, profile_id, severity, cats)
+    if decision.create_alert:
         from app.services.alert_dedup import upsert_alert
         alert_id, _created = upsert_alert(
             session,
@@ -417,9 +433,11 @@ async def _ingest_inner(
             device_id=device_id,
             profile_id=profile_id,
             severity=severity,
-            categories=merged.get("categories", []),
+            categories=cats,
             source="screenshot",
             source_ip=source_ip,
+            notify=decision.notify,
+            risk_summary=merged.get("summary", ""),
         )
 
     return {

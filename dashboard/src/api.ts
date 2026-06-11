@@ -74,12 +74,15 @@ export const api = {
       age_group?: string;
       notes?: string;
       custom_watch_phrases?: string[];
+      alert_policy?: any;
+      reset_policy_to_age_default?: boolean;
     },
   ) =>
     request<any>(`/profiles/${profile_id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
+  policyMeta: () => request<any>("/profiles/policy/meta"),
   notificationSettings: () => request<any>("/settings/notifications"),
   updateNotificationSettings: (body: any) =>
     request<any>("/settings/notifications", { method: "PATCH", body: JSON.stringify(body) }),

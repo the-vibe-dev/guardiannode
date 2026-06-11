@@ -191,6 +191,24 @@ def pair_complete(
     return PairCompleteResponse(device_id=device_id, device_token=token)
 
 
+@router.get("/capture-config")
+def capture_config(
+    db: Session = Depends(get_db_dep),
+    device: Device = Depends(current_device),
+):
+    """Capture knobs (cadence, change sensitivity, scope) derived from the
+    child's policy. The agent polls this so a parent can tighten or loosen
+    monitoring from the dashboard without touching the kid's PC."""
+    from app.db.models import ChildProfile
+    from app.services import profile_policy
+    prof = db.get(ChildProfile, device.profile_id) if device.profile_id else None
+    policy = (prof.alert_policy or {}) if prof is not None else {}
+    age = prof.age_group if prof is not None else "10_13"
+    cfg = profile_policy.capture_settings(policy, age)
+    cfg["paused"] = device.paused_until is not None
+    return cfg
+
+
 class HeartbeatRequest(BaseModel):
     queued_frames: int = Field(default=0, ge=0, le=10000)
     agent_version: str | None = None

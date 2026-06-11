@@ -9,10 +9,12 @@ type Profile = {
   created_at: string;
   notes: string | null;
   custom_watch_phrases: string[];
+  alert_policy: any;
 };
 
 export default function Profiles() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [meta, setMeta] = useState<any>(null);
   const [name, setName] = useState("");
   const [age, setAge] = useState("10_13");
   const [initialPhrases, setInitialPhrases] = useState("");
@@ -23,6 +25,7 @@ export default function Profiles() {
   }
   useEffect(() => {
     reload();
+    api.policyMeta().then(setMeta).catch(() => {});
   }, []);
 
   async function create() {
@@ -102,14 +105,14 @@ export default function Profiles() {
           </div>
         )}
         {profiles.map((p) => (
-          <ProfileCard key={p.profile_id} profile={p} onSaved={reload} />
+          <ProfileCard key={p.profile_id} profile={p} meta={meta} onSaved={reload} />
         ))}
       </div>
     </div>
   );
 }
 
-function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => void }) {
+function ProfileCard({ profile, meta, onSaved }: { profile: Profile; meta: any; onSaved: () => void }) {
   const [phrases, setPhrases] = useState<string[]>(profile.custom_watch_phrases || []);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -223,6 +226,129 @@ function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => vo
         {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
         {err && <div className="text-xs text-red-700 mt-1">{err}</div>}
       </div>
+
+      {meta && <PolicyEditor profile={profile} meta={meta} onSaved={onSaved} />}
+    </div>
+  );
+}
+
+const SEV_LABEL: Record<string, string> = {
+  low: "Low+", medium: "Medium+", high: "High+", critical: "Critical only",
+};
+const MODE_LABEL: Record<string, string> = {
+  alert: "Alert me", monitor: "Monitor quietly", allow: "Allow (ignore)",
+};
+const CAPTURE_LABEL: Record<string, string> = {
+  tight: "Tight (catch everything)", balanced: "Balanced", leeway: "Leeway (more privacy)",
+};
+
+function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [policy, setPolicy] = useState<any>(() => JSON.parse(JSON.stringify(profile.alert_policy || {})));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => { setPolicy(JSON.parse(JSON.stringify(profile.alert_policy || {}))); }, [profile.profile_id]);
+
+  function setCat(key: string, field: string, value: any) {
+    const cats = { ...(policy.categories || {}) };
+    cats[key] = { ...(cats[key] || { mode: "alert" }), [field]: value };
+    setPolicy({ ...policy, categories: cats });
+  }
+
+  async function save(reset = false) {
+    setBusy(true); setMsg(null);
+    try {
+      await api.updateProfile(profile.profile_id,
+        reset ? { reset_policy_to_age_default: true } : { alert_policy: policy });
+      setMsg(reset ? "Reset to age defaults" : "Privacy settings saved");
+      setTimeout(() => setMsg(null), 2500);
+      onSaved();
+    } finally { setBusy(false); }
+  }
+
+  const cats = policy.categories || {};
+  return (
+    <div className="mt-4 border-t pt-3">
+      <button onClick={() => setOpen(!open)} className="text-sm font-medium text-brand-700">
+        {open ? "▾" : "▸"} Privacy & alert settings
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          <p className="text-xs text-gray-500">
+            Give your child privacy while still catching what matters. Self-harm,
+            grooming, threats, and your watch phrases <strong>always alert</strong> —
+            you can't turn those off.
+          </p>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="text-xs text-gray-500">Only alert me at or above</span>
+              <select className="mt-1 w-full border rounded px-2 py-1"
+                value={policy.min_severity || "medium"}
+                onChange={(e) => setPolicy({ ...policy, min_severity: e.target.value })}>
+                {(meta.severities || []).map((s: string) => <option key={s} value={s}>{SEV_LABEL[s] || s}</option>)}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="text-xs text-gray-500">How much to capture</span>
+              <select className="mt-1 w-full border rounded px-2 py-1"
+                value={(policy.capture && policy.capture.level) || "balanced"}
+                onChange={(e) => setPolicy({ ...policy, capture: { ...(policy.capture || {}), level: e.target.value } })}>
+                {(meta.capture_levels || []).map((l: string) => <option key={l} value={l}>{CAPTURE_LABEL[l] || l}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-gray-400 text-left">
+                <tr><th className="py-1">Behavior to watch</th><th className="py-1">What to do</th><th className="py-1">Only when</th></tr>
+              </thead>
+              <tbody>
+                {(meta.tunable_categories || []).map((c: any) => {
+                  const cur = cats[c.key] || { mode: "alert" };
+                  return (
+                    <tr key={c.key} className="border-t">
+                      <td className="py-1.5 pr-2">{c.label}</td>
+                      <td className="py-1.5 pr-2">
+                        <select className="border rounded px-1.5 py-0.5"
+                          value={cur.mode || "alert"} onChange={(e) => setCat(c.key, "mode", e.target.value)}>
+                          {(meta.modes || []).map((m: string) => <option key={m} value={m}>{MODE_LABEL[m] || m}</option>)}
+                        </select>
+                      </td>
+                      <td className="py-1.5">
+                        <select className="border rounded px-1.5 py-0.5 disabled:opacity-40"
+                          disabled={cur.mode === "allow"}
+                          value={cur.min_severity || policy.min_severity || "medium"}
+                          onChange={(e) => setCat(c.key, "min_severity", e.target.value)}>
+                          {(meta.severities || []).map((s: string) => <option key={s} value={s}>{SEV_LABEL[s] || s}</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="text-xs text-gray-500">
+            Always alerts (locked): {(meta.protected_categories || []).map((c: string) => c.replace(/_/g, " ")).join(", ")}
+          </div>
+
+          <div className="flex gap-2 items-center">
+            <button onClick={() => save(false)} disabled={busy}
+              className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-1.5 rounded text-sm">
+              {busy ? "Saving…" : "Save privacy settings"}
+            </button>
+            <button onClick={() => save(true)} disabled={busy}
+              className="text-sm text-gray-500 underline">
+              Reset to age defaults
+            </button>
+            {msg && <span className="text-xs text-green-700">{msg}</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

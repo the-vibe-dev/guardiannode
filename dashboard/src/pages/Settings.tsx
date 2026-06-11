@@ -3,6 +3,40 @@ import { api } from "../api";
 
 const retentionKeys = ["critical", "high", "medium", "low", "none", "screenshots_flagged", "audit_logs"];
 
+// One-click SMTP presets so a parent doesn't have to look up server settings.
+const MAIL_PROVIDERS: Record<string, { host?: string; port?: number; tls_mode?: string; note?: string }> = {
+  gmail: {
+    host: "smtp.gmail.com", port: 587, tls_mode: "starttls",
+    note: "Gmail blocks your normal password. Turn on 2-Step Verification, then create an App Password (Google Account → Security → App passwords) and paste that as the password.",
+  },
+  outlook: {
+    host: "smtp-mail.outlook.com", port: 587, tls_mode: "starttls",
+    note: "Use your full Outlook/Hotmail address as the username. If you have 2-step verification on, create an app password.",
+  },
+  yahoo: {
+    host: "smtp.mail.yahoo.com", port: 465, tls_mode: "ssl",
+    note: "Yahoo requires an App Password (Account Security → Generate app password).",
+  },
+  icloud: {
+    host: "smtp.mail.me.com", port: 587, tls_mode: "starttls",
+    note: "iCloud Mail requires an app-specific password (appleid.apple.com → Sign-In and Security → App-Specific Passwords).",
+  },
+  custom: { note: "Enter your provider's SMTP host, port, and TLS mode below." },
+};
+
+function applyMailProvider(provider: string, current: any, set: (n: any) => void) {
+  const p = MAIL_PROVIDERS[provider];
+  if (!p) { set({ ...current, _provider: provider }); return; }
+  set({
+    ...current,
+    _provider: provider,
+    enabled: true,
+    ...(p.host !== undefined ? { host: p.host } : {}),
+    ...(p.port !== undefined ? { port: p.port } : {}),
+    ...(p.tls_mode !== undefined ? { tls_mode: p.tls_mode } : {}),
+  });
+}
+
 export default function Settings() {
   const [notifications, setNotifications] = useState<any>(null);
   const [retention, setRetention] = useState<any>(null);
@@ -56,7 +90,27 @@ export default function Settings() {
       {msg && <div className="bg-green-50 border border-green-200 text-green-700 rounded p-3 text-sm">{msg}</div>}
 
       <section className="bg-white shadow rounded p-4 space-y-3">
-        <h2 className="font-semibold">Notifications</h2>
+        <h2 className="font-semibold">Email alerts</h2>
+        <div className="rounded bg-brand-50 border border-brand-100 p-3 text-sm">
+          <label className="block">
+            <span className="text-xs text-gray-600 font-medium">Quick setup — pick your email provider</span>
+            <select
+              className="mt-1 w-full border rounded px-2 py-1"
+              value={notifications._provider || ""}
+              onChange={(e) => applyMailProvider(e.target.value, notifications, setNotifications)}
+            >
+              <option value="">Choose a provider…</option>
+              <option value="gmail">Gmail</option>
+              <option value="outlook">Outlook / Hotmail</option>
+              <option value="yahoo">Yahoo Mail</option>
+              <option value="icloud">iCloud Mail</option>
+              <option value="custom">Other / custom SMTP</option>
+            </select>
+          </label>
+          {MAIL_PROVIDERS[notifications._provider]?.note && (
+            <p className="mt-2 text-xs text-gray-600">{MAIL_PROVIDERS[notifications._provider].note}</p>
+          )}
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -97,7 +151,7 @@ export default function Settings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => run("save-notifications", () => api.updateNotificationSettings(notifications), "Notification settings saved.")}
+            onClick={() => run("save-notifications", () => { const { _provider, ...n } = notifications; return api.updateNotificationSettings(n); }, "Notification settings saved.")}
             disabled={busy !== null}
             className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
           >

@@ -141,6 +141,8 @@ For parents:
 - [Install on one PC](docs/PARENT_GUIDES/install-on-one-pc.md)
 - [Install on a server + child PC](docs/PARENT_GUIDES/install-server-and-child.md)
 - [Child profiles & custom watch phrases](docs/PARENT_GUIDES/profiles-and-watch-phrases.md) — flag your child's name/address/school
+- [Privacy & alert settings](docs/PARENT_GUIDES/privacy-and-alert-settings.md) — give a teen room without going blind; per-category alert/monitor/allow
+- [Get alerts by email](docs/PARENT_GUIDES/email-alerts-setup.md) — one-dropdown SMTP setup (Gmail/Outlook/Yahoo/iCloud)
 - [When Windows says "Protected your PC"](docs/PARENT_GUIDES/when-windows-says-protected-your-pc.md) — SmartScreen click-through
 - [If you forget your password](docs/PARENT_GUIDES/if-you-forget-your-password.md)
 - [Pause monitoring when you use the PC](docs/PARENT_GUIDES/pause-monitoring-when-you-use-the-pc.md)

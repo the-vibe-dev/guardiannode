@@ -119,17 +119,30 @@ async def ingest_event(
 
     severity = cls_result["risk_level"]
     alert_id: str | None = None
-    if severity in ("medium", "high", "critical"):
+    pol_profile = payload.get("profile_id")
+    if not pol_profile:
+        dev = session.get(Device, device_id)
+        pol_profile = dev.profile_id if dev is not None else None
+    from app.services import profile_policy
+    if pol_profile:
+        prof = session.get(ChildProfile, pol_profile)
+        pol = profile_policy.normalize(prof.alert_policy or {}, prof.age_group) if prof else profile_policy.default_policy_for_age("10_13")
+    else:
+        pol = profile_policy.default_policy_for_age("10_13")
+    decision = profile_policy.decide(pol, severity, cls_result["categories"]) if severity != "none" else profile_policy.Decision(False, False, "no_risk")
+    if decision.create_alert:
         from app.services.alert_dedup import upsert_alert
         alert_id, _created = upsert_alert(
             session,
             risk_id=risk_id,
             device_id=device_id,
-            profile_id=payload.get("profile_id"),
+            profile_id=pol_profile,
             severity=severity,
             categories=cls_result["categories"],
             source="text_event",
             source_ip=source_ip,
+            notify=decision.notify,
+            risk_summary=cls_result.get("summary", ""),
         )
 
     return {

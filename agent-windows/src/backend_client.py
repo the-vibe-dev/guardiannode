@@ -85,3 +85,17 @@ class BackendClient:
                 return r.status_code == 200
         except Exception:
             return False
+
+    async def get_capture_config(self) -> dict | None:
+        """Fetch capture settings the parent set via the child's policy."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                r = await c.get(
+                    f"{self.base_url}/api/devices/capture-config",
+                    headers=self._headers(),
+                )
+                if r.status_code == 200:
+                    return r.json()
+        except Exception:
+            pass
+        return None

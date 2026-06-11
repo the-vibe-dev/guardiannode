@@ -67,6 +67,9 @@ class ChildProfile(Base):
     # Parent-configured phrases to flag (child's real name, address, school,
     # nicknames, anything the parent wants matched in OCR'd text). Severity high.
     custom_watch_phrases: Mapped[list] = mapped_column(JSON, default=list)
+    # Privacy / alert-threshold / capture policy (see services/profile_policy.py).
+    # Empty = age-group defaults are used.
+    alert_policy: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Policy(Base):

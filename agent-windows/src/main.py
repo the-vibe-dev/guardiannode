@@ -49,13 +49,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
     #  - 0..1  : near-identical (cursor blink, idle screen): skip
     #  - 2..3  : a single-character / single-line edit in a text app: send
     #  - 4+    : clear scene change: send
-    PHASH_THRESHOLD = int(getattr(cfg, "phash_threshold", 0) or 2)
     FULL_DUP_THRESHOLD = int(getattr(cfg, "full_screen_duplicate_threshold", 0) or 3)
-    # Whole-screen change is an independent trigger: a background window
-    # loading new content (e.g. a browser behind Notepad) must send a frame
-    # even when the foreground window hash is unchanged. full_phash is a
-    # 256-bit dHash, so small noise (clock tick) stays below this.
-    FULL_CHANGE_THRESHOLD = int(getattr(cfg, "full_screen_change_threshold", 0) or 10)
 
     last_phash: int | None = None
     last_full_phash: int | None = None
@@ -65,6 +59,11 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
 
     while True:
         try:
+            # Re-read each iteration so a parent's policy change (pushed via the
+            # capture-config poller) takes effect without restarting the agent.
+            PHASH_THRESHOLD = int(getattr(cfg, "phash_threshold", 0) or 2)
+            FULL_CHANGE_THRESHOLD = int(getattr(cfg, "full_screen_change_threshold", 0) or 10)
+
             if _is_locally_paused():
                 log.debug("monitoring paused locally; skipping capture")
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
@@ -236,6 +235,33 @@ async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue)
         await asyncio.sleep(30)
 
 
+async def capture_config_loop(client: BackendClient, cfg: AgentConfig) -> None:
+    """Poll the backend for the parent's capture policy and apply it live.
+
+    Lets a parent tighten or loosen monitoring (cadence, change sensitivity)
+    from the dashboard without touching the child's PC. Falls back silently to
+    the local agent.yaml settings if the endpoint isn't reachable."""
+    while True:
+        try:
+            cc = await client.get_capture_config()
+            if cc:
+                if isinstance(cc.get("cadence_seconds"), (int, float)):
+                    cfg.ocr_cadence_seconds = max(2, int(cc["cadence_seconds"]))
+                if isinstance(cc.get("phash_threshold"), (int, float)):
+                    cfg.phash_threshold = int(cc["phash_threshold"])
+                if isinstance(cc.get("full_screen_change_threshold"), (int, float)):
+                    cfg.full_screen_change_threshold = int(cc["full_screen_change_threshold"])
+                if isinstance(cc.get("full_screen_capture_enabled"), bool):
+                    cfg.full_screen_capture_enabled = cc["full_screen_capture_enabled"]
+                log.info(
+                    "capture policy: level=%s cadence=%ds phash=%d",
+                    cc.get("level"), cfg.ocr_cadence_seconds, cfg.phash_threshold,
+                )
+        except Exception as e:
+            log.debug("capture-config poll error: %s", e)
+        await asyncio.sleep(120)
+
+
 async def main_async(cfg: AgentConfig) -> None:
     # Complete pairing left pending by the installer (or a previous failed run).
     try:
@@ -261,6 +287,7 @@ async def main_async(cfg: AgentConfig) -> None:
         capture_loop(cfg, screenshot_queue),
         screenshot_sender_loop(client, screenshot_queue),
         heartbeat_loop(client, screenshot_queue),
+        capture_config_loop(client, cfg),
     )
 
 
