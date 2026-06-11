@@ -4,13 +4,23 @@ Real-world honest list of GuardianNode's limits. Read this so you have realistic
 
 ## A determined kid with admin rights
 
-GuardianNode v1 protects against **casual** circumvention — a kid who tries the obvious things (uninstall via Programs & Features, kill in Task Manager). It does NOT defeat a determined teenager who:
+GuardianNode protects against **casual** circumvention. If a kid ends the agent
+or the tray from Task Manager, two cooperating background services (one named
+plainly, one named generically so it isn't obvious) restart it within seconds,
+and they restart each other if one is stopped. And if the whole thing is killed
+at once — or the PC is simply shut down or unplugged — the server notices the
+device stopped reporting and **sends you a "monitoring stopped" alert**, so a
+silent gap doesn't look like "all clear".
+
+What that still does NOT defeat is a determined teenager who:
 
 - Has Windows administrator rights on their PC, AND
 - Boots into Safe Mode (where most third-party services are disabled), AND
 - Uses the Safe Mode shell to delete the agent files
 
-If your kid is in that category, you have two options:
+An administrator can ultimately stop any software on their own machine — no
+parental tool can change that. So if your kid is in that category, you have two
+options:
 1. **Make their Windows account a Standard user** (not Administrator). GuardianNode still works on a standard account; the password-gated uninstaller can't be bypassed without your admin password.
 2. **Wait for the v2 kernel-driver tier** which protects in Safe Mode. (No ETA yet — gated on code-signing cert.)
 

@@ -7,6 +7,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Tamper resistance + tray dialog (field-test round 2)
+- **Tray Exit/Pause dialog fixed**: the password box ignored typing and the
+  OK/Cancel buttons didn't respond because the Tk dialog was created inside
+  pystray's callback thread and never got window focus. Dialogs now render in a
+  separate process (`GuardianNodeTray.exe --prompt …`) with a clean main thread.
+- **Two cooperating watchdog services** for tamper resistance: the named
+  `GuardianNodeWatchdog` and a second, generically-named `EndpointHealthAgent`,
+  each configured with `--peer-service` so they restart each other. Both also
+  re-run the agent and tray scheduled tasks if those processes are ended from
+  Task Manager. The tray now runs as an all-users logon task (not a Startup
+  shortcut) so it, too, can be relaunched.
+- **Offline / monitoring-stopped alerts**: the backend raises a high-severity
+  alert and notification when a device stops sending heartbeats for
+  `device_offline_after_seconds` (default 180s), and clears it when the device
+  reconnects. This is the safety net for the one thing a local-admin child can
+  always do — kill everything at once or power off — which no amount of
+  client-side hardening can prevent. Recommend running the child as a standard
+  (non-admin) Windows user; see *What this cannot stop*.
+- **Installer upgrades no longer roll back**: `PrepareToInstall` stops the
+  services, scheduled tasks, and running processes before the file-copy stage,
+  so in-place upgrades don't fail with "file in use".
+
 ### Fixed (post-lenovohouse field test)
 - **Duplicate agent/tray instances**: the agent ran as a session-0 service *and*
   a startup shortcut *and* an install-time launch. The agent is now launched
