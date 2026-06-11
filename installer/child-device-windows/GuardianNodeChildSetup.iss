@@ -231,6 +231,32 @@ begin
   Result := (ModePage.SelectedValueIndex = 0);
 end;
 
+procedure RunHidden(const ExeName, Params: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant(ExeName), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  // Free locked binaries before the file-copy stage so upgrades don't roll back
+  // with "file in use". Stop BOTH watchdogs first (they revive each other), then
+  // the legacy agent service, the scheduled tasks, and finally the processes.
+  RunHidden('{sys}\sc.exe', 'stop EndpointHealthAgent');
+  RunHidden('{sys}\sc.exe', 'delete EndpointHealthAgent');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeAgent');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeAgent');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeAgent');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeTray');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeWatchdog.exe /F');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeAgent.exe /F');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeTray.exe /F');
+  Result := '';
+end;
+
 function GetTier(Param: String): String;
 begin
   Result := DetectedTier;
