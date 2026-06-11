@@ -111,7 +111,17 @@ export default function RiskFeed() {
             <tr key={a.alert_id} className="border-t hover:bg-gray-50 align-top">
               <td className="p-3"><SeverityBadge severity={a.severity} /></td>
               <td className="p-3 text-sm max-w-md">
-                <div className="line-clamp-2">{a.summary || <em className="text-gray-400">(no summary)</em>}</div>
+                <div className="line-clamp-2">
+                  {(a.repeat_count || 1) > 1 && (
+                    <span
+                      className="mr-1.5 inline-block rounded-full bg-orange-100 text-orange-800 text-xs font-semibold px-1.5 py-0.5 align-middle"
+                      title={`Seen ${a.repeat_count} times — identical findings are folded into this alert`}
+                    >
+                      ×{a.repeat_count}
+                    </span>
+                  )}
+                  {a.summary || <em className="text-gray-400">(no summary)</em>}
+                </div>
                 {(a.categories || []).length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {a.categories.slice(0, 3).map((c: string) => (
@@ -130,7 +140,12 @@ export default function RiskFeed() {
                 </div>
               </td>
               <td className="p-3 text-sm whitespace-nowrap">{a.status.replace("_", " ")}</td>
-              <td className="p-3 text-sm text-gray-500 whitespace-nowrap">{formatDateTime(a.created_at)}</td>
+              <td className="p-3 text-sm text-gray-500 whitespace-nowrap">
+                {formatDateTime(a.created_at)}
+                {(a.repeat_count || 1) > 1 && a.last_seen_at && (
+                  <div className="text-xs text-gray-400">last {formatDateTime(a.last_seen_at)}</div>
+                )}
+              </td>
               <td className="p-3 text-right">
                 <Link to={`/alerts/${a.alert_id}`} className="text-brand-700 underline text-sm">Review</Link>
               </td>

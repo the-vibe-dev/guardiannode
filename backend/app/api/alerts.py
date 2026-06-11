@@ -31,6 +31,9 @@ class AlertDTO(BaseModel):
     categories: list[str] = []
     summary: str | None = None
     app_name: str | None = None
+    # Repeat aggregation: how many identical findings this alert absorbed.
+    repeat_count: int = 1
+    last_seen_at: datetime | None = None
 
 
 def _to_dto(a: Alert, risk: RiskResult | None = None, event: Event | None = None) -> AlertDTO:
@@ -49,6 +52,8 @@ def _to_dto(a: Alert, risk: RiskResult | None = None, event: Event | None = None
         categories=list(risk.categories or []) if risk else [],
         summary=risk.summary if risk else None,
         app_name=event.app_name if event else None,
+        repeat_count=a.repeat_count or 1,
+        last_seen_at=a.last_seen_at,
     )
 
 

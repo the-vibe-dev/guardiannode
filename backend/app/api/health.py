@@ -50,6 +50,7 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
         "version": __version__,
         "tier": settings.classifier_tier,
         "queue": snap,
+        "agent_queues": pipeline_metrics.agent_queues(),
         "ollama": {
             "url": vision_status.base_url,
             "available": vision_status.available and text_status.available,

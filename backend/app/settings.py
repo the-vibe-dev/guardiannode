@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     tesseract_enabled: bool = True
     retention_cleanup_enabled: bool = True
     retention_cleanup_interval_seconds: int = 3600
+    # Identical open findings (same device/profile/severity/categories) within
+    # this window fold into one alert with a repeat count instead of flooding
+    # the Risk Feed. 0 disables aggregation.
+    alert_dedup_window_seconds: int = 1800
 
     @property
     def keys_dir(self) -> Path:

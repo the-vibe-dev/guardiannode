@@ -105,7 +105,6 @@ if [ ! -f "$WINSW_EXE" ]; then
   curl -fL --retry 3 -o "$WINSW_EXE" "$WINSW_URL"
 fi
 cp "$WINSW_EXE" "$STAGE/winsw/WinSW.exe"
-cp "$BUILD/winsw_templates/Agent.xml"    "$STAGE/winsw/Agent.xml"
 cp "$BUILD/winsw_templates/Watchdog.xml" "$STAGE/winsw/Watchdog.xml"
 cp "$BUILD/winsw_templates/Backend.xml"  "$STAGE/winsw/Backend.xml"
 

@@ -51,6 +51,11 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
     #  - 4+    : clear scene change: send
     PHASH_THRESHOLD = int(getattr(cfg, "phash_threshold", 0) or 2)
     FULL_DUP_THRESHOLD = int(getattr(cfg, "full_screen_duplicate_threshold", 0) or 3)
+    # Whole-screen change is an independent trigger: a background window
+    # loading new content (e.g. a browser behind Notepad) must send a frame
+    # even when the foreground window hash is unchanged. full_phash is a
+    # 256-bit dHash, so small noise (clock tick) stays below this.
+    FULL_CHANGE_THRESHOLD = int(getattr(cfg, "full_screen_change_threshold", 0) or 10)
 
     last_phash: int | None = None
     last_full_phash: int | None = None
@@ -91,18 +96,19 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             # First frame always sends (dist=64 sentinel forces it).
             dist = 64 if last_phash is None else hamming(last_phash, shot.phash)
             full_dist = 64
-            if shot.full_phash is not None and last_full_phash is not None:
+            full_known = shot.full_phash is not None and last_full_phash is not None
+            if full_known:
                 full_dist = hamming(last_full_phash, shot.full_phash)
             send = dist >= PHASH_THRESHOLD
 
-            if (
-                send
-                and cfg.full_screen_capture_enabled
-                and shot.full_phash is not None
-                and last_full_phash is not None
-                and full_dist < FULL_DUP_THRESHOLD
-            ):
+            # Foreground-hash triggers that the whole screen says are noise → skip.
+            if send and cfg.full_screen_capture_enabled and full_known and full_dist < FULL_DUP_THRESHOLD:
                 send = False
+
+            # Whole-screen trigger: catches background windows changing content
+            # while the foreground window (and its hash) stays identical.
+            if not send and cfg.full_screen_capture_enabled and full_known and full_dist >= FULL_CHANGE_THRESHOLD:
+                send = True
 
             if cfg.dry_run:
                 log.info(
@@ -199,10 +205,10 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
             await asyncio.sleep(5)
 
 
-async def heartbeat_loop(client: BackendClient) -> None:
+async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue) -> None:
     while True:
         try:
-            ok = await client.heartbeat()
+            ok = await client.heartbeat(queued_frames=screenshot_queue.qsize())
             if not ok:
                 log.debug("heartbeat: backend unreachable")
         except Exception as e:
@@ -234,8 +240,24 @@ async def main_async(cfg: AgentConfig) -> None:
     await asyncio.gather(
         capture_loop(cfg, screenshot_queue),
         screenshot_sender_loop(client, screenshot_queue),
-        heartbeat_loop(client),
+        heartbeat_loop(client, screenshot_queue),
     )
+
+
+# Held for the process lifetime so the OS keeps the mutex alive.
+_instance_mutex = None
+
+
+def already_running() -> bool:
+    """Per-session single-instance guard. One agent per logged-in session;
+    duplicate launchers (startup shortcut + scheduled task + installer) collapse."""
+    global _instance_mutex
+    if os.name != "nt":
+        return False
+    import ctypes
+    ERROR_ALREADY_EXISTS = 183
+    _instance_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GuardianNodeAgentSingleton")
+    return ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS
 
 
 def _log_path() -> Path:
@@ -302,6 +324,10 @@ def cli() -> None:
     if args.dry_run:
         cfg.dry_run = True
     cfg.dry_run = cfg.dry_run or os.environ.get("GUARDIANNODE_DRY_RUN") == "1"
+
+    if already_running():
+        log.info("another GuardianNode agent is already running in this session; exiting")
+        return
 
     log.info("GuardianNode agent %s starting (hostname=%s)", __version__, socket.gethostname())
     try:

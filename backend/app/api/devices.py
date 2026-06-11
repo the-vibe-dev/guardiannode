@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep
+from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, User
 from app.services import pairing as pairing_svc, rate_limit
 from app.services.audit import log_action
@@ -156,6 +156,29 @@ def pair_complete(
     )
     db.commit()
     return PairCompleteResponse(device_id=device_id, device_token=token)
+
+
+class HeartbeatRequest(BaseModel):
+    queued_frames: int = Field(default=0, ge=0, le=10000)
+    agent_version: str | None = None
+
+
+@router.post("/heartbeat")
+def heartbeat(
+    req: HeartbeatRequest,
+    db: Session = Depends(get_db_dep),
+    device: Device = Depends(current_device),
+):
+    """Agent liveness + upload-backlog report (shown in the pipeline widget)."""
+    from app.services import pipeline_metrics
+    device.last_seen = datetime.now(timezone.utc)
+    if device.status not in ("paused", "disabled"):
+        device.status = "online"
+    if req.agent_version:
+        device.agent_version = req.agent_version
+    pipeline_metrics.record_agent_queue(device.device_id, device.hostname, req.queued_frames)
+    db.commit()
+    return {"ok": True, "paused_until": device.paused_until}
 
 
 class PauseRequest(BaseModel):

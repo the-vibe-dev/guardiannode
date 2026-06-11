@@ -7,8 +7,10 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import simpledialog
 from typing import Callable
 
@@ -26,6 +28,26 @@ DURATIONS = [
     ("4 hours", 4 * 60 * 60),
     ("Until reboot", 86400),  # ~24h cap; service restart resets
 ]
+
+
+# Held for the process lifetime so the OS keeps the mutex alive.
+_instance_mutex = None
+
+
+def already_running() -> bool:
+    """Single-instance guard: a second tray launch in the same session exits.
+
+    Session-local (not Global\\) on purpose — each logged-in user gets their
+    own tray icon, but duplicate launchers within a session (startup shortcut
+    + taskbar pin + installer) collapse to one.
+    """
+    global _instance_mutex
+    if os.name != "nt":
+        return False
+    import ctypes
+    ERROR_ALREADY_EXISTS = 183
+    _instance_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GuardianNodeTraySingleton")
+    return ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS
 
 
 def _backend_url() -> str:
@@ -144,14 +166,37 @@ def _try_pystray() -> Callable[[], None] | None:
         return None
 
     def _make_image(color: str) -> "Image.Image":
-        img = Image.new("RGB", (64, 64), color="white")
+        img = Image.new("RGBA", (64, 64), (255, 255, 255, 0))
         d = ImageDraw.Draw(img)
         d.ellipse((8, 8, 56, 56), fill=color)
         return img
 
+    def _load_brand_icon() -> "Image.Image | None":
+        """Find the GuardianNode logo: PyInstaller bundle dir, exe dir, or repo."""
+        candidates = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "icon.png")
+        candidates.append(Path(sys.executable).resolve().parent / "icon.png")
+        candidates.append(Path(__file__).resolve().parents[2] / "assets" / "brand" / "icon.png")
+        for p in candidates:
+            try:
+                if p.is_file():
+                    return Image.open(p).convert("RGBA").resize((64, 64))
+            except Exception:
+                continue
+        return None
+
+    def _paused_variant(base: "Image.Image") -> "Image.Image":
+        img = base.copy()
+        d = ImageDraw.Draw(img)
+        d.ellipse((36, 36, 62, 62), fill="#f9a825", outline="white", width=2)
+        return img
+
     def _run() -> None:
-        green = _make_image("#2e7d32")
-        yellow = _make_image("#f9a825")
+        brand = _load_brand_icon()
+        green = brand or _make_image("#275e3d")
+        yellow = _paused_variant(brand) if brand else _make_image("#f9a825")
 
         def _menu_pause(icon, item):  # noqa: ANN001
             pause_flow()
@@ -193,6 +238,10 @@ def cli() -> None:
     args = parser.parse_args()  # noqa: F841
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    if already_running():
+        log.info("another GuardianNode tray instance is already running in this session; exiting")
+        return
 
     runner = _try_pystray()
     if runner is None:

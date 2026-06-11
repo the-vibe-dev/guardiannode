@@ -72,15 +72,27 @@ def _patch_schema(engine) -> None:
     """
     from sqlalchemy import inspect, text
     insp = inspect(engine)
-    if "child_profiles" not in insp.get_table_names():
-        return
-    cols = {c["name"] for c in insp.get_columns("child_profiles")}
-    if "custom_watch_phrases" not in cols:
-        with engine.begin() as conn:
-            conn.execute(text(
-                "ALTER TABLE child_profiles ADD COLUMN custom_watch_phrases TEXT DEFAULT '[]'"
-            ))
-        log.info("schema patch: added child_profiles.custom_watch_phrases")
+    tables = insp.get_table_names()
+    if "child_profiles" in tables:
+        cols = {c["name"] for c in insp.get_columns("child_profiles")}
+        if "custom_watch_phrases" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE child_profiles ADD COLUMN custom_watch_phrases TEXT DEFAULT '[]'"
+                ))
+            log.info("schema patch: added child_profiles.custom_watch_phrases")
+    if "alerts" in tables:
+        cols = {c["name"] for c in insp.get_columns("alerts")}
+        patches = {
+            "dedup_key": "ALTER TABLE alerts ADD COLUMN dedup_key VARCHAR(64)",
+            "repeat_count": "ALTER TABLE alerts ADD COLUMN repeat_count INTEGER DEFAULT 1",
+            "last_seen_at": "ALTER TABLE alerts ADD COLUMN last_seen_at DATETIME",
+        }
+        for col, ddl in patches.items():
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+                log.info("schema patch: added alerts.%s", col)
 
 
 @asynccontextmanager

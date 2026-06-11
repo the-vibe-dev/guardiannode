@@ -7,6 +7,38 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Fixed (post-lenovohouse field test)
+- **Duplicate agent/tray instances**: the agent ran as a session-0 service *and*
+  a startup shortcut *and* an install-time launch. The agent is now launched
+  only by the `GuardianNodeAgent` scheduled task — registered for the
+  **BUILTIN\Users group**, so it starts inside every user's session at logon
+  (services cannot capture the desktop from session 0). Both agent and tray
+  gained per-session single-instance mutexes, so duplicate launchers can never
+  stack again. The watchdog service now watches the agent *process* across all
+  sessions and re-runs the scheduled task if it is killed.
+- **Tray showed a generic green dot**: the tray now loads the GuardianNode logo
+  (shipped as `icon.png` next to the exe; paused state shows an amber badge),
+  the placeholder 16×16 `icon.ico` was replaced with a multi-resolution brand
+  icon, all shortcuts carry it, and the taskbar pin now pins the branded
+  Start Menu shortcut instead of the bare exe.
+- **Alert flooding**: a risky note sitting on screen produced dozens of
+  identical alerts (21 in 15 minutes in the field test). Identical open
+  findings (same device/profile/severity/categories) within a 30-minute window
+  now fold into one alert with a repeat counter (`×N` in the Risk Feed) whose
+  detail always points at the newest evidence. Escalations and reviewed alerts
+  always create a fresh alert. Window configurable via
+  `GUARDIANNODE_ALERT_DEDUP_WINDOW_SECONDS`.
+- **Missed background changes**: a background window loading new content (e.g.
+  a browser behind Notepad) never triggered a capture because the change
+  detector keyed on the foreground window's hash. Whole-screen change is now an
+  independent trigger (`full_screen_change_threshold`, default 10/256 bits).
+
+### Added (post-lenovohouse field test)
+- **Agent upload backlog in the dashboard**: device heartbeats now POST
+  `/api/devices/heartbeat` with the agent's queued-frame count (also updating
+  device liveness); the pipeline widget shows "N waiting upload" per device
+  alongside the in-flight count.
+
 ### Builder notes
 - Codex was the primary builder for this release train, covering the backend,
   installer, agent, documentation, release-hardening, and test work.

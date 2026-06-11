@@ -50,6 +50,9 @@ class CompletedItem:
 
 _lock = Lock()
 _in_flight: dict[str, InFlightItem] = {}
+# Agent-side upload backlog, reported via device heartbeats:
+# device_id -> (hostname, queued_frames, reported_at)
+_agent_queues: dict[str, tuple[str, int, float]] = {}
 # rolling window of completed items; we keep last 200 for stats
 _recent: deque[CompletedItem] = deque(maxlen=200)
 
@@ -129,7 +132,30 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
     }
 
 
+def record_agent_queue(device_id: str, hostname: str, queued_frames: int) -> None:
+    """Called from the device heartbeat: how many frames the agent is holding."""
+    with _lock:
+        _agent_queues[device_id] = (hostname, int(queued_frames), time.time())
+
+
+def agent_queues(max_age_seconds: int = 120) -> list[dict[str, Any]]:
+    """Recent agent backlog reports (stale entries are dropped from the view)."""
+    now = time.time()
+    with _lock:
+        return [
+            {
+                "device_id": device_id,
+                "hostname": hostname,
+                "queued_frames": queued,
+                "age_seconds": int(now - ts),
+            }
+            for device_id, (hostname, queued, ts) in _agent_queues.items()
+            if now - ts <= max_age_seconds
+        ]
+
+
 def reset_for_tests() -> None:
     with _lock:
         _in_flight.clear()
         _recent.clear()
+        _agent_queues.clear()

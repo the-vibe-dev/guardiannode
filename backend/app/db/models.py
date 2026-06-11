@@ -138,6 +138,10 @@ class Alert(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     action_taken: Mapped[str | None] = mapped_column(String(128), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Repeat aggregation: identical open findings fold into one alert.
+    dedup_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    repeat_count: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class EvidenceBlob(Base):

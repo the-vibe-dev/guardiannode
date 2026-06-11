@@ -108,3 +108,4 @@ recovery.txt
 htmlcov/
 test-results/
 playwright-report/
+.claude/

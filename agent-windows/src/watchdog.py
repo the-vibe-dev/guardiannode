@@ -1,7 +1,10 @@
-"""Watchdog process.
+"""Watchdog process (runs as a SYSTEM service).
 
-Polls the agent's heartbeat. If the agent service is not running, restarts it
-via the Service Control Manager (Windows) or systemctl (Linux dev).
+The agent itself runs per user session via the `GuardianNodeAgent` scheduled
+task (Windows services live in session 0 and cannot capture a user's desktop).
+The watchdog's job is tamper resistance: if the agent process disappears from
+every session — e.g. the child kills it from Task Manager — re-run the
+scheduled task, which starts it back up in the logged-on user's session.
 """
 from __future__ import annotations
 
@@ -10,25 +13,34 @@ import logging
 import os
 import subprocess
 import time
-from pathlib import Path
 
 log = logging.getLogger("guardiannode.watchdog")
 
-AGENT_SERVICE_NAME = "GuardianNodeAgent"
+AGENT_PROCESS_NAME = "GuardianNodeAgent.exe"
+AGENT_TASK_NAME = "GuardianNodeAgent"
 
 
-def _service_running_windows(name: str) -> bool:
+def _agent_process_running_windows() -> bool:
+    """True if the agent process exists in any session (SYSTEM sees them all)."""
     try:
-        out = subprocess.run(["sc", "query", name], capture_output=True, text=True, timeout=5)
-        return "RUNNING" in (out.stdout or "")
+        out = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {AGENT_PROCESS_NAME}", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return AGENT_PROCESS_NAME.lower() in (out.stdout or "").lower()
     except Exception:
         return False
 
 
-def _service_start_windows(name: str) -> bool:
+def _agent_task_start_windows() -> bool:
+    """Re-run the logon task. Task Scheduler starts interactive group tasks in
+    the logged-on user's session; fails harmlessly when no one is signed in."""
     try:
-        r = subprocess.run(["sc", "start", name], capture_output=True, text=True, timeout=10)
-        return r.returncode in (0, 1056)  # 1056 = already running
+        r = subprocess.run(
+            ["schtasks", "/Run", "/TN", AGENT_TASK_NAME],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.returncode == 0
     except Exception:
         return False
 
@@ -42,15 +54,15 @@ def _service_running_systemd(unit: str) -> bool:
 
 
 def watchdog_loop(interval: int = 5) -> None:
-    log.info("watchdog started for %s every %ds", AGENT_SERVICE_NAME, interval)
+    log.info("watchdog started for %s every %ds", AGENT_TASK_NAME, interval)
     failures = 0
     while True:
         running = False
         if os.name == "nt":
-            running = _service_running_windows(AGENT_SERVICE_NAME)
+            running = _agent_process_running_windows()
             if not running:
-                log.warning("agent service not running; attempting restart")
-                _service_start_windows(AGENT_SERVICE_NAME)
+                log.warning("agent process not found in any session; re-running scheduled task")
+                _agent_task_start_windows()
         else:
             unit = "guardiannode-agent.service"
             running = _service_running_systemd(unit)

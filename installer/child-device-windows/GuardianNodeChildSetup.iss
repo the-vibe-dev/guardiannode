@@ -56,13 +56,22 @@ Source: "..\..\LICENSE";     DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md";   DestDir: "{app}"; Flags: ignoreversion
 
 ; ---- WinSW service wrapper (downloaded during build into stage/) ----
-Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeAgentService.exe"; Flags: ignoreversion
-Source: "..\build\stage\winsw\Agent.xml";       DestDir: "{app}"; DestName: "GuardianNodeAgentService.xml"; Flags: ignoreversion
+; The agent itself is NOT a service: services live in session 0 and cannot
+; capture a logged-in user's desktop. The agent runs per user session via the
+; GuardianNodeAgent scheduled task (see register_agent_task.ps1). Only the
+; watchdog (tamper resistance) and the backend (all-in-one) are services.
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Watchdog.xml";    DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.xml"; Flags: ignoreversion
 ; Backend service only exists in all-in-one mode
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBackendService.exe"; Flags: ignoreversion; Check: IsAllInOne
 Source: "..\build\stage\winsw\Backend.xml";     DestDir: "{app}"; DestName: "GuardianNodeBackendService.xml"; Flags: ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
+
+; ---- Scheduled-task registration helper ----
+Source: "register_agent_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
+
+; ---- Brand icons (shortcuts + tray runtime icon) ----
+Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "assets\icon.png"; DestDir: "{app}\agent"; Flags: ignoreversion
 
 ; ---- Ollama / model bootstrap helper (used in all-in-one mode) ----
 Source: "..\shared\configure_ollama_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -77,12 +86,13 @@ Name: "{commonappdata}\GuardianNode\keys";  Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 
 [Icons]
-Name: "{commonprograms}\{#MyAppName}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"
-Name: "{commonprograms}\{#MyAppName}\GuardianNode Agent"; Filename: "{app}\agent\GuardianNodeAgent.exe"
-Name: "{commonprograms}\{#MyAppName}\Open Dashboard"; Filename: "{code:GetDashboardUrl}"
-Name: "{commonprograms}\{#MyAppName}\Uninstall GuardianNode"; Filename: "{app}\GuardianNodeUninstall.exe"; Parameters: """{uninstallexe}"""
-Name: "{commonstartup}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"
-Name: "{commonstartup}\GuardianNode Agent"; Filename: "{app}\agent\GuardianNodeAgent.exe"
+; The agent has no startup shortcut — the GuardianNodeAgent scheduled task
+; launches it in every user's session at logon (and is harder to disable
+; from Task Manager's Startup tab than a Startup-folder shortcut).
+Name: "{commonprograms}\{#MyAppName}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"; IconFilename: "{app}\icon.ico"
+Name: "{commonprograms}\{#MyAppName}\Open Dashboard"; Filename: "{code:GetDashboardUrl}"; IconFilename: "{app}\icon.ico"
+Name: "{commonprograms}\{#MyAppName}\Uninstall GuardianNode"; Filename: "{app}\GuardianNodeUninstall.exe"; Parameters: """{uninstallexe}"""; IconFilename: "{app}\icon.ico"
+Name: "{commonstartup}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"; IconFilename: "{app}\icon.ico"
 
 [Run]
 ; ---- Restrict install dir ACL (before anything starts) ----
@@ -95,33 +105,41 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Backend service..."; Check: IsAllInOne
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; Check: IsAllInOne
 
-; ---- Install agent + watchdog services via WinSW ----
-Filename: "{app}\GuardianNodeAgentService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Agent service..."
-Filename: "{app}\GuardianNodeAgentService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
+; ---- Clean up the agent service from older installs (the agent is a scheduled
+; task now — a session-0 service cannot capture the desktop and caused duplicate
+; capture instances). Best-effort: errors are ignored on fresh machines.
+Filename: "sc.exe"; Parameters: "stop GuardianNodeAgent"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "delete GuardianNodeAgent"; Flags: runhidden waituntilterminated
+
+; ---- Register the agent as a logon scheduled task for ALL users and start it now ----
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeAgent.exe"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode monitoring for all users..."
+
+; ---- Install + start the watchdog service (re-runs the agent task if killed) ----
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
 ; ---- Restrict the service ACLs: deny stop/delete to non-admin ----
-Filename: "sc.exe"; Parameters: "sdset GuardianNodeAgent D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated; Check: IsAllInOne
 
-; ---- Pin Tray app to the parent user's taskbar (runs as original user so HKCU = parent's hive) ----
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\pin_to_taskbar.ps1"" -Target ""{app}\agent\GuardianNodeTray.exe"""; Flags: runhidden waituntilterminated runasoriginaluser; StatusMsg: "Pinning GuardianNode to the taskbar..."
+; ---- Start the tray now for the installing user (per-session mutex prevents duplicates) ----
+Filename: "{app}\agent\GuardianNodeTray.exe"; Flags: nowait runasoriginaluser
 
-; ---- Start an interactive capture agent in the installing user's desktop session.
-; The service remains as a restart/backstop, but Windows services run in session 0
-; and cannot reliably capture every logged-in user's desktop.
-Filename: "{app}\agent\GuardianNodeAgent.exe"; Flags: nowait runasoriginaluser; StatusMsg: "Starting GuardianNode monitoring..."
+; ---- Pin Tray to the parent user's taskbar. Pin the Start Menu shortcut (it
+; carries the brand icon), not the bare exe. ----
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\pin_to_taskbar.ps1"" -Target ""{commonprograms}\{#MyAppName}\GuardianNode Tray.lnk"""; Flags: runhidden waituntilterminated runasoriginaluser; StatusMsg: "Pinning GuardianNode to the taskbar..."
 
 ; ---- Launch dashboard at the end (first-run web setup creates the parent account + recovery code) ----
 Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; Description: "Open Parent Dashboard to finish setup"
 
 [UninstallRun]
+; Watchdog first, or it would restart the agent task mid-uninstall.
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
-Filename: "{app}\GuardianNodeAgentService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
-Filename: "{app}\GuardianNodeAgentService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeAgent"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeAgent /F"; Flags: runhidden waituntilterminated
+Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeAgent.exe /F"; Flags: runhidden waituntilterminated
+Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeTray.exe /F"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 

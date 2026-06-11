@@ -70,12 +70,18 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
-    async def heartbeat(self) -> bool:
+    async def heartbeat(self, queued_frames: int = 0) -> bool:
+        """Liveness + upload-backlog report. Falls back to the plain health
+        probe when talking to a backend that predates /api/devices/heartbeat."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as c:
-                r = await c.get(
-                    f"{self.base_url}/api/health", headers=self._headers()
+                r = await c.post(
+                    f"{self.base_url}/api/devices/heartbeat",
+                    headers=self._headers(),
+                    json={"queued_frames": queued_frames},
                 )
+                if r.status_code in (404, 405):
+                    r = await c.get(f"{self.base_url}/api/health", headers=self._headers())
                 return r.status_code == 200
         except Exception:
             return False

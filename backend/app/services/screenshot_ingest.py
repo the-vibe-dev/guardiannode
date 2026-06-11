@@ -32,7 +32,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import Alert, ChildProfile, Device, EvidenceBlob, Event, RiskResult
+from app.db.models import ChildProfile, Device, EvidenceBlob, Event, RiskResult
 from app.services import classifier, encryption, image_safety, multimodal_risk, pipeline_metrics, risk_rules
 from app.services.audit import log_action
 from app.services.ollama_client import OllamaClient
@@ -400,30 +400,18 @@ async def _ingest_inner(
     )
     session.add(rr)
 
-    # ----- Step 6: Alert if severity warrants -----
+    # ----- Step 6: Alert if severity warrants (repeats fold into one alert) -----
     alert_id: str | None = None
     if severity in ("medium", "high", "critical"):
-        alert_id = _ulid()
-        alert = Alert(
-            alert_id=alert_id,
+        from app.services.alert_dedup import upsert_alert
+        alert_id, _created = upsert_alert(
+            session,
             risk_id=risk_id,
             device_id=device_id,
             profile_id=profile_id,
             severity=severity,
-            status="open",
-        )
-        session.add(alert)
-        log_action(
-            session,
-            actor="system",
-            action="alert.create",
-            target=alert_id,
-            details={
-                "severity": severity,
-                "categories": merged.get("categories", []),
-                "source": "screenshot",
-                "via_vision": bool(vision_result),
-            },
+            categories=merged.get("categories", []),
+            source="screenshot",
             source_ip=source_ip,
         )
 

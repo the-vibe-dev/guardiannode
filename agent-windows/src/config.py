@@ -44,6 +44,11 @@ class AgentConfig:
     # changes can alter the active-window hash while the visible desktop is
     # effectively unchanged. Do not resend near-identical full-screen frames.
     full_screen_duplicate_threshold: int = 4
+    # Whole-screen change trigger (Hamming over the 256-bit full-frame dHash).
+    # Catches a background window loading new content while the foreground
+    # window is unchanged (e.g. a browser behind Notepad). Keep above the
+    # duplicate threshold so clock ticks / cursor noise don't trigger.
+    full_screen_change_threshold: int = 10
     # Default to the visible desktop so typed risk in simple apps such as
     # Notepad is still reviewed. App names remain useful context, not a gate.
     full_screen_capture_enabled: bool = True

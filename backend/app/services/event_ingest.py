@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import Alert, ChildProfile, Device, Event, RiskResult
+from app.db.models import ChildProfile, Device, Event, RiskResult
 from app.services import classifier, encryption, redaction
 from app.services.audit import log_action
 
@@ -120,22 +120,15 @@ async def ingest_event(
     severity = cls_result["risk_level"]
     alert_id: str | None = None
     if severity in ("medium", "high", "critical"):
-        alert_id = _ulid()
-        alert = Alert(
-            alert_id=alert_id,
+        from app.services.alert_dedup import upsert_alert
+        alert_id, _created = upsert_alert(
+            session,
             risk_id=risk_id,
             device_id=device_id,
             profile_id=payload.get("profile_id"),
             severity=severity,
-            status="open",
-        )
-        session.add(alert)
-        log_action(
-            session,
-            actor="system",
-            action="alert.create",
-            target=alert_id,
-            details={"severity": severity, "categories": cls_result["categories"]},
+            categories=cls_result["categories"],
+            source="text_event",
             source_ip=source_ip,
         )
 

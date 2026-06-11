@@ -26,6 +26,12 @@ interface Health {
       severity_counts: Record<string, number>;
     };
   };
+  agent_queues?: {
+    device_id: string;
+    hostname: string;
+    queued_frames: number;
+    age_seconds: number;
+  }[];
   ollama: {
     url: string;
     available: boolean;
@@ -73,17 +79,41 @@ export default function PipelineHealth() {
 
   const busy = h.queue.in_flight_count > 0;
   const ollamaOK = h.ollama.available;
+  const backlog = (h.agent_queues || []).filter((q) => q.queued_frames > 0);
+  const backlogTotal = backlog.reduce((sum, q) => sum + q.queued_frames, 0);
 
   return (
     <div className="bg-white shadow rounded p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-semibold">Pipeline status</h2>
         <div className="flex items-center gap-2 text-xs">
-          <Pulse on={busy} color="bg-yellow-400" label={busy ? "Processing" : "Idle"} />
+          <Pulse
+            on={busy}
+            color="bg-yellow-400"
+            label={busy ? `Processing ${h.queue.in_flight_count}` : "Idle"}
+          />
+          {backlogTotal > 0 && (
+            <Pulse on color="bg-orange-400" label={`${backlogTotal} waiting upload`} />
+          )}
           <Pulse on={ollamaOK} color="bg-green-500" label={ollamaOK ? "Ollama OK" : "Ollama down"} />
           <span className="text-gray-500">tier=<strong>{h.tier}</strong></span>
         </div>
       </div>
+
+      {/* Agent-side upload backlog (frames captured but not yet sent) */}
+      {backlog.length > 0 && (
+        <div className="mb-3 space-y-1">
+          {backlog.map((q) => (
+            <div key={q.device_id} className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded px-3 py-1.5 text-sm">
+              <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+              <span className="font-medium">{q.hostname}</span>
+              <span className="text-gray-600">
+                {q.queued_frames} frame{q.queued_frames > 1 ? "s" : ""} captured, waiting to upload
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* In-flight items */}
       {busy ? (
