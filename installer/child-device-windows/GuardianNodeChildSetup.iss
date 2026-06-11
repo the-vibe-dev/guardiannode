@@ -62,6 +62,9 @@ Source: "..\..\README.md";   DestDir: "{app}"; Flags: ignoreversion
 ; watchdog (tamper resistance) and the backend (all-in-one) are services.
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Watchdog.xml";    DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.xml"; Flags: ignoreversion
+; Secondary, obscurely-named watchdog (mutual resurrection — see Helper.xml)
+Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "EndpointHealthAgentService.exe"; Flags: ignoreversion
+Source: "..\build\stage\winsw\Helper.xml";      DestDir: "{app}"; DestName: "EndpointHealthAgentService.xml"; Flags: ignoreversion
 ; Backend service only exists in all-in-one mode
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBackendService.exe"; Flags: ignoreversion; Check: IsAllInOne
 Source: "..\build\stage\winsw\Backend.xml";     DestDir: "{app}"; DestName: "GuardianNodeBackendService.xml"; Flags: ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
@@ -83,6 +86,7 @@ Source: "pin_to_taskbar.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; Stale launchers from pre-scheduled-task installs (the mutex would collapse
 ; them anyway, but don't leave dead shortcuts around).
 Type: files; Name: "{commonstartup}\GuardianNode Agent.lnk"
+Type: files; Name: "{commonstartup}\GuardianNode Tray.lnk"
 
 [Dirs]
 Name: "{commonappdata}\GuardianNode"; Permissions: system-modify
@@ -91,13 +95,12 @@ Name: "{commonappdata}\GuardianNode\keys";  Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 
 [Icons]
-; The agent has no startup shortcut — the GuardianNodeAgent scheduled task
-; launches it in every user's session at logon (and is harder to disable
-; from Task Manager's Startup tab than a Startup-folder shortcut).
+; Neither the agent nor the tray uses a Startup-folder shortcut — both run via
+; scheduled tasks (logon trigger, all users) that the watchdog can re-run if
+; killed. A Startup shortcut can be toggled off from Task Manager's Startup tab.
 Name: "{commonprograms}\{#MyAppName}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"; IconFilename: "{app}\icon.ico"
 Name: "{commonprograms}\{#MyAppName}\Open Dashboard"; Filename: "{code:GetDashboardUrl}"; IconFilename: "{app}\icon.ico"
 Name: "{commonprograms}\{#MyAppName}\Uninstall GuardianNode"; Filename: "{app}\GuardianNodeUninstall.exe"; Parameters: """{uninstallexe}"""; IconFilename: "{app}\icon.ico"
-Name: "{commonstartup}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"; IconFilename: "{app}\icon.ico"
 
 [Run]
 ; ---- Restrict install dir ACL (before anything starts) ----
@@ -116,15 +119,19 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: ru
 Filename: "sc.exe"; Parameters: "stop GuardianNodeAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "delete GuardianNodeAgent"; Flags: runhidden waituntilterminated
 
-; ---- Register the agent as a logon scheduled task for ALL users and start it now ----
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeAgent.exe"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode monitoring for all users..."
+; ---- Register the agent + tray as logon scheduled tasks for ALL users and start them ----
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeAgent.exe"" -TaskName ""GuardianNodeAgent"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode monitoring for all users..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeTray.exe"" -TaskName ""GuardianNodeTray"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode tray for all users..."
 
-; ---- Install + start the watchdog service (re-runs the agent task if killed) ----
+; ---- Install + start BOTH watchdog services (each revives the other + the agent/tray tasks) ----
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
+Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
+Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
 ; ---- Restrict the service ACLs: deny stop/delete to non-admin ----
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "sdset EndpointHealthAgent D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated; Check: IsAllInOne
 
 ; ---- Start the tray now for the installing user (per-session mutex prevents duplicates) ----
@@ -138,11 +145,15 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; Description: "Open Parent Dashboard to finish setup"
 
 [UninstallRun]
-; Watchdog first, or it would restart the agent task mid-uninstall.
+; Both watchdogs first, or they would revive each other / the tasks mid-uninstall.
+Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\EndpointHealthAgentService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeAgent"; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeAgent /F"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeTray"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeTray /F"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeAgent.exe /F"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeTray.exe /F"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist

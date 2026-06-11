@@ -19,6 +19,9 @@ $usersGroup = (New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32
     Translate([System.Security.Principal.NTAccount]).Value
 
 $action = New-ScheduledTaskAction -Execute $AgentExe -WorkingDirectory (Split-Path -Parent $AgentExe)
+# Note: this script registers ONE task (agent or tray) per call; the installer
+# invokes it twice. Both run in the user's session at logon and on demand
+# (the watchdog re-runs them with schtasks /Run if the process is killed).
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -GroupId $usersGroup -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet `

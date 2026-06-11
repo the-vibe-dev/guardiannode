@@ -36,7 +36,7 @@ from app.db.models import Base
 from app.db.session import get_engine
 from app.services import mdns_advertiser
 from app.settings import settings
-from app.workers import cleanup_worker
+from app.workers import cleanup_worker, offline_monitor
 
 log = logging.getLogger("guardiannode")
 
@@ -107,15 +107,17 @@ async def lifespan(app: FastAPI):
             mdns_advertiser.start()
         except Exception as e:  # pragma: no cover
             log.warning("mDNS start failed: %s", e)
-    cleanup_task = None
+    background_tasks = []
     if settings.retention_cleanup_enabled:
-        cleanup_task = asyncio.create_task(cleanup_worker.loop())
+        background_tasks.append(asyncio.create_task(cleanup_worker.loop()))
+    if settings.device_offline_alert_enabled:
+        background_tasks.append(asyncio.create_task(offline_monitor.loop()))
     log.info("GuardianNode backend %s listening on %s:%s", __version__, settings.bind_host, settings.bind_port)
     try:
         yield
     finally:
-        if cleanup_task is not None:
-            cleanup_task.cancel()
+        for task in background_tasks:
+            task.cancel()
         try:
             mdns_advertiser.stop()
         except Exception:

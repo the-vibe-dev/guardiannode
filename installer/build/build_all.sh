@@ -106,6 +106,7 @@ if [ ! -f "$WINSW_EXE" ]; then
 fi
 cp "$WINSW_EXE" "$STAGE/winsw/WinSW.exe"
 cp "$BUILD/winsw_templates/Watchdog.xml" "$STAGE/winsw/Watchdog.xml"
+cp "$BUILD/winsw_templates/Helper.xml"   "$STAGE/winsw/Helper.xml"
 cp "$BUILD/winsw_templates/Backend.xml"  "$STAGE/winsw/Backend.xml"
 
 # ---- 4. Build dashboard ----

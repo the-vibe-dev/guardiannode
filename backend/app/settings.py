@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # this window fold into one alert with a repeat count instead of flooding
     # the Risk Feed. 0 disables aggregation.
     alert_dedup_window_seconds: int = 1800
+    # Tamper / offline detection. A child who is a local admin can kill the
+    # agent or shut the PC down; the watchdog auto-restarts it, but if the
+    # backend stops hearing heartbeats we raise an alert so the parent knows
+    # monitoring stopped. Agent heartbeats every 30s.
+    device_offline_alert_enabled: bool = True
+    device_offline_after_seconds: int = 180
+    device_offline_check_interval_seconds: int = 60
 
     @property
     def keys_dir(self) -> Path:

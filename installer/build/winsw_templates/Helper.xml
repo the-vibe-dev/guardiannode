@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Secondary tamper-resistance watchdog. Intentionally named generically so a
+     child can't kill every protective service by grepping for "GuardianNode".
+     It runs the same GuardianNodeWatchdog.exe (visible binary path under
+     C:\Program Files\GuardianNode) and revives the primary watchdog; the
+     primary revives this one. Monitoring stays transparent via the tray icon. -->
+<service>
+  <id>EndpointHealthAgent</id>
+  <name>Endpoint Health Agent</name>
+  <description>Monitors local endpoint services and restarts them on failure.</description>
+  <executable>%BASE%\agent\GuardianNodeWatchdog.exe</executable>
+  <arguments>--interval 5 --peer-service GuardianNodeWatchdog</arguments>
+  <workingdirectory>%BASE%\agent</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+</service>

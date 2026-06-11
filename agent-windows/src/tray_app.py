@@ -5,13 +5,15 @@ Right-click → Pause → enter password → pick duration → POST to backend.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import subprocess
 import sys
+import tempfile
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import simpledialog
 from typing import Callable
 
 import httpx
@@ -87,34 +89,108 @@ def _verify_password_or_recovery(s: str) -> bool:
         return False
 
 
-def _ask_password() -> str | None:
+# --- Dialogs ---------------------------------------------------------------
+#
+# pystray menu callbacks run inside the tray's win32 message loop. Creating a
+# Tk window there never reliably gets foreground focus, so the password field
+# ignored keystrokes and the OK/Cancel buttons didn't respond. We therefore
+# render every dialog in a SEPARATE PROCESS (a re-exec of this same exe with
+# `--prompt`), which has its own clean main thread and message loop. The child
+# writes the result as JSON to a temp file we hand it.
+
+
+def _new_root(title: str) -> "tk.Tk":
     root = tk.Tk()
-    root.withdraw()
-    val = simpledialog.askstring(
-        "GuardianNode — Parent verification",
-        "Enter your parent password (or 12-word recovery code):",
-        show="*",
-    )
-    root.destroy()
-    return val
+    root.title(title)
+    root.attributes("-topmost", True)
+    root.lift()
+    root.after(50, root.focus_force)
+    return root
 
 
-def _ask_duration() -> int | None:
-    root = tk.Tk()
-    root.title("Pause GuardianNode")
-    root.geometry("280x180")
-    selected: dict = {"value": None}
+def _ask_password_dialog() -> str | None:
+    result: dict = {"value": None}
+    root = _new_root("GuardianNode — Parent verification")
+    root.geometry("380x170")
+    tk.Label(root, text="Enter your parent password\n(or 12-word recovery code):").pack(pady=(14, 6))
+    entry = tk.Entry(root, show="*", width=36)
+    entry.pack(pady=4)
+    entry.focus_set()
 
+    def _ok(*_):
+        result["value"] = entry.get()
+        root.destroy()
+
+    def _cancel(*_):
+        result["value"] = None
+        root.destroy()
+
+    btns = tk.Frame(root)
+    btns.pack(pady=12)
+    tk.Button(btns, text="OK", width=10, command=_ok, default="active").pack(side="left", padx=6)
+    tk.Button(btns, text="Cancel", width=10, command=_cancel).pack(side="left", padx=6)
+    root.bind("<Return>", _ok)
+    root.bind("<Escape>", _cancel)
+    root.protocol("WM_DELETE_WINDOW", _cancel)
+    root.mainloop()
+    return result["value"]
+
+
+def _ask_duration_dialog() -> int | None:
+    result: dict = {"value": None}
+    root = _new_root("Pause GuardianNode")
+    root.geometry("300x230")
     tk.Label(root, text="Pause monitoring for:").pack(pady=10)
     for label, seconds in DURATIONS:
         def _pick(s=seconds):
-            selected["value"] = s
+            result["value"] = s
             root.destroy()
-        tk.Button(root, text=label, command=_pick, width=20).pack(pady=2)
-    tk.Button(root, text="Cancel", command=root.destroy, width=20).pack(pady=2)
-
+        tk.Button(root, text=label, command=_pick, width=22).pack(pady=2)
+    tk.Button(root, text="Cancel", command=root.destroy, width=22).pack(pady=(8, 2))
+    root.protocol("WM_DELETE_WINDOW", root.destroy)
     root.mainloop()
-    return selected.get("value")
+    return result["value"]
+
+
+def _run_prompt_in_subprocess(kind: str) -> str | None:
+    """Re-exec this exe with --prompt <kind> to render the dialog cleanly."""
+    fd, out_path = tempfile.mkstemp(suffix=".gnprompt")
+    os.close(fd)
+    try:
+        if getattr(sys, "frozen", False):
+            args = [sys.executable, "--prompt", kind, "--out", out_path]
+        else:
+            args = [sys.executable, os.path.abspath(__file__), "--prompt", kind, "--out", out_path]
+        creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+        subprocess.run(args, timeout=300, creationflags=creationflags)
+        raw = Path(out_path).read_text("utf-8") or "{}"
+        return json.loads(raw).get("value")
+    except Exception as e:
+        log.warning("prompt subprocess failed (%s); falling back to in-process dialog", e)
+        # Fallback keeps Exit/Pause usable even if the re-exec path breaks.
+        if kind == "password":
+            return _ask_password_dialog()
+        if kind == "duration":
+            d = _ask_duration_dialog()
+            return str(d) if d else None
+        return None
+    finally:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+
+
+def _ask_password() -> str | None:
+    return _run_prompt_in_subprocess("password")
+
+
+def _ask_duration() -> int | None:
+    val = _run_prompt_in_subprocess("duration")
+    try:
+        return int(val) if val else None
+    except (TypeError, ValueError):
+        return None
 
 
 def pause_flow() -> None:
@@ -248,9 +324,27 @@ def _open_dashboard() -> None:
 def cli() -> None:
     parser = argparse.ArgumentParser(description="GuardianNode tray app")
     parser.add_argument("--config", default=str(default_config_path()))
-    args = parser.parse_args()  # noqa: F841
+    parser.add_argument("--prompt", choices=["password", "duration"], help=argparse.SUPPRESS)
+    parser.add_argument("--out", help=argparse.SUPPRESS)
+    args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    # Dialog-rendering mode: a clean child process with its own main thread.
+    # Must run BEFORE the single-instance mutex so the tray can spawn it.
+    if args.prompt:
+        value = None
+        if args.prompt == "password":
+            value = _ask_password_dialog()
+        elif args.prompt == "duration":
+            d = _ask_duration_dialog()
+            value = str(d) if d else None
+        if args.out:
+            try:
+                Path(args.out).write_text(json.dumps({"value": value}), encoding="utf-8")
+            except Exception as e:
+                log.warning("could not write prompt result: %s", e)
+        return
 
     if already_running():
         log.info("another GuardianNode tray instance is already running in this session; exiting")
