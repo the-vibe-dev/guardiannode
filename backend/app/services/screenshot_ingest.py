@@ -34,9 +34,8 @@ from ulid import ULID
 
 from app.db.models import ChildProfile, Device, EvidenceBlob, Event, RiskResult
 from app.services import classifier, encryption, image_safety, multimodal_risk, pipeline_metrics, risk_rules
-from app.services.audit import log_action
-from app.services.profile_resolution import resolve_profile
 from app.services.ollama_client import OllamaClient
+from app.services.profile_resolution import resolve_profile
 from app.settings import settings
 
 log = logging.getLogger(__name__)
@@ -128,15 +127,53 @@ async def _vision_available() -> tuple[bool, list[str]]:
 
 
 def _tesseract_extract(image_bytes: bytes) -> str:
-    """Server-side OCR fallback. No-op if pytesseract isn't installed."""
+    """Server-side OCR. No-op if pytesseract or the Tesseract binary is unavailable."""
+    if not settings.tesseract_enabled:
+        return ""
     try:
         import pytesseract  # type: ignore
-        from PIL import Image  # type: ignore
+        from PIL import Image, ImageOps  # type: ignore
+
         img = Image.open(io.BytesIO(image_bytes))
-        return pytesseract.image_to_string(img).strip()
+
+        def _ocr(region: Image.Image) -> str:
+            # Terminal and browser text can be only a few pixels tall in full-screen
+            # captures. Upscaling a contrast-normalized grayscale copy materially
+            # improves exact phrase OCR while keeping the longest edge bounded.
+            gray = ImageOps.autocontrast(ImageOps.grayscale(region))
+            scale = min(3.0, 4800 / max(gray.size))
+            if scale > 1:
+                gray = gray.resize(
+                    (max(1, int(gray.width * scale)), max(1, int(gray.height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            return pytesseract.image_to_string(gray, config="--psm 6").strip()
+
+        readings = [_ocr(img)]
+        if img.width >= img.height * 1.4:
+            # A full desktop commonly contains side-by-side windows. Overlapping
+            # pane passes prevent one column from corrupting the other's layout.
+            pane_width = int(img.width * 0.6)
+            readings.extend(
+                (
+                    _ocr(img.crop((0, 0, pane_width, img.height))),
+                    _ocr(img.crop((img.width - pane_width, 0, img.width, img.height))),
+                )
+            )
+        return _merge_ocr_text(*readings)
     except Exception as e:
         log.debug("tesseract fallback unavailable: %s", e)
         return ""
+
+
+def _merge_ocr_text(*values: str) -> str:
+    """Keep distinct OCR readings so deterministic rules can inspect both."""
+    merged: list[str] = []
+    for value in values:
+        text = (value or "").strip()
+        if text and text not in merged:
+            merged.append(text)
+    return "\n".join(merged)
 
 
 async def ingest_screenshot(
@@ -161,11 +198,6 @@ async def ingest_screenshot(
     sha256 = hashlib.sha256(image_bytes).hexdigest()
     event_id = _ulid()
     tier = settings.classifier_tier if settings.classifier_tier in VALID_TIERS else "vision_only"
-
-    vision_result: dict[str, Any] = {}
-    text_result: dict[str, Any] = {}
-    extracted_text = ""
-    rules_only_severity = "none"
 
     # Register this frame as in-flight so the dashboard health widget can see it.
     pipeline_metrics.start(
@@ -225,7 +257,7 @@ async def _ingest_inner(
     vision_result: dict[str, Any] = {}
     text_result: dict[str, Any] = {}
     extracted_text = ""
-    rules_only_severity = "none"
+    tesseract_used = False
 
     # Resolve the child profile the same way text-event ingest does (payload →
     # device assignment → default). Also yields the parent's custom watch
@@ -245,6 +277,7 @@ async def _ingest_inner(
         log.info("screenshot %s → tier=text_only (Tesseract + text LLM)", event_id)
         pipeline_metrics.set_stage(event_id, "tesseract")
         extracted_text = _tesseract_extract(image_bytes)
+        tesseract_used = bool(extracted_text)
         if extracted_text:
             pipeline_metrics.set_stage(event_id, "text_llm")
             text_result = await classifier.classify_text(
@@ -255,31 +288,39 @@ async def _ingest_inner(
             )
 
     elif tier == "vision_only":
-        # GPU path: vision LLM does OCR + visual classification; rules engine on
-        # extracted text for fast deterministic catches. No text LLM call → no swap.
-        log.info("screenshot %s → tier=vision_only (vision LLM + rules)", event_id)
+        # Run deterministic OCR alongside vision. Exact watch phrases must not
+        # disappear when a reachable vision model returns empty or malformed OCR.
+        log.info("screenshot %s → tier=vision_only (vision LLM + Tesseract + rules)", event_id)
         available, vision_models = await _vision_available()
         if available:
             chosen = settings.vision_model if settings.vision_model in vision_models else vision_models[0]
-            pipeline_metrics.set_stage(event_id, "vision_llm")
-            vision_result = await image_safety.classify_image(
-                image_bytes=image_bytes,
-                app_name=app_name, source_type="image",
-                age_group=age_group, timestamp=timestamp.isoformat(),
-                related_ocr_text="", watch_phrases=custom_phrases, model=chosen,
+            pipeline_metrics.set_stage(event_id, "vision+tesseract")
+            vision_task = asyncio.create_task(
+                image_safety.classify_image(
+                    image_bytes=image_bytes,
+                    app_name=app_name, source_type="image",
+                    age_group=age_group, timestamp=timestamp.isoformat(),
+                    related_ocr_text="", watch_phrases=custom_phrases, model=chosen,
+                )
             )
-            extracted_text = (vision_result.get("visible_text") or "").strip()
+            tess_task = asyncio.create_task(asyncio.to_thread(_tesseract_extract, image_bytes))
+            vision_result, tess_text = await asyncio.gather(vision_task, tess_task)
+            tesseract_used = bool(tess_text)
+            extracted_text = _merge_ocr_text(
+                vision_result.get("visible_text") or "",
+                tess_text,
+            )
         else:
             log.warning("vision_only tier but no vision model; falling back to Tesseract")
             pipeline_metrics.set_stage(event_id, "tesseract")
             extracted_text = _tesseract_extract(image_bytes)
+            tesseract_used = bool(extracted_text)
         # Rules engine on text (free, deterministic, no LLM cost).
         # Includes any parent-configured custom watch phrases for this profile.
         if extracted_text:
             pipeline_metrics.set_stage(event_id, "rules")
             matches = risk_rules.evaluate(extracted_text, custom_phrases=custom_phrases)
             if matches:
-                rules_only_severity = risk_rules.max_severity(matches)
                 text_result = _rules_result_from_matches(matches)
 
     else:  # tier == "full"
@@ -321,9 +362,11 @@ async def _ingest_inner(
         text_task = asyncio.create_task(_text_path())
         vision_result = await vision_task
         tess_text, text_result = await text_task
-        # Prefer vision LLM's OCR (better quality) if it produced text;
-        # otherwise use Tesseract's.
-        extracted_text = (vision_result.get("visible_text") or "").strip() or tess_text
+        tesseract_used = bool(tess_text)
+        extracted_text = _merge_ocr_text(
+            vision_result.get("visible_text") or "",
+            tess_text,
+        )
 
     # Apply deterministic rules to the final OCR text for every tier. In the
     # full tier, Tesseract can miss text that the vision model reads correctly;
@@ -386,7 +429,7 @@ async def _ingest_inner(
             "vision_model": vision_result.get("model"),
             "text_model": text_result.get("model"),
             "vision_used": bool(vision_result),
-            "tesseract_used": (not vision_result) and bool(extracted_text),
+            "tesseract_used": tesseract_used,
             "extracted_text_chars": len(extracted_text),
         },
         received_at=datetime.now(timezone.utc),

@@ -65,8 +65,11 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
             warnings.append(f"Vision model {settings.vision_model} is not installed — image-only risks (nudity/gore/weapons) are not detected.")
     if tier == "text_only":
         warnings.append("text_only tier: image-only risks (nudity/gore/weapons) are not detected on this hardware.")
-        if not tesseract_available:
+    if not tesseract_available:
+        if tier == "text_only":
             warnings.append("Tesseract OCR is not available — screenshots cannot be read at all in text_only tier.")
+        else:
+            warnings.append("Tesseract OCR fallback is not available — exact phrase detection depends on vision OCR.")
     if not (vision_status.available and text_status.available):
         protection_level = "rules_only"
     elif warnings:

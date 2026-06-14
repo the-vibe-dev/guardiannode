@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services import taxonomy
-from app.services.ollama_client import OllamaClient, OllamaError
+from app.services.ollama_client import OllamaClient, OllamaContextLengthError, OllamaError
 from app.settings import settings
 
 log = logging.getLogger(__name__)
@@ -112,18 +112,31 @@ async def classify_image(
 
     vision_image = _downscale_for_vision(image_bytes)
 
-    try:
-        response = await client.generate(
+    async def _generate(num_ctx: int) -> str:
+        return await client.generate(
             model=chosen,
             prompt=prompt,
             images=[vision_image],
             # num_ctx bounds the vision compute-graph size (the thing that OOM'd
             # qwen2.5vl on big frames). See settings.vision_num_ctx.
-            options={"temperature": 0.1, "num_ctx": settings.vision_num_ctx},
+            options={"temperature": 0.1, "num_ctx": num_ctx},
             format_json=True,
         )
+
+    try:
+        try:
+            response = await _generate(settings.vision_num_ctx)
+        except OllamaContextLengthError as e:
+            retry_ctx = max(8192, settings.vision_num_ctx * 2)
+            log.warning("%s; retrying vision classification with num_ctx=%d", e, retry_ctx)
+            response = await _generate(retry_ctx)
         parsed = _extract_json(response)
         if parsed is None:
+            log.warning(
+                "vision classifier returned no parseable JSON (model=%s response_chars=%d)",
+                chosen,
+                len(response),
+            )
             return result
         # Strict allowlist normalization — the model's JSON is untrusted and is
         # never merged wholesale into the result (hallucinated categories,

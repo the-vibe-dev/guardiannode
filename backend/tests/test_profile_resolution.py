@@ -132,6 +132,54 @@ async def test_screenshot_path_uses_device_assigned_profile_watch_phrase(db_sess
 
 
 @pytest.mark.asyncio
+async def test_vision_only_tesseract_catches_watch_phrase_when_vision_ocr_is_empty(
+    db_session, monkeypatch
+):
+    _mk_profile(db_session, "prof1", phrases=["Kale", "3253 Oak Dr"])
+    _mk_device(db_session, profile_id="prof1")
+
+    from app.services import screenshot_ingest
+
+    monkeypatch.setattr(screenshot_ingest.settings, "classifier_tier", "vision_only")
+
+    async def fake_vision_available():
+        return True, [screenshot_ingest.settings.vision_model]
+
+    async def fake_classify_image(**kwargs):
+        return {
+            "visible_text": "",
+            "risk_level": "none",
+            "score": 0,
+            "categories": [],
+            "confidence": 0.0,
+        }
+
+    monkeypatch.setattr(screenshot_ingest, "_vision_available", fake_vision_available)
+    monkeypatch.setattr(screenshot_ingest.image_safety, "classify_image", fake_classify_image)
+    monkeypatch.setattr(
+        screenshot_ingest,
+        "_tesseract_extract",
+        lambda b: "Customer: Kale\nAddress: 3253 Oak Dr SW",
+    )
+
+    result = await screenshot_ingest.ingest_screenshot(
+        db_session,
+        image_bytes=b"\xff\xd8\xff\xe0fake",
+        device_id="dev1",
+        app_name="putty.exe",
+    )
+    db_session.commit()
+
+    assert result["risk_level"] == "high"
+    assert "custom_watch" in result["categories"]
+    risk = db_session.get(RiskResult, result["risk_id"])
+    assert set(risk.rules_triggered) == {
+        "custom_watch:3253 oak dr",
+        "custom_watch:kale",
+    }
+
+
+@pytest.mark.asyncio
 async def test_invalid_payload_profile_cannot_override_device_assignment(db_session):
     _mk_profile(db_session, "prof1", phrases=["watchword"])
     _mk_device(db_session, profile_id="prof1")

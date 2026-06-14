@@ -29,6 +29,10 @@ class OllamaError(Exception):
     pass
 
 
+class OllamaContextLengthError(OllamaError):
+    pass
+
+
 class OllamaClient:
     def __init__(self, base_url: str | None = None, timeout: float = 60.0):
         self.base_url = (base_url or settings.ollama_url).rstrip("/")
@@ -93,9 +97,17 @@ class OllamaClient:
                 r = await client.post(f"{self.base_url}/api/generate", json=body)
                 r.raise_for_status()
                 data = r.json()
+                if data.get("done_reason") == "length":
+                    raise OllamaContextLengthError(
+                        f"Ollama context exhausted for model {model} "
+                        f"(prompt={data.get('prompt_eval_count', '?')} "
+                        f"output={data.get('eval_count', '?')})"
+                    )
                 # Some models (Qwen3.x) emit JSON in the `thinking` field if
                 # think mode is on; fall back to that when response is empty.
                 return data.get("response") or data.get("thinking") or ""
+        except OllamaContextLengthError:
+            raise
         except httpx.HTTPError as e:
             raise OllamaError(f"Ollama HTTP error: {e}") from e
 

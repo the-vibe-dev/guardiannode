@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     # (Ollama bug ollama/ollama#14798) — do not use it. qwen2.5vl:7b also works
     # but offloads ~2 GB to CPU and runs ~30s.
     vision_model: str = "qwen3-vl:8b-instruct"
-    vision_num_ctx: int = 4096
+    # Full-screen OCR can itself be several thousand tokens. 4096 truncated
+    # otherwise-valid JSON on real 1600x900 desktop frames.
+    vision_num_ctx: int = 8192
     classifier_timeout_seconds: int = 30
     rules_version: str = "0.1.0"
     # Classifier tier: governs which paths run per screenshot.

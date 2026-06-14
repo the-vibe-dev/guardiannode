@@ -52,24 +52,24 @@ install_system_packages() {
     ubuntu|debian|raspbian|linuxmint|pop)
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
-      apt-get install -y -qq python3 python3-venv python3-pip sqlite3 curl ca-certificates git avahi-daemon libnss-mdns
+      apt-get install -y -qq python3 python3-venv python3-pip sqlite3 curl ca-certificates git avahi-daemon libnss-mdns tesseract-ocr
       systemctl enable --now avahi-daemon || true
       ;;
     fedora|rhel|centos|rocky|almalinux)
-      dnf install -y python3 python3-pip sqlite curl ca-certificates git avahi nss-mdns || \
-        yum install -y python3 python3-pip sqlite curl git avahi nss-mdns
+      dnf install -y python3 python3-pip sqlite curl ca-certificates git avahi nss-mdns tesseract || \
+        yum install -y python3 python3-pip sqlite curl git avahi nss-mdns tesseract
       systemctl enable --now avahi-daemon || true
       ;;
     arch|manjaro|endeavouros)
-      pacman -Sy --noconfirm python python-pip sqlite curl ca-certificates git avahi nss-mdns
+      pacman -Sy --noconfirm python python-pip sqlite curl ca-certificates git avahi nss-mdns tesseract tesseract-data-eng
       systemctl enable --now avahi-daemon || true
       ;;
     opensuse*|sles)
-      zypper -n install python3 python3-pip sqlite3 curl git avahi nss-mdns
+      zypper -n install python3 python3-pip sqlite3 curl git avahi nss-mdns tesseract-ocr
       systemctl enable --now avahi-daemon || true
       ;;
     *)
-      yellow "Unknown distro '$DISTRO_ID' — please install python3, pip, sqlite3, curl, git manually."
+      yellow "Unknown distro '$DISTRO_ID' — please install python3, pip, sqlite3, curl, git, and Tesseract OCR manually."
       ;;
   esac
 }
@@ -143,16 +143,6 @@ install_ollama() {
     yellow "text_only tier without LLM — skipping Ollama entirely."
     return
   fi
-  # Tesseract is the CPU OCR engine for text_only tier (vision tiers use the LLM's OCR).
-  if [ "$GN_TIER" = "text_only" ]; then
-    blue "Installing tesseract-ocr for the CPU OCR path..."
-    case "$DISTRO_ID" in
-      ubuntu|debian|raspbian|linuxmint|pop) apt-get install -y -qq tesseract-ocr ;;
-      fedora|rhel|centos|rocky|almalinux)   dnf install -y tesseract || yum install -y tesseract ;;
-      arch|manjaro|endeavouros)             pacman -S --noconfirm tesseract tesseract-data-eng ;;
-      opensuse*|sles)                       zypper -n install tesseract-ocr ;;
-    esac
-  fi
   # Shared bootstrap: installs Ollama if missing, pulls models per tier.
   blue "Configuring Ollama + pulling models for tier=$GN_TIER..."
   GN_TIER="$GN_TIER" \
@@ -183,6 +173,7 @@ Environment="GUARDIANNODE_TEXT_MODEL=${GN_TEXT_MODEL:-llama3.2:3b}"
 Environment="GUARDIANNODE_VISION_MODEL=${GN_VISION_MODEL:-qwen3-vl:8b-instruct}"
 Environment="GUARDIANNODE_OLLAMA_URL=${GN_OLLAMA_URL:-http://127.0.0.1:11434}"
 Environment="GUARDIANNODE_CLASSIFIER_TIMEOUT_SECONDS=120"
+Environment="GUARDIANNODE_VISION_NUM_CTX=8192"
 WorkingDirectory=$GN_HOME/src/backend
 ExecStart=$GN_HOME/venv/bin/python -m uvicorn app.main:app --host $GN_BIND_HOST --port $GN_BIND_PORT
 Restart=on-failure
