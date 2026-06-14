@@ -335,14 +335,30 @@ def _open_dashboard() -> None:
     webbrowser.open(url)
 
 
+def _self_test() -> None:
+    """Validate dependencies required by the frozen tray without opening UI."""
+    import _tkinter  # noqa: F401
+    import pystray  # noqa: F401
+    from PIL import Image  # noqa: F401
+
+    interpreter = tk.Tcl()
+    if not interpreter.eval("info patchlevel"):
+        raise RuntimeError("Tcl interpreter did not report a version")
+
+
 def cli() -> None:
     parser = argparse.ArgumentParser(description="GuardianNode tray app")
     parser.add_argument("--config", default=str(default_config_path()))
     parser.add_argument("--prompt", choices=["password", "duration"], help=argparse.SUPPRESS)
     parser.add_argument("--out", help=argparse.SUPPRESS)
+    parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    if args.self_test:
+        _self_test()
+        return
 
     # Dialog-rendering mode: a clean child process with its own main thread.
     # Must run BEFORE the single-instance mutex so the tray can spawn it.

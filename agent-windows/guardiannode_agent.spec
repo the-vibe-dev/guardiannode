@@ -25,7 +25,6 @@ def make_analysis(script):
         binaries=[],
         datas=datas,
         hiddenimports=hiddenimports,
-        excludes=["tkinter"],
     )
 
 
@@ -45,7 +44,8 @@ pyz_watchdog = PYZ(a_watchdog.pure)
 
 exe_agent = EXE(
     pyz_agent, a_agent.scripts, [],
-    exclude_binaries=True, name="GuardianNodeAgent", console=True, icon=None,
+    # The monitoring agent logs to ProgramData and must not open a console.
+    exclude_binaries=True, name="GuardianNodeAgent", console=False, icon=None,
 )
 exe_tray = EXE(
     pyz_tray, a_tray.scripts, [],

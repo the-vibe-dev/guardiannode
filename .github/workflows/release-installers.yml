@@ -71,18 +71,15 @@ jobs:
         working-directory: agent-windows
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e ".[windows]"
           pip install pyinstaller
       - name: Build agent bundle
         working-directory: agent-windows
-        run: pyinstaller --noconfirm guardiannode_agent.spec
-      - name: Smoke-test bundle exists
+        run: pyinstaller --clean --noconfirm guardiannode_agent.spec
+      - name: Verify agent bundle
         working-directory: agent-windows
         shell: pwsh
-        run: |
-          foreach ($exe in "GuardianNodeAgent.exe","GuardianNodeTray.exe","GuardianNodeWatchdog.exe") {
-            if (-not (Test-Path "dist/GuardianNodeAgent/$exe")) { throw "$exe missing" }
-          }
+        run: ./scripts/verify_windows_bundle.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: agent-bundle

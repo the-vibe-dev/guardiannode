@@ -92,11 +92,10 @@ cd agent-windows
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[windows]" pyinstaller
-.\.venv\Scripts\pyinstaller --noconfirm --windowed --name GuardianNodeAgent src\main.py
-.\.venv\Scripts\pyinstaller --noconfirm --windowed --name GuardianNodeTray src\tray_app.py
-.\.venv\Scripts\pyinstaller --noconfirm --console --name GuardianNodeWatchdog src\watchdog.py
+.\.venv\Scripts\pyinstaller --clean --noconfirm guardiannode_agent.spec
+.\scripts\verify_windows_bundle.ps1
 ```
 
-Output is written under `dist/`. The release installer expects the agent bundle
-under `installer/build/prebuilt/agent`; see
+The shared bundle is written to `dist/GuardianNodeAgent/`. The release installer
+expects that complete directory under `installer/build/prebuilt/agent`; see
 [`POWER_USER_INSTALL.md`](POWER_USER_INSTALL.md) for the full installer build.

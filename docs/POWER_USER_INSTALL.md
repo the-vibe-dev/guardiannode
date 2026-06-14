@@ -40,9 +40,8 @@ cd guardiannode\agent-windows
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[windows]" pyinstaller
-.\.venv\Scripts\pyinstaller --noconfirm --windowed --name GuardianNodeAgent src\main.py
-.\.venv\Scripts\pyinstaller --noconfirm --windowed --name GuardianNodeTray src\tray_app.py
-.\.venv\Scripts\pyinstaller --noconfirm --console --name GuardianNodeWatchdog src\watchdog.py
+.\.venv\Scripts\pyinstaller --clean --noconfirm guardiannode_agent.spec
+.\scripts\verify_windows_bundle.ps1
 ```
 
 Stage the bundle for the installer:
@@ -51,8 +50,6 @@ Stage the bundle for the installer:
 cd ..
 New-Item -ItemType Directory -Force installer\build\prebuilt\agent | Out-Null
 Copy-Item agent-windows\dist\GuardianNodeAgent\* installer\build\prebuilt\agent -Recurse -Force
-Copy-Item agent-windows\dist\GuardianNodeTray\GuardianNodeTray.exe installer\build\prebuilt\agent -Force
-Copy-Item agent-windows\dist\GuardianNodeWatchdog\GuardianNodeWatchdog.exe installer\build\prebuilt\agent -Force
 ```
 
 Compile `installer\child-device-windows\GuardianNodeChildSetup.iss` with Inno
