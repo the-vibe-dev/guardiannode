@@ -23,8 +23,8 @@ class Screenshot:
     width: int
     height: int
     jpeg_bytes: bytes
-    phash: int  # 64-bit dHash for cheap change detection (region-scoped when available)
-    full_phash: int | None = None  # 64-bit dHash of the whole encoded frame
+    phash: int  # high-resolution dHash, region-scoped when available
+    full_phash: int | None = None  # 256-bit dHash of the whole encoded frame
 
 
 def _encode_jpeg(img, quality: int = 80, max_dim: int = 1600) -> bytes:
@@ -91,7 +91,7 @@ def capture_active(rect: tuple[int, int, int, int] | None) -> Screenshot | None:
         with mss.mss() as sct:
             shot = sct.grab(region)
             img = Image.frombytes("RGB", shot.size, shot.rgb)
-            phash = _dhash(img)
+            phash = _dhash(img, hash_size=16)
             jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
             return Screenshot(width=w, height=h, jpeg_bytes=jpeg, phash=phash, full_phash=phash)
     except Exception as e:
@@ -142,7 +142,10 @@ def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screen
                     phash_img = img.crop((x0, y0, x0 + w, y0 + h))
 
             full_phash = _dhash(img, hash_size=16)
-            phash = _dhash(phash_img)
+            # A 64-bit hash is too coarse for a few newly typed terminal
+            # characters. Match the full-frame hash resolution so small text
+            # changes survive downsampling.
+            phash = _dhash(phash_img, hash_size=16)
             jpeg = _encode_jpeg(img, quality=80, max_dim=1600)
             return Screenshot(
                 width=mon["width"],

@@ -40,15 +40,15 @@ class AgentConfig:
     # Perceptual hash Hamming threshold over the active-window dHash.
     # 2 catches a single-line text edit; 0-1 catches even cursor blink (too noisy).
     phash_threshold: int = 2
-    # Full-screen duplicate suppression. In full-screen mode, small focus/title
-    # changes can alter the active-window hash while the visible desktop is
-    # effectively unchanged. Do not resend near-identical full-screen frames.
-    full_screen_duplicate_threshold: int = 4
     # Whole-screen change trigger (Hamming over the 256-bit full-frame dHash).
     # Catches a background window loading new content while the foreground
     # window is unchanged (e.g. a browser behind Notepad). Keep above the
     # duplicate threshold so clock ticks / cursor noise don't trigger.
     full_screen_change_threshold: int = 10
+    # Guarantee a fresh frame even when perceptual hashing misses tiny text
+    # edits. The live capture policy may shorten the normal cadence, while this
+    # bounds the longest period without a frame from the visible desktop.
+    max_capture_interval_seconds: int = 15
     # Default to the visible desktop so typed risk in simple apps such as
     # Notepad is still reviewed. App names remain useful context, not a gate.
     full_screen_capture_enabled: bool = True
@@ -56,7 +56,7 @@ class AgentConfig:
         "Roblox.exe", "Discord.exe", "notepad.exe", "chrome.exe", "msedge.exe",
         "firefox.exe", "brave.exe", "outlook.exe", "Teams.exe",
         "Steam.exe", "EpicGamesLauncher.exe", "MinecraftLauncher.exe",
-        "javaw.exe",
+        "javaw.exe", "putty.exe", "WindowsTerminal.exe", "wt.exe",
     ])
     log_level: str = "INFO"
     dry_run: bool = False

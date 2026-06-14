@@ -44,18 +44,17 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
     """Screenshot loop. Captures active monitored window, perceptual-hash dedups,
     queues JPEG bytes for the sender to ship to the backend.
     """
-    # Perceptual-hash threshold. Hamming distance over 64-bit dHash computed
+    # Perceptual-hash threshold. Hamming distance over 256-bit dHash computed
     # on the foreground window region (see capture_full(active_rect=…)).
     #  - 0..1  : near-identical (cursor blink, idle screen): skip
     #  - 2..3  : a single-character / single-line edit in a text app: send
     #  - 4+    : clear scene change: send
-    FULL_DUP_THRESHOLD = int(getattr(cfg, "full_screen_duplicate_threshold", 0) or 3)
-
     last_phash: int | None = None
     last_full_phash: int | None = None
     sent_count = 0
     skipped_count = 0
     last_log_summary = time.time()
+    last_sent_at = 0.0
 
     while True:
         try:
@@ -74,7 +73,12 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             app_name = active.name if active else None
             win_title = win.title if win else None
             active_rect = win.rect if win else None
-            in_monitored = is_monitored(active, cfg.monitored_apps)
+            # Full-screen mode means the visible desktop is the monitoring
+            # boundary. Every foreground app is therefore monitored; the app
+            # list only gates captures when full-screen mode is disabled.
+            in_monitored = cfg.full_screen_capture_enabled or is_monitored(
+                active, cfg.monitored_apps
+            )
 
             if not in_monitored and not cfg.full_screen_capture_enabled:
                 log.debug("active app is not monitored; skipping capture: %s", app_name)
@@ -100,13 +104,18 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 full_dist = hamming(last_full_phash, shot.full_phash)
             send = dist >= PHASH_THRESHOLD
 
-            # Foreground-hash triggers that the whole screen says are noise → skip.
-            if send and cfg.full_screen_capture_enabled and full_known and full_dist < FULL_DUP_THRESHOLD:
-                send = False
-
             # Whole-screen trigger: catches background windows changing content
             # while the foreground window (and its hash) stays identical.
             if not send and cfg.full_screen_capture_enabled and full_known and full_dist >= FULL_CHANGE_THRESHOLD:
+                send = True
+
+            # dHash can still miss a few glyphs changing in a dense chat or
+            # terminal. Never let dedup suppress the visible desktop forever.
+            max_interval = max(
+                cfg.ocr_cadence_seconds,
+                int(getattr(cfg, "max_capture_interval_seconds", 15) or 15),
+            )
+            if not send and time.time() - last_sent_at >= max_interval:
                 send = True
 
             if cfg.dry_run:
@@ -118,6 +127,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             if send:
                 last_phash = shot.phash
                 last_full_phash = shot.full_phash
+                last_sent_at = time.time()
                 sent_count += 1
                 payload = {
                     "image_bytes": shot.jpeg_bytes,
