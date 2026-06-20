@@ -1,6 +1,8 @@
 """Tests for the AES-GCM encryption service."""
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from app.services import encryption
@@ -47,11 +49,12 @@ def test_master_key_status_records_raw_key_metadata():
     status = encryption.master_key_status()
 
     assert status["key_version"] == encryption.current_key_version()
-    assert status["storage"] == "raw-file"
-    assert status["raw_key_present"] is True
-    assert status["dpapi_key_present"] is False
+    expected_storage = "dpapi-local-machine" if os.name == "nt" else "raw-file"
+    assert status["storage"] == expected_storage
+    assert status["raw_key_present"] is (os.name != "nt")
+    assert status["dpapi_key_present"] is (os.name == "nt")
     assert status["metadata_present"] is True
-    assert status["metadata"]["wrapping"] == "raw-file"
+    assert status["metadata"]["wrapping"] == expected_storage
     assert status["metadata"]["algorithm"] == "AES-256-GCM"
 
 
@@ -64,8 +67,9 @@ def test_existing_raw_key_loads_and_gets_metadata():
     assert encryption.get_master_key() == b"k" * 32
 
     status = encryption.master_key_status()
-    assert status["storage"] == "raw-file"
-    assert status["metadata"]["wrapping"] == "raw-file"
+    expected_storage = "dpapi-local-machine" if os.name == "nt" else "raw-file"
+    assert status["storage"] == expected_storage
+    assert status["metadata"]["wrapping"] == expected_storage
 
 
 def test_master_key_backup_export_import_roundtrip(tmp_path):
@@ -75,7 +79,9 @@ def test_master_key_backup_export_import_roundtrip(tmp_path):
     assert encryption.export_master_key_backup(backup, "correct horse battery staple") == backup
     assert b"master.key" not in backup.read_bytes()
 
-    encryption._key_path().unlink()
+    for path in (encryption._key_path(), encryption._dpapi_key_path()):
+        if path.exists():
+            path.unlink()
     encryption._metadata_path().unlink()
     encryption._reset_cache()
     encryption.import_master_key_backup(backup, "correct horse battery staple")
@@ -98,7 +104,9 @@ def test_master_key_backup_refuses_overwrite(tmp_path):
 def test_master_key_backup_rejects_wrong_passphrase(tmp_path):
     backup = tmp_path / "master-key-backup.json"
     encryption.export_master_key_backup(backup, "correct horse battery staple")
-    encryption._key_path().unlink()
+    for path in (encryption._key_path(), encryption._dpapi_key_path()):
+        if path.exists():
+            path.unlink()
     encryption._metadata_path().unlink()
     encryption._reset_cache()
 

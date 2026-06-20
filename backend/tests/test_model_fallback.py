@@ -6,8 +6,18 @@ import pytest
 from app.db.models import Device, RiskResult
 
 
+@pytest.fixture
+def ollama_unavailable(monkeypatch):
+    from app.services.ollama_client import OllamaClient, OllamaError
+
+    async def fail_generate(self, **kwargs):
+        raise OllamaError("test model unavailable")
+
+    monkeypatch.setattr(OllamaClient, "generate", fail_generate)
+
+
 @pytest.mark.asyncio
-async def test_llm_failure_marks_unclassified_status():
+async def test_llm_failure_marks_unclassified_status(ollama_unavailable):
     """When Ollama is unreachable, status flags the reduced protection."""
     from app.services import classifier
 
@@ -21,7 +31,7 @@ async def test_llm_failure_marks_unclassified_status():
 
 
 @pytest.mark.asyncio
-async def test_llm_failure_still_applies_rules():
+async def test_llm_failure_still_applies_rules(ollama_unavailable):
     from app.services import classifier
 
     result = await classifier.classify_text(redacted_text="free robux click here now")
@@ -31,7 +41,7 @@ async def test_llm_failure_still_applies_rules():
 
 
 @pytest.mark.asyncio
-async def test_status_persisted_on_risk_result(db_session):
+async def test_status_persisted_on_risk_result(db_session, ollama_unavailable):
     from app.services import event_ingest
 
     db_session.add(Device(device_id="dev1", hostname="kid-pc", paired=True))

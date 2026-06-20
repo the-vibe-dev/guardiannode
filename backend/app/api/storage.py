@@ -75,12 +75,18 @@ def _final_export_path(export_id: str) -> Path:
 
 
 def _fsync_path(path: Path) -> None:
+    flags = os.O_RDWR if os.name == "nt" else os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
     try:
-        fd = os.open(path, os.O_RDONLY)
+        fd = os.open(path, flags)
     except OSError:
         return
     try:
-        os.fsync(fd)
+        try:
+            os.fsync(fd)
+        except OSError:
+            if os.name != "nt":
+                raise
     finally:
         os.close(fd)
 

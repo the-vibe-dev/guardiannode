@@ -60,14 +60,14 @@ def _metadata_path() -> Path:
 
 def _write_restricted(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
     tmp.write_bytes(data)
     if os.name != "nt":
         try:
             os.chmod(tmp, 0o600)
         except OSError:
             pass
-    tmp.replace(path)
+    os.replace(tmp, path)
 
 
 def _load_raw_key(path: Path) -> bytes:
