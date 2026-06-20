@@ -22,7 +22,7 @@ Status definitions:
 | mDNS discovery hints | Experimental | Backend/agent | `backend/app/services/mdns_advertiser.py` | `agent-windows/tests/test_pairing_bootstrap.py` |
 | Windows tray/status UI | Experimental | Windows | `agent-windows/src/tray_app.py` | Manual Windows validation |
 | Windows watchdog | Experimental | Windows | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
-| Durable encrypted agent queue | Planned | Windows | Planned broker module | Not implemented |
+| Durable encrypted agent queue | Experimental | Windows | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |
 | Privileged Windows broker | Planned | Windows | Planned broker service | Not implemented |
 | Clipboard collector | Planned | Windows | Planned collector | Not implemented |
 | File collector | Planned | Windows | Planned collector | Not implemented |
