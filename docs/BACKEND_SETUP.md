@@ -32,10 +32,22 @@ and security/runtime flags. Use this to verify an installer-written
 
 ## First run
 
-1. Backend creates `~/.guardiannode/keys/master.key` (random 32 bytes, AES-GCM).
+1. Backend creates the evidence master key (random 32 bytes, AES-GCM). Windows
+   service installs store new keys as `keys/master.key.dpapi`; Linux/source
+   installs use `keys/master.key` with restrictive filesystem permissions.
 2. Backend creates `~/.guardiannode/guardiannode.db` (SQLite).
 3. Backend creates a one-time setup token in `keys/setup_token.json`.
 4. Setup wizard at `/setup` prompts for the setup token and admin account.
+
+Create a portable, passphrase-encrypted key backup before moving the backend to
+another machine. From a source checkout, run this in the `backend/` directory or
+an installed backend Python environment:
+
+```bash
+python -m app.services.encryption export-key-backup ~/guardiannode-master-key-backup.json
+```
+
+Store that backup separately from the database and evidence directory.
 
 ## Production install (Windows)
 

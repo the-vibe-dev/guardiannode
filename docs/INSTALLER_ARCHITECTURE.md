@@ -44,7 +44,8 @@ Target ACLs for clean-machine testing:
 |---|---|---|
 | `%ProgramData%\GuardianNode\keys\setup_token.json` | One-time setup token | SYSTEM + Administrators only; the server shortcut self-elevates before display |
 | `%ProgramData%\GuardianNode\keys\device_bootstrap_token.json` | One-time local device enrollment token | SYSTEM + Administrators create; current alpha agent reads during all-in-one enrollment only |
-| `%ProgramData%\GuardianNode\keys\master.key` | Evidence encryption key | SYSTEM + Administrators only; future releases should wrap it with DPAPI |
+| `%ProgramData%\GuardianNode\keys\master.key.dpapi` | DPAPI-wrapped evidence encryption key for new Windows backend installs | SYSTEM + Administrators only; machine-bound, so create a portable key backup before migration |
+| `%ProgramData%\GuardianNode\keys\master.key` | Legacy/raw evidence encryption key for migrated alpha installs | SYSTEM + Administrators only; remove only after a verified portable key backup |
 | `%ProgramData%\GuardianNode\evidence\` | Encrypted evidence blobs | SYSTEM + Administrators only |
 | `%ProgramData%\GuardianNode\server.env` | Backend service configuration | SYSTEM + Administrators modify |
 | `%ProgramData%\GuardianNode\agent.yaml` | Child capture configuration | Administrators modify; interactive users read |

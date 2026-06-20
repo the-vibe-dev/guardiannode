@@ -16,8 +16,10 @@ encryption key.
 
 This is a deliberate dead-end for dashboard access. GuardianNode is local-first
 and we have no back door. If you still have a backup of the backend data
-directory, including `keys/master.key`, encrypted evidence may be recoverable
-after restoring that backup.
+directory, including the evidence master key (`keys/master.key`,
+`keys/master.key.dpapi` on the original Windows machine, or a portable
+master-key backup), encrypted evidence may be recoverable after restoring that
+backup.
 
 Options:
 
@@ -27,8 +29,9 @@ Options:
   ```
   ⚠️ This is irreversible. Only do this if you've truly lost both keys.
 
-- **Restore from a backup.** If you backed up the backend data directory,
-  including `keys/master.key`, restore that backup.
+- **Restore from a backup.** If you backed up the backend data directory and
+  evidence master key, restore that backup. DPAPI-wrapped Windows keys are
+  machine-bound; use a portable key backup when moving to another PC.
 
 ## Best practice for the recovery code
 
@@ -39,4 +42,5 @@ Options:
 - Do NOT store it in the same Windows account/PC as GuardianNode is installed on, where ransomware could encrypt both at once.
 
 Also back up the backend data directory if you need to preserve encrypted
-evidence. Without `keys/master.key`, encrypted evidence may not be recoverable.
+evidence. Without the evidence master key or a portable key backup, encrypted
+evidence may not be recoverable.
