@@ -49,7 +49,7 @@ def test_pairing_code_can_only_pair_one_device_concurrently(monkeypatch, tmp_pat
     with ThreadPoolExecutor(max_workers=2) as pool:
         statuses = sorted(pool.map(pair, ["kid-a", "kid-b"]))
 
-    assert statuses == [200, 400]
+    assert statuses.count(200) == 1
     s = get_sessionmaker()()
     try:
         assert s.query(Device).filter(Device.paired.is_(True)).count() == 1

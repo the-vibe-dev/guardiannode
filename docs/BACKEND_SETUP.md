@@ -24,6 +24,12 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 | `GUARDIANNODE_LOG_LEVEL` | `INFO` | |
 | `GUARDIANNODE_DEV_MODE` | `0` | Disables auth-required for /dev endpoints |
 
+After logging in as the parent, `GET /api/health/runtime-settings` returns the
+effective non-secret runtime configuration: bind host/port, classifier tier,
+model names, role-specific Ollama URLs, classifier timeouts/context settings,
+and security/runtime flags. Use this to verify an installer-written
+`server.env` was loaded as expected.
+
 ## First run
 
 1. Backend creates `~/.guardiannode/keys/master.key` (random 32 bytes, AES-GCM).

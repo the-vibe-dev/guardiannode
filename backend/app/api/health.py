@@ -1,7 +1,10 @@
 """Health endpoint — no auth, useful for installer self-tests + dashboard live status."""
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from app import __version__
 from app.api.deps import current_user
@@ -20,6 +23,64 @@ def health() -> dict:
         "version": __version__,
         "service": "guardiannode-backend",
     }
+
+
+class RuntimeSettingsResponse(BaseModel):
+    version: str
+    bind: dict[str, str | int]
+    security: dict[str, str | bool | list[str]]
+    classifier: dict[str, str | int | bool | None]
+    ollama: dict[str, str]
+    retention: dict[str, int | bool]
+    device_offline: dict[str, int | bool]
+    database: dict[str, str]
+
+
+def _database_driver() -> str:
+    parsed = urlparse(settings.db_url_resolved)
+    return parsed.scheme or "unknown"
+
+
+@router.get("/health/runtime-settings", response_model=RuntimeSettingsResponse)
+def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse:
+    """Parent-only diagnostic view of effective non-secret runtime settings."""
+    allowed_hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    return RuntimeSettingsResponse(
+        version=__version__,
+        bind={"host": settings.bind_host, "port": settings.bind_port},
+        security={
+            "allowed_hosts": allowed_hosts,
+            "cors_allow_origin_configured": settings.cors_allow_origin is not None,
+            "dev_mode": settings.dev_mode,
+            "https_only_cookies": settings.https_only_cookies,
+            "mdns_enabled": settings.mdns_enabled,
+        },
+        classifier={
+            "tier": settings.classifier_tier,
+            "text_model": settings.text_model,
+            "vision_model": settings.vision_model,
+            "classifier_timeout_seconds": settings.classifier_timeout_seconds,
+            "vision_num_ctx": settings.vision_num_ctx,
+            "vision_max_image_edge": settings.vision_max_image_edge,
+            "tesseract_enabled": settings.tesseract_enabled,
+            "rules_version": settings.rules_version,
+        },
+        ollama={
+            "base_url": settings.ollama_url,
+            "text_url": settings.text_ollama_url_resolved,
+            "vision_url": settings.vision_ollama_url_resolved,
+        },
+        retention={
+            "cleanup_enabled": settings.retention_cleanup_enabled,
+            "cleanup_interval_seconds": settings.retention_cleanup_interval_seconds,
+        },
+        device_offline={
+            "alert_enabled": settings.device_offline_alert_enabled,
+            "after_seconds": settings.device_offline_after_seconds,
+            "check_interval_seconds": settings.device_offline_check_interval_seconds,
+        },
+        database={"driver": _database_driver()},
+    )
 
 
 @router.get("/health/pipeline")
