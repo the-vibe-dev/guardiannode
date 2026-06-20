@@ -12,8 +12,10 @@ import json
 import logging
 import smtplib
 import base64
+import ipaddress
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Any
@@ -30,6 +32,13 @@ SEVERITY_ROUTING = {
     "high": {"immediate": True},
     "medium": {"digest": True},
     "low": {"dashboard_only": True},
+}
+
+_METADATA_HOSTS = {
+    "169.254.169.254",
+    "100.100.100.200",
+    "metadata.google.internal",
+    "metadata",
 }
 
 
@@ -80,13 +89,40 @@ def _send_email(cfg: dict[str, Any], subject: str, body: str) -> tuple[bool, str
         return False, str(e)
 
 
-def _send_webhook(url: str, payload: dict[str, Any]) -> tuple[bool, str]:
+def _validate_webhook_url(url: str, *, allow_private: bool = False) -> tuple[bool, str]:
+    if len(url) > 2048:
+        return False, "webhook URL is too long"
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False, "webhook URL must start with http:// or https://"
+    if not parsed.hostname:
+        return False, "webhook URL must include a host"
+    host = parsed.hostname.strip().lower().strip("[]")
+    if host in _METADATA_HOSTS:
+        return False, "webhook URL targets a cloud metadata service"
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return (True, "ok") if allow_private else (False, "private/internal webhook URL requires explicit opt-in")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True, "ok"
+    if str(ip) in _METADATA_HOSTS:
+        return False, "webhook URL targets a cloud metadata service"
+    if ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_reserved or ip.is_unspecified or ip.is_multicast:
+        return (True, "ok") if allow_private else (False, "private/internal webhook URL requires explicit opt-in")
+    return True, "ok"
+
+
+def _send_webhook(url: str, payload: dict[str, Any], *, allow_private: bool = False) -> tuple[bool, str]:
     """POST a JSON payload to a generic webhook URL.
 
     The body uses common field names (``title``/``message``/``priority``) so the
     same call works against ntfy, Gotify, and most generic webhook receivers
     without per-service adapters. Local-only by design: no third-party SaaS.
     """
+    valid, detail = _validate_webhook_url(url, allow_private=allow_private)
+    if not valid:
+        return False, detail
     try:
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -133,6 +169,7 @@ def send_test_webhook(cfg: dict[str, Any]) -> tuple[bool, str]:
             "priority": "default",
             "severity": "test",
         },
+        allow_private=bool(cfg.get("webhook_allow_private", False)),
     )
 
 
@@ -211,6 +248,7 @@ def dispatch(
                 "device": alert.device_id or "unknown",
                 "time": datetime.now(timezone.utc).isoformat(),
             },
+            allow_private=bool(cfg.get("webhook_allow_private", False)),
         )
         nl = NotificationLog(
             alert_id=alert.alert_id,

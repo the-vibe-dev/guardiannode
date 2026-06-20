@@ -36,7 +36,15 @@ def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
     pending.write_text(json.dumps({"backend_url": "http://srv:8787", "code": "123456"}))
     device = tmp_path / "device.json"
 
-    def fake_pair(backend_url, code, hostname, platform="windows", agent_version="0.1.0-alpha.1", local_bootstrap=False):
+    def fake_pair(
+        backend_url,
+        code,
+        hostname,
+        platform="windows",
+        agent_version="0.1.0-alpha.1",
+        local_bootstrap=False,
+        setup_token=None,
+    ):
         assert backend_url == "http://srv:8787"
         assert code == "123456"
         assert hostname == "kid-pc"
@@ -51,6 +59,35 @@ def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
     assert saved["device_token"] == "token42"
     assert saved["backend_url"] == "http://srv:8787"
     assert not pending.exists(), "pending file must be removed after success"
+
+
+def test_bootstrap_reads_setup_token_for_local_bootstrap(tmp_path, monkeypatch):
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({"backend_url": "http://127.0.0.1:8787", "local_bootstrap": True}))
+    device = tmp_path / "device.json"
+    token_dir = tmp_path / "keys"
+    token_dir.mkdir()
+    (token_dir / "setup_token.json").write_text(json.dumps({"token": "setup-secret"}))
+
+    def fake_pair(
+        backend_url,
+        code,
+        hostname,
+        platform="windows",
+        agent_version="0.1.0-alpha.1",
+        local_bootstrap=False,
+        setup_token=None,
+    ):
+        assert backend_url == "http://127.0.0.1:8787"
+        assert local_bootstrap is True
+        assert setup_token == "setup-secret"
+        return "dev-local", "tok-local"
+
+    monkeypatch.setattr(pairing_client, "pair_with_server", fake_pair)
+    result = pairing_client.bootstrap_pairing(
+        "family-pc", "0.1.0-alpha.1", pending_path=pending, device_path=device,
+    )
+    assert result["device_id"] == "dev-local"
 
 
 def test_bootstrap_removes_pending_on_rejected_code(tmp_path, monkeypatch):

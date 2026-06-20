@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import settings as settings_mod
@@ -29,6 +30,18 @@ def get_sessionmaker() -> sessionmaker[Session]:
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(bind=get_engine(), autoflush=False, autocommit=False, future=True)
     return _SessionLocal
+
+
+def begin_immediate_if_sqlite(session: Session) -> None:
+    """Acquire SQLite's write lock before read-check-write state transitions.
+
+    Setup and pairing both need "look up current state, then insert/update" to
+    be atomic under concurrent HTTP requests. SQLite's default deferred
+    transactions let two requests observe the same pre-write state; BEGIN
+    IMMEDIATE serializes those flows for the default deployment.
+    """
+    if session.get_bind().dialect.name == "sqlite":
+        session.execute(text("BEGIN IMMEDIATE"))
 
 
 @contextmanager

@@ -17,12 +17,19 @@ You'll need:
 
 1. Download `GuardianNodeServerSetup-0.1.0-alpha.1.exe` from [Releases](https://github.com/the-vibe-dev/guardiannode/releases).
 2. Run the installer.
-3. The wizard walks you through:
-   - Admin account + password + recovery code (write it down!)
-   - Network mode — pick **"Other devices on my home network"** (this is the whole point of separated mode)
-   - When Windows Firewall prompts, click **Allow access**.
-   - Hardware detect → AI model size → automatic download (5–20 minutes)
-4. When done, the wizard shows you the dashboard URL like `http://192.168.1.42:8787`. Write it down or bookmark it.
+3. The installer detects hardware, installs/pulls the AI model, starts the backend on `127.0.0.1`, and opens the local setup page.
+4. Use the Start Menu **Show Setup Token** shortcut, enter that token in the setup page, then create the parent account and recovery code.
+5. To use a child PC on your LAN during this alpha, manually edit `%ProgramData%\GuardianNode\server.env` as an administrator:
+   ```text
+   GUARDIANNODE_BIND_HOST=0.0.0.0
+   GUARDIANNODE_MDNS_ENABLED=false
+   ```
+6. Restart the backend service and add a private-network firewall rule:
+   ```powershell
+   Restart-Service GuardianNodeBackend
+   New-NetFirewallRule -DisplayName "GuardianNode Backend (LAN)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private
+   ```
+7. Find the server's LAN IP and write down the dashboard URL, for example `http://192.168.1.42:8787`.
 
 ### If your server is Linux
 
@@ -38,9 +45,37 @@ cd guardiannode/installer/server-linux
 docker compose up -d
 ```
 
-In both cases, open `http://<server-ip>:8787/setup` in a browser and complete:
-- Admin account + password + recovery code
-- AI model selection + pull
+For the native installer, open `http://127.0.0.1:8787/setup` on the server and
+enter the printed one-time setup token. For Docker, open
+`http://127.0.0.1:8787/setup` on the Docker host and read the token from the
+container logs or data volume.
+
+To use a child PC on your LAN during this alpha, manually bind the backend to
+the LAN after first-run setup:
+
+Native systemd:
+
+```bash
+sudo systemctl edit guardiannode-backend
+```
+
+Add:
+
+```ini
+[Service]
+Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"
+Environment="GUARDIANNODE_MDNS_ENABLED=false"
+```
+
+Then run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart guardiannode-backend
+```
+
+Docker Compose keeps the host port bound to loopback by default. Change the
+backend port mapping to `8787:8787`, then run `docker compose up -d` again.
 
 Separated mode currently uses local-network HTTP unless you add TLS, Tailscale,
 WireGuard, or a trusted reverse proxy. Use it only on a trusted LAN/VPN during
@@ -52,7 +87,6 @@ Go to your dashboard URL (e.g. `http://192.168.1.42:8787`). Sign in.
 
 Click **Devices** in the left sidebar → **Add Device**. The dashboard shows you:
 - A **6-digit pairing code** (valid for 10 minutes)
-- A **QR code** containing the same info
 
 Keep this page open while you walk to the kid's PC.
 
@@ -61,15 +95,9 @@ Keep this page open while you walk to the kid's PC.
 1. Download `GuardianNodeChildSetup-0.1.0-alpha.1.exe` to the kid's PC.
 2. Run it. (See [SmartScreen guide](when-windows-says-protected-your-pc.md) if Windows complains.)
 3. On wizard page 2, pick **"Connect to existing GuardianNode server"**.
-4. Set up your parent account on this PC (same password as the server is recommended for simplicity).
-5. On the "Server connection" page, the installer **automatically searches your network** and shows discovered servers:
-   ```
-   ✅ Found 1 GuardianNode server on your network:
-      ☐ HOME-SERVER (192.168.1.42)
-   ```
-   Click your server, then click **Next** and enter the 6-digit pairing code from your dashboard.
-6. **If no servers are found**, click "Type the address manually" and enter the URL and pairing code by hand.
-7. Continue with monitored-apps setup (same as the all-in-one guide).
+4. Enter the explicit server URL, for example `http://192.168.1.42:8787`.
+5. Enter the 6-digit pairing code from your dashboard.
+6. Continue the installer.
 
 ## Step 4 — Verify
 
@@ -81,7 +109,7 @@ captures a meaningful screen change. That confirms the pipeline works.
 
 ## Pausing on the child's PC
 
-When you use the kid's PC, right-click the GuardianNode tray icon → **Pause monitoring** → enter your parent password.
+When you use the kid's PC, right-click the GuardianNode tray icon → **Pause monitoring** → enter your parent password. In separated mode, local tray password verification requires either a local parent hash or an HTTPS backend URL; use the dashboard **Devices → Pause** button for plain-HTTP LAN setups.
 
 ## Multiple children
 

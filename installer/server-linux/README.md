@@ -19,8 +19,11 @@ What it does:
 8. Starts the service and prints the local dashboard URL plus one-time setup token
 
 Open the printed loopback URL in a browser on the server to complete first-run
-setup (admin account + recovery code + AI model pull). Fresh installs do not
-bind to the LAN until an authenticated parent enables LAN access.
+setup (admin account + recovery code). Fresh installs do not bind to the LAN.
+For this alpha, enabling a separated-server deployment is a manual admin task:
+set `GUARDIANNODE_BIND_HOST=0.0.0.0` in the systemd environment override,
+restart `guardiannode-backend`, and add an explicit firewall rule only for your
+trusted LAN or VPN.
 
 ## B) Docker Compose (recommended for home-server enthusiasts)
 
@@ -56,14 +59,15 @@ After the backend is up, pull the default models:
 ```bash
 # native install
 sudo -u guardiannode ollama pull llama3.2:3b
-sudo -u guardiannode ollama pull llava-phi3
+sudo -u guardiannode ollama pull qwen3-vl:8b-instruct
 
 # docker
 docker exec guardiannode_ollama ollama pull llama3.2:3b
-docker exec guardiannode_ollama ollama pull llava-phi3
+docker exec guardiannode_ollama ollama pull qwen3-vl:8b-instruct
 ```
 
-Or use the web setup wizard at `http://127.0.0.1:8787` which has a model picker.
+Then open `http://127.0.0.1:8787/models` after setup to confirm the text and
+vision endpoints can see the installed models.
 
 ## Uninstall
 

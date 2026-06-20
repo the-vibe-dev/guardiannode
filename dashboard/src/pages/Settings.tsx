@@ -60,14 +60,14 @@ export default function Settings() {
     reload().catch((e) => setErr(e.message));
   }, []);
 
-  async function run(label: string, fn: () => Promise<any>, done: string) {
+  async function run(label: string, fn: () => Promise<any>, done: string | ((result: any) => string)) {
     setBusy(label);
     setErr(null);
     setMsg(null);
     try {
-      await fn();
+      const result = await fn();
       await reload();
-      setMsg(done);
+      setMsg(typeof done === "function" ? done(result) : done);
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -145,8 +145,16 @@ export default function Settings() {
               onChange={(webhook_url) => setNotifications({ ...notifications, webhook_url })}
             />
             <p className="mt-1 text-xs text-gray-400">
-              Optional. A JSON POST is sent to this local/self-hosted URL for immediate-severity alerts.
+              Optional. A JSON POST is sent for immediate-severity alerts.
             </p>
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={Boolean(notifications.webhook_allow_private)}
+                onChange={(e) => setNotifications({ ...notifications, webhook_allow_private: e.target.checked })}
+              />
+              Allow private/internal webhook URL
+            </label>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -211,11 +219,11 @@ export default function Settings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => run("export", api.exportStorage, "Encrypted export created.")}
+            onClick={() => run("export", api.exportStorage, (result) => `Encrypted .gnexport created at ${result.path}.`)}
             disabled={busy !== null}
             className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
           >
-            Export encrypted ZIP
+            Export encrypted .gnexport
           </button>
           <button
             onClick={() => run("wipe-screenshots", () => api.wipeStorage({ screenshots: true }), "Screenshots wiped.")}

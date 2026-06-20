@@ -1,7 +1,8 @@
 """mDNS / Zeroconf advertiser.
 
-The backend announces itself on the LAN as `_guardiannode._tcp.local` so
-child-device installers can auto-discover it.
+The backend can announce itself on the LAN as `_guardiannode._tcp.local`.
+Discovery is advisory only; child installs still require an explicit trusted
+server URL.
 """
 from __future__ import annotations
 

@@ -40,14 +40,15 @@ def _set_json(session: Session, key: str, value: dict[str, Any]) -> None:
 
 class NotificationSettings(BaseModel):
     enabled: bool = False
-    host: str = ""
+    host: str = Field(default="", max_length=255)
     port: int = Field(default=587, ge=1, le=65535)
     tls_mode: str = Field(default="starttls", pattern="^(starttls|ssl|none)$")
-    username: str = ""
+    username: str = Field(default="", max_length=255)
     password: str | None = None
-    from_address: str = ""
-    to_address: str = ""
-    webhook_url: str = ""
+    from_address: str = Field(default="", max_length=320)
+    to_address: str = Field(default="", max_length=320)
+    webhook_url: str = Field(default="", max_length=2048)
+    webhook_allow_private: bool = False
     immediate_min_severity: str = Field(default="high", pattern="^(critical|high|medium|low)$")
     daily_digest_enabled: bool = True
     daily_digest_time: str = "08:00"
@@ -65,6 +66,7 @@ def _public_notifications(data: dict[str, Any]) -> dict[str, Any]:
         "from_address": data.get("from_address", ""),
         "to_address": data.get("to_address", ""),
         "webhook_url": data.get("webhook_url", ""),
+        "webhook_allow_private": bool(data.get("webhook_allow_private", False)),
         "immediate_min_severity": data.get("immediate_min_severity", "high"),
         "daily_digest_enabled": bool(data.get("daily_digest_enabled", True)),
         "daily_digest_time": data.get("daily_digest_time", "08:00"),

@@ -147,8 +147,8 @@ docker compose up -d
 
 Open `http://127.0.0.1:8787/setup` on the server, enter the one-time setup token
 printed by the installer or stored in the server token file, create the parent
-account, and pull models. Then enable LAN access from an authenticated admin
-session before using **Devices -> Add device** to pair the child PC with
+account, and pull models. Then follow the manual LAN binding/firewall steps in
+the server + child guide before using **Devices -> Add device** to pair the child PC with
 `GuardianNodeChildSetup-0.1.0-alpha.1.exe`.
 
 Do not expose the backend directly to the public internet during alpha testing.

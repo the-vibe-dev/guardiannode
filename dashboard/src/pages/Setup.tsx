@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 
 interface Props {
-  onComplete: () => void;
+  onComplete: (user: { display_name: string; role: string }) => void;
 }
 
 export default function Setup({ onComplete }: Props) {
@@ -39,8 +39,9 @@ export default function Setup({ onComplete }: Props) {
           recovery_code: recovery!.code,
           setup_token: setupToken.trim(),
         });
+        const user = await api.me();
         setStep("done");
-        setTimeout(onComplete, 1500);
+        setTimeout(() => onComplete(user), 1500);
       }
     } catch (e: any) {
       setError(e.message || "Setup failed");
@@ -65,8 +66,9 @@ export default function Setup({ onComplete }: Props) {
             <p>Welcome. Let's set up GuardianNode on this PC.</p>
             <p className="text-sm text-gray-600">
               GuardianNode runs entirely on your own hardware. It does not send your child's
-              data to any cloud service. You're about to set the parent password and generate
-              a recovery code that you'll need if you ever forget your password.
+              data to any cloud service by default. External email or webhook alerts can send
+              alert summaries to parent-configured services. You're about to set the parent
+              password and generate a recovery code for dashboard access.
             </p>
             <label className="block">
               <span className="text-sm text-gray-600">Your display name (e.g. "Mom"):</span>
@@ -105,7 +107,8 @@ export default function Setup({ onComplete }: Props) {
             </div>
             <p className="text-xs text-gray-600">
               Store this somewhere safe (filing cabinet, fireproof box, password manager). If you lose
-              your password and this code, your data cannot be recovered. This is by design.
+              your password and this code, dashboard access cannot be recovered. Evidence recovery
+              also requires the server master key in the backend data directory.
             </p>
             <label className="flex items-start gap-2 text-sm">
               <input type="checkbox" className="mt-1" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />

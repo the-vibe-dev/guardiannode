@@ -92,7 +92,8 @@ Then on the child's PC, get a pairing code from the dashboard (**Devices → Add
 
 Fresh servers bind to `127.0.0.1` and require the one-time setup token printed by
 the installer or stored in the server token file. Complete first-run setup on
-the server before enabling LAN access.
+the server, then follow the manual LAN binding/firewall steps in the server +
+child guide before pairing another PC.
 
 Step-by-step with screenshots: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
 

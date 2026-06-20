@@ -10,9 +10,11 @@ from ulid import ULID
 
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, User
+from app.db.session import begin_immediate_if_sqlite
 from app.services import device_tokens, pairing as pairing_svc, rate_limit
 from app.services.device_state import effective_paused_until, is_device_paused
 from app.services.audit import log_action
+from app.services.setup_token import verify_setup_token
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -122,6 +124,7 @@ class PairCompleteRequest(BaseModel):
     # All-in-one installs: the agent and backend share the machine, and no
     # parent account exists yet to issue a code. Loopback-only, first-device-only.
     local_bootstrap: bool = False
+    setup_token: str | None = Field(default=None, max_length=256)
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -148,13 +151,20 @@ def pair_complete(
         )
 
     if req.local_bootstrap:
+        begin_immediate_if_sqlite(db)
         # No code needed for the very first device pairing from this machine
         # itself: nothing else can reach loopback, and once any device is
         # paired this path closes permanently.
         if client_ip not in _LOOPBACK_HOSTS:
+            db.rollback()
             rate_limit.record_failure("pairing", client_ip)
             raise HTTPException(status_code=400, detail="Local bootstrap is loopback-only")
+        if not verify_setup_token(req.setup_token):
+            db.rollback()
+            rate_limit.record_failure("pairing", client_ip)
+            raise HTTPException(status_code=401, detail="Invalid or expired setup token")
         if db.query(Device).filter(Device.paired.is_(True)).count() > 0:
+            db.rollback()
             rate_limit.record_failure("pairing", client_ip)
             raise HTTPException(status_code=400, detail="Local bootstrap unavailable: a device is already paired")
     elif not pairing_svc.verify_and_consume(db, req.code.strip()):

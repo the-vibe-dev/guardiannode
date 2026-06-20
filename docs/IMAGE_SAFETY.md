@@ -7,13 +7,9 @@ Detects nudity, gore, weapons, drugs, self-harm imagery, hate symbols, private i
 ```
 Screenshot / image
   ↓
-OpenCV preprocessing (resize, normalize)
+Optional Tesseract OCR text extraction → forwarded to text classifier
   ↓
-Optional first-pass classifier (NSFWJS plugin) — fast filter
-  ↓
-OCR text extraction → forwarded to text classifier
-  ↓
-Vision LLM (Ollama llava / llava-phi3) — only if triggered
+Vision LLM (Ollama qwen3-vl:8b-instruct by default, depending on tier)
   ↓
 Multimodal merge with text classifier
   ↓
@@ -24,12 +20,10 @@ Alert
 
 ## When the vision LLM runs
 
-Not on every screenshot — it's expensive. It runs when:
-- The text OCR result is already medium+
-- New image appears in Downloads (file watcher)
-- Clipboard contains an image
-- Parent manually requests review
-- Periodic sample interval (default 15–30s for image-heavy apps)
+Vision analysis runs according to the configured classifier tier. In the default
+vision-only tier, changed screenshots are queued and classified by the local
+vision model. In text-only tier, GuardianNode uses Tesseract plus the text
+classifier instead.
 
 ## Prompt
 
@@ -57,10 +51,10 @@ Not on every screenshot — it's expensive. It runs when:
 
 ## Models
 
-- Tiny: `moondream` (~1.8GB)
-- Small: `llava-phi3` (~2.4GB)
-- Medium: `llava:7b` (~4.5GB)
-- Large: `llama3.2-vision:11b` (~7.5GB)
+- Text default: `llama3.2:3b`
+- Vision default: `qwen3-vl:8b-instruct`
+- Full dual-model mode keeps text and vision runtimes hot together and is
+  intended for 16+ GB VRAM systems.
 
 ## Adversarial input
 

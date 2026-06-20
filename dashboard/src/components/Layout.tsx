@@ -54,6 +54,13 @@ export default function Layout({ children, user, onLogout }: Props) {
         <div className="hidden p-3 border-t border-brand-500/40 text-sm md:block">
           <div className="font-medium">{user.display_name}</div>
           <div className="text-xs text-brand-100">{user.role}</div>
+          <div className="mt-3 text-xs text-brand-100">
+            <div>v0.1.0-alpha.1</div>
+            <a className="underline" href="https://github.com/the-vibe-dev/guardiannode" rel="noreferrer">
+              AGPL-3.0 source
+            </a>
+            <div>No warranty.</div>
+          </div>
           <button
             onClick={onLogout}
             className="mt-2 text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20"

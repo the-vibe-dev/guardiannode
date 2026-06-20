@@ -48,11 +48,20 @@ export default function ModelStatus() {
       <div className="bg-white shadow rounded p-4">
         <h2 className="font-semibold mb-2">Ollama status</h2>
         {status ? (
-          <div className="text-sm space-y-1">
-            <div>URL: <code>{status.ollama_url}</code></div>
-            <div>Reachable: {status.ollama_available ? "✅" : "❌"}</div>
+          <div className="text-sm space-y-3">
+            <EndpointStatus
+              label="Vision"
+              url={status.vision_ollama_url || status.ollama_url}
+              reachable={status.vision_ollama_available ?? status.ollama_available}
+              models={status.vision_models_installed || status.models_installed || []}
+            />
+            <EndpointStatus
+              label="Text"
+              url={status.text_ollama_url || status.ollama_url}
+              reachable={status.text_ollama_available ?? status.ollama_available}
+              models={status.text_models_installed || status.models_installed || []}
+            />
             {status.error && <div className="text-red-700">Error: {status.error}</div>}
-            <div>Installed models: {(status.models_installed || []).join(", ") || "(none)"}</div>
           </div>
         ) : <div className="text-gray-500">Loading…</div>}
       </div>
@@ -79,5 +88,16 @@ function Coverage({ on, label }: { on: boolean; label: string }) {
       <span>{on ? "✓" : "✕"}</span>
       {label}
     </span>
+  );
+}
+
+function EndpointStatus({ label, url, reachable, models }: { label: string; url: string; reachable: boolean; models: string[] }) {
+  return (
+    <div>
+      <div className="font-medium">{label}</div>
+      <div>URL: <code>{url}</code></div>
+      <div>Reachable: {reachable ? "yes" : "no"}</div>
+      <div>Installed models: {models.join(", ") || "(none)"}</div>
+    </div>
   );
 }

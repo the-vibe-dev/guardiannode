@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -78,3 +79,27 @@ def test_expired_setup_token_rejected(monkeypatch, tmp_path):
 
     r = client.post("/api/auth/setup", json=_setup_body("expired-token"))
     assert r.status_code == 401
+
+
+def test_concurrent_setup_creates_exactly_one_admin(monkeypatch, tmp_path):
+    app = _app(monkeypatch, tmp_path)
+    from app.services.setup_token import ensure_setup_token
+    from app.db.models import User
+    from app.db.session import get_sessionmaker
+
+    token = ensure_setup_token()
+
+    def post_setup(name: str) -> int:
+        with TestClient(app, client=("192.168.1.50", 50000)) as client:
+            r = client.post("/api/auth/setup", json={**_setup_body(token), "display_name": name})
+            return r.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = sorted(pool.map(post_setup, ["Parent A", "Parent B"]))
+
+    assert statuses == [200, 400] or statuses == [200, 401]
+    s = get_sessionmaker()()
+    try:
+        assert s.query(User).filter(User.role == "admin").count() == 1
+    finally:
+        s.close()

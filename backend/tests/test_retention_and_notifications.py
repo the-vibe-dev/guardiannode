@@ -87,7 +87,7 @@ def test_run_test_records_per_channel_without_leaking_secret(monkeypatch):
         captured["email_password"] = cfg.get("password")
         return True, "ok"
 
-    def fake_webhook(url, payload):
+    def fake_webhook(url, payload, **_kwargs):
         captured["webhook_url"] = url
         return False, "connection refused"
 
@@ -99,6 +99,7 @@ def test_run_test_records_per_channel_without_leaking_secret(monkeypatch):
         "host": "smtp.test.invalid",
         "password": "s3cr3t",
         "webhook_url": "http://localhost:1/notify",
+        "webhook_allow_private": True,
     }
     results = notifications.run_test(cfg)
 
@@ -121,7 +122,7 @@ def test_run_test_no_channels_configured():
 def test_dispatch_records_dashboard_email_and_webhook(db_session, monkeypatch):
     s = db_session
     monkeypatch.setattr(notifications, "_send_email", lambda cfg, subj, body: (True, "ok"))
-    monkeypatch.setattr(notifications, "_send_webhook", lambda url, payload: (True, "ok"))
+    monkeypatch.setattr(notifications, "_send_webhook", lambda url, payload, **_kwargs: (True, "ok"))
 
     from app.db.models import Setting
     import base64, json
@@ -131,6 +132,7 @@ def test_dispatch_records_dashboard_email_and_webhook(db_session, monkeypatch):
         "enabled": True,
         "host": "smtp.test.invalid",
         "webhook_url": "http://localhost:1/notify",
+        "webhook_allow_private": True,
         "password_enc": base64.b64encode(encryption.encrypt_text("s3cr3t")).decode("ascii"),
     }
     s.add(Setting(key="notification_settings", value=json.dumps(cfg)))

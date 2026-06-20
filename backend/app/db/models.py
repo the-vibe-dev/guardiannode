@@ -13,6 +13,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -27,6 +28,15 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index(
+            "ux_users_single_admin",
+            "role",
+            unique=True,
+            sqlite_where=text("role = 'admin'"),
+            postgresql_where=text("role = 'admin'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     display_name: Mapped[str] = mapped_column(String(128))

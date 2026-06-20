@@ -1,10 +1,12 @@
 """Event ingestion + listing."""
 from __future__ import annotations
 
+import io
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -15,6 +17,9 @@ from app.services.device_state import is_device_paused
 
 router = APIRouter(prefix="/events", tags=["events"])
 _MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+_MAX_SCREENSHOT_PIXELS = 16_000_000
+_MAX_SCREENSHOT_EDGE = 7680
+Image.MAX_IMAGE_PIXELS = _MAX_SCREENSHOT_PIXELS
 
 
 async def _read_upload_with_cap(image: UploadFile, limit: int = _MAX_SCREENSHOT_BYTES) -> bytes:
@@ -29,6 +34,25 @@ async def _read_upload_with_cap(image: UploadFile, limit: int = _MAX_SCREENSHOT_
             raise HTTPException(413, "Image too large (max 8 MB)")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _validate_image_bytes(image_bytes: bytes) -> None:
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            if img.format not in {"JPEG", "PNG"}:
+                raise HTTPException(400, "Screenshot must be JPEG or PNG")
+            width, height = img.size
+            if width <= 0 or height <= 0:
+                raise HTTPException(400, "Invalid screenshot dimensions")
+            if width > _MAX_SCREENSHOT_EDGE or height > _MAX_SCREENSHOT_EDGE:
+                raise HTTPException(400, "Screenshot dimensions are too large")
+            if width * height > _MAX_SCREENSHOT_PIXELS:
+                raise HTTPException(400, "Screenshot pixel count is too large")
+            img.verify()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise HTTPException(400, "Invalid screenshot image")
 
 
 class IngestRequest(BaseModel):
@@ -169,16 +193,16 @@ class ScreenshotIngestResponse(BaseModel):
 async def ingest_screenshot(
     request: Request,
     image: UploadFile = File(...),
-    app_name: str | None = Form(default=None),
-    window_title: str | None = Form(default=None),
-    url: str | None = Form(default=None),
-    profile_id: str | None = Form(default=None),
-    age_group: str = Form(default="10_13"),
-    capture_scope: str = Form(default="monitored_app"),
-    policy_id: str | None = Form(default=None),
-    policy_version: str | None = Form(default=None),
-    collector_version: str | None = Form(default=None),
-    timestamp: str | None = Form(default=None),
+    app_name: str | None = Form(default=None, max_length=256),
+    window_title: str | None = Form(default=None, max_length=1024),
+    url: str | None = Form(default=None, max_length=4096),
+    profile_id: str | None = Form(default=None, max_length=64),
+    age_group: str = Form(default="10_13", max_length=16),
+    capture_scope: str = Form(default="monitored_app", max_length=64),
+    policy_id: str | None = Form(default=None, max_length=64),
+    policy_version: str | None = Form(default=None, max_length=64),
+    collector_version: str | None = Form(default=None, max_length=64),
+    timestamp: str | None = Form(default=None, max_length=64),
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
@@ -199,6 +223,11 @@ async def ingest_screenshot(
     image_bytes = await _read_upload_with_cap(image)
     if not image_bytes:
         raise HTTPException(400, "Empty image")
+    if age_group not in {"under_10", "10_13", "14_17"}:
+        raise HTTPException(400, "Invalid age group")
+    if capture_scope not in {"monitored_app", "visible_desktop", "browser_dom"}:
+        raise HTTPException(400, "Invalid capture scope")
+    _validate_image_bytes(image_bytes)
 
     # Update device liveness now (don't wait for classification).
     device.last_seen = datetime.now(timezone.utc)

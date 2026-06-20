@@ -394,8 +394,13 @@ begin
 
   if CurPageID = ServerConnectionPage.ID then begin
     url := Trim(ServerConnectionPage.Values[0]);
-    if (url <> '') and (Pos('http', url) <> 1) then begin
-      MsgBox('Server URL must start with http://.', mbError, MB_OK);
+    if url = '' then begin
+      MsgBox('Separated mode requires the GuardianNode server URL. Complete server setup first, then enter its trusted LAN/VPN URL here.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    if Pos('http', url) <> 1 then begin
+      MsgBox('Server URL must start with http:// or https://.', mbError, MB_OK);
       Result := False;
       Exit;
     end;

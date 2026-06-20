@@ -47,6 +47,12 @@ class StatusResponse(BaseModel):
     ollama_url: str
     models_installed: list[str]
     error: str | None
+    vision_ollama_url: str
+    vision_ollama_available: bool
+    vision_models_installed: list[str]
+    text_ollama_url: str
+    text_ollama_available: bool
+    text_models_installed: list[str]
     tier: str
     tier_info: dict
     vision_model: str
@@ -55,14 +61,29 @@ class StatusResponse(BaseModel):
 
 @router.get("/status", response_model=StatusResponse)
 async def status(_: User = Depends(current_user)):
-    client = OllamaClient()
-    s = await client.status()
+    vision_url = settings.vision_ollama_url_resolved
+    text_url = settings.text_ollama_url_resolved
+    vision_client = OllamaClient(base_url=vision_url)
+    if text_url == vision_url:
+        vision_status = await vision_client.status()
+        text_status = vision_status
+    else:
+        text_client = OllamaClient(base_url=text_url)
+        vision_status = await vision_client.status()
+        text_status = await text_client.status()
     tier = settings.classifier_tier
+    all_models = sorted(set(vision_status.models) | set(text_status.models))
     return StatusResponse(
-        ollama_available=s.available,
-        ollama_url=s.base_url,
-        models_installed=s.models,
-        error=s.error,
+        ollama_available=vision_status.available and text_status.available,
+        ollama_url=vision_status.base_url,
+        models_installed=all_models,
+        error=vision_status.error or text_status.error,
+        vision_ollama_url=vision_status.base_url,
+        vision_ollama_available=vision_status.available,
+        vision_models_installed=vision_status.models,
+        text_ollama_url=text_status.base_url,
+        text_ollama_available=text_status.available,
+        text_models_installed=text_status.models,
         tier=tier,
         tier_info=TIER_INFO.get(tier, TIER_INFO["vision_only"]),
         vision_model=settings.vision_model,

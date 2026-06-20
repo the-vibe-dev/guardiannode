@@ -252,7 +252,8 @@ print_done() {
   echo "    ${GN_SETUP_TOKEN:-read $GN_DATA/keys/setup_token.json}"
   echo
   echo "First-run setup is loopback-only. Finish setup on this server first,"
-  echo "then enable LAN access from an authenticated admin session."
+  echo "then manually set GUARDIANNODE_BIND_HOST=0.0.0.0 and add a firewall"
+  echo "rule only for a trusted LAN/VPN if you need separated child devices."
   echo
   echo "Service:    systemctl status guardiannode-backend"
   echo "Logs:       journalctl -u guardiannode-backend"

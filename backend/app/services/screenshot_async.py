@@ -33,10 +33,18 @@ log = logging.getLogger(__name__)
 
 _queue: asyncio.Queue | None = None
 _MAX_PENDING = 500  # backpressure: refuse new frames if the server is this far behind
+_MAX_ATTEMPTS = 5
+_BACKOFF_SECONDS = (30, 120, 300, 900, 1800)
 
 
 def _pending_dir() -> Path:
     p = settings.data_dir / "pending"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _dead_letter_dir() -> Path:
+    p = settings.data_dir / "pending_dead_letter"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -84,6 +92,10 @@ def _load_meta(token: str) -> dict[str, Any] | None:
         return None
 
 
+def _write_meta(token: str, meta: dict[str, Any]) -> None:
+    (_pending_dir() / f"{token}.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
 def _discard(token: str) -> None:
     for suffix in (".enc", ".json"):
         try:
@@ -94,6 +106,55 @@ def _discard(token: str) -> None:
 
 def discard(token: str) -> None:
     _discard(token)
+
+
+def _quarantine(token: str, reason: str) -> None:
+    dead = _dead_letter_dir()
+    for suffix in (".enc", ".json"):
+        src = _pending_dir() / f"{token}{suffix}"
+        if not src.exists():
+            continue
+        dst = dead / f"{token}{suffix}"
+        try:
+            src.replace(dst)
+        except OSError:
+            log.warning("pending frame %s could not move to dead letter: %s", token, reason)
+
+
+def _record_failure(token: str, exc: Exception) -> None:
+    meta = _load_meta(token)
+    if meta is None:
+        return
+    attempts = int(meta.get("attempts", 0) or 0) + 1
+    meta["attempts"] = attempts
+    meta["last_error"] = str(exc)[:500]
+    meta["last_error_at"] = datetime.now(timezone.utc).isoformat()
+    if attempts >= _MAX_ATTEMPTS:
+        meta["dead_letter_reason"] = meta["last_error"]
+        _write_meta(token, meta)
+        _quarantine(token, meta["last_error"])
+        return
+    delay = _BACKOFF_SECONDS[min(attempts - 1, len(_BACKOFF_SECONDS) - 1)]
+    meta["next_attempt_at"] = (
+        datetime.now(timezone.utc).timestamp() + delay
+    )
+    _write_meta(token, meta)
+
+
+def _ready_tokens() -> list[str]:
+    now = datetime.now(timezone.utc).timestamp()
+    tokens: list[str] = []
+    for jf in sorted(_pending_dir().glob("*.json")):
+        meta = _load_meta(jf.stem)
+        if meta is None:
+            continue
+        try:
+            next_attempt = float(meta.get("next_attempt_at", 0) or 0)
+        except (TypeError, ValueError):
+            next_attempt = 0
+        if next_attempt <= now:
+            tokens.append(jf.stem)
+    return tokens
 
 
 async def _classify_token(token: str) -> None:
@@ -108,8 +169,8 @@ async def _classify_token(token: str) -> None:
             _pending_dir() / f"{token}.enc", aad=token.encode("ascii")
         )
     except Exception as e:
-        log.warning("pending frame %s unreadable (%s); discarding", token, e)
-        _discard(token)
+        log.warning("pending frame %s unreadable (%s); quarantining", token, e)
+        _record_failure(token, e)
         return
 
     ts = meta.get("timestamp")
@@ -137,20 +198,21 @@ async def _classify_token(token: str) -> None:
             source_ip=meta.get("source_ip"),
         )
         session.commit()
+        _discard(token)
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
-        # The classifier stored its own evidence blob if the frame was risky;
-        # the pending copy is no longer needed either way.
-        _discard(token)
 
 
 async def loop() -> None:
     """Single-consumer worker: classify pending frames one at a time."""
     q = get_queue()
     # Re-enqueue frames left on disk by a previous run (crash / restart / power-off).
-    for jf in sorted(_pending_dir().glob("*.json")):
+    for token in _ready_tokens():
         try:
-            q.put_nowait(jf.stem)
+            q.put_nowait(token)
         except asyncio.QueueFull:
             break
     if q.qsize():
@@ -159,17 +221,17 @@ async def loop() -> None:
         try:
             token = await asyncio.wait_for(q.get(), timeout=30.0)
         except asyncio.TimeoutError:
-            for jf in sorted(_pending_dir().glob("*.json")):
+            for token in _ready_tokens():
                 if q.full():
                     break
-                q.put_nowait(jf.stem)
+                q.put_nowait(token)
             continue
         try:
             await _classify_token(token)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            log.warning("classification of %s failed: %s", token, e)
-            _discard(token)
+            log.warning("classification of %s failed; will retry if attempts remain: %s", token, e)
+            _record_failure(token, e)
         finally:
             q.task_done()

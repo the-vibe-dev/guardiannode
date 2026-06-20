@@ -24,9 +24,17 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
 def test_heartbeat_reports_backlog_and_updates_last_seen(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    from app.services.setup_token import ensure_setup_token
+
     r = client.post(
         "/api/devices/pair/complete",
-        json={"hostname": "kid-pc", "platform": "windows", "agent_version": "0.1.0-alpha.1", "local_bootstrap": True},
+        json={
+            "hostname": "kid-pc",
+            "platform": "windows",
+            "agent_version": "0.1.0-alpha.1",
+            "local_bootstrap": True,
+            "setup_token": ensure_setup_token(),
+        },
     )
     assert r.status_code == 200
     token = r.json()["device_token"]

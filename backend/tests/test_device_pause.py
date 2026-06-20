@@ -2,12 +2,24 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import base64
 
 from fastapi.testclient import TestClient
 
 from app.db.models import Device, Event
 from app.services import pipeline_metrics, rate_limit
 from app.services.device_state import effective_paused_until, is_device_paused
+
+_JPEG_1X1 = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
+    "////2wBDAf//////////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIA"
+    "AhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAVEAEBAAAAAAAAAAAAAAAAAAAAEf/aAAwDAQACEAMQAAAB9A//"
+    "xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAU"
+    "EQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAE"
+    "AAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQ"
+    "MBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEA"
+    "AT8QH//Z"
+)
 
 
 def _client(monkeypatch, tmp_path) -> TestClient:
@@ -27,9 +39,17 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
 
 def _pair(client: TestClient) -> tuple[str, str]:
+    from app.services.setup_token import ensure_setup_token
+
     r = client.post(
         "/api/devices/pair/complete",
-        json={"hostname": "kid-pc", "platform": "windows", "agent_version": "0.1.0-alpha.1", "local_bootstrap": True},
+        json={
+            "hostname": "kid-pc",
+            "platform": "windows",
+            "agent_version": "0.1.0-alpha.1",
+            "local_bootstrap": True,
+            "setup_token": ensure_setup_token(),
+        },
     )
     assert r.status_code == 200
     return r.json()["device_id"], r.json()["device_token"]
@@ -137,7 +157,7 @@ def test_active_pause_blocks_screenshot_ingest(monkeypatch, tmp_path):
 
     r = client.post(
         "/api/events/screenshot",
-        files={"image": ("frame.jpg", b"\xff\xd8\xff\xe0fakejpegbytes", "image/jpeg")},
+        files={"image": ("frame.jpg", _JPEG_1X1, "image/jpeg")},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200
@@ -152,7 +172,7 @@ def test_expired_pause_does_not_block_screenshot_ingest(monkeypatch, tmp_path):
 
     r = client.post(
         "/api/events/screenshot",
-        files={"image": ("frame.jpg", b"\xff\xd8\xff\xe0fakejpegbytes", "image/jpeg")},
+        files={"image": ("frame.jpg", _JPEG_1X1, "image/jpeg")},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200

@@ -23,4 +23,4 @@ labels: model
 - Quantization options available?
 
 **Benchmark results (optional)**
-Compared to current default (llama3.2:3b for text, llava-phi3 for vision).
+Compared to current default (llama3.2:3b for text, qwen3-vl:8b-instruct for vision).

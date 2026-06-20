@@ -21,7 +21,7 @@ Your network may be blocking the download. Either:
 Same as above — your network is blocking the model pull. After install, manually run from PowerShell:
 ```powershell
 ollama pull llama3.2:3b
-ollama pull llava-phi3
+ollama pull qwen3-vl:8b-instruct
 ```
 Then restart the GuardianNode backend service: `sc stop GuardianNodeBackend && sc start GuardianNodeBackend`.
 

@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     https_only_cookies: bool = False
     mdns_enabled: bool = True
     cors_allow_origin: str | None = None  # for dashboard dev server
+    allowed_hosts: str = "*"
     text_model: str = "llama3.2:3b"
     # qwen2.5vl:7b is fast (~2-3s warm per frame at the settings below) and reads
     # on-screen text + classifies images in one pass. It nominally offloads ~2 GB

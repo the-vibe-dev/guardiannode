@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, get_db_dep
 from app.db.models import User
+from app.db.session import begin_immediate_if_sqlite
 from app.services import rate_limit
 from app.services.audit import log_action
 from app.services.parent_auth import (
@@ -129,25 +131,34 @@ def setup(req: SetupRequest, request: Request, db: Session = Depends(get_db_dep)
     and is now confirming both. We accept the recovery code text and hash it
     server-side so the parent has truly written it down.
     """
-    if not verify_setup_token(req.setup_token):
-        raise HTTPException(status_code=401, detail="Invalid or expired setup token")
-    existing = db.query(User).filter(User.role == "admin").first()
-    if existing is not None:
-        raise HTTPException(status_code=400, detail="Already set up")
+    try:
+        begin_immediate_if_sqlite(db)
+        if not verify_setup_token(req.setup_token):
+            raise HTTPException(status_code=401, detail="Invalid or expired setup token")
+        existing = db.query(User).filter(User.role == "admin").first()
+        if existing is not None:
+            raise HTTPException(status_code=400, detail="Already set up")
+    except HTTPException:
+        db.rollback()
+        raise
     user = User(
         display_name=req.display_name,
         password_hash=hash_password(req.password),
         recovery_hash=hash_recovery_code(req.recovery_code),
         role="admin",
     )
-    db.add(user)
-    db.flush()
-    log_action(
-        db, actor=str(user.id), action="setup.complete",
-        target=str(user.id),
-        source_ip=request.client.host if request.client else None,
-    )
-    db.commit()
-    consume_setup_token()
+    try:
+        db.add(user)
+        db.flush()
+        log_action(
+            db, actor=str(user.id), action="setup.complete",
+            target=str(user.id),
+            source_ip=request.client.host if request.client else None,
+        )
+        db.commit()
+        consume_setup_token()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Already set up")
     request.session["user_id"] = user.id
     return {"ok": True, "user_id": user.id}

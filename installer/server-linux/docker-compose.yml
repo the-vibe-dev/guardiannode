@@ -4,7 +4,7 @@
 #
 # Usage:
 #   docker compose up -d
-#   # then open http://<server-ip>:8787 in your browser
+#   # then open http://127.0.0.1:8787 in your browser on the Docker host
 #
 # Persistent state:
 #   - ollama_models   : downloaded model weights
@@ -21,8 +21,6 @@ services:
     restart: unless-stopped
     volumes:
       - ollama_models:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"   # only expose on loopback by default
     # Uncomment for NVIDIA GPU:
     # deploy:
     #   resources:
@@ -42,14 +40,19 @@ services:
       - ollama
     environment:
       - GUARDIANNODE_OLLAMA_URL=http://ollama:11434
-      - GUARDIANNODE_BIND_HOST=127.0.0.1
+      - GUARDIANNODE_BIND_HOST=0.0.0.0
       - GUARDIANNODE_BIND_PORT=8787
       - GUARDIANNODE_MDNS_ENABLED=false
-      - GUARDIANNODE_MDNS_ENABLED=true
     ports:
       - "127.0.0.1:8787:8787"
     volumes:
       - gn_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   ollama_models:

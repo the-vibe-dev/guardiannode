@@ -9,6 +9,7 @@ from argon2.exceptions import VerifyMismatchError
 from sqlalchemy.orm import Session
 
 from app.db.models import PairingCode
+from app.db.session import begin_immediate_if_sqlite
 
 _PH = PasswordHasher(time_cost=2, memory_cost=32768, parallelism=2)
 _CODE_LENGTH = 6
@@ -32,6 +33,7 @@ def issue(session: Session, *, ttl_seconds: int = _TTL_SECONDS) -> tuple[str, da
 
 def verify_and_consume(session: Session, code: str) -> bool:
     """Verify a code, mark it used. Returns True on success."""
+    begin_immediate_if_sqlite(session)
     now = datetime.now(timezone.utc)
     rows = (
         session.query(PairingCode)

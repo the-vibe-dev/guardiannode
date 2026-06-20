@@ -76,6 +76,7 @@ def pair_with_server(
     platform: str = "windows",
     agent_version: str = "0.1.0-alpha.1",
     local_bootstrap: bool = False,
+    setup_token: str | None = None,
 ) -> tuple[str, str]:
     """Run the pair/complete handshake. Returns (device_id, device_token)."""
     body = {
@@ -85,6 +86,8 @@ def pair_with_server(
         "agent_version": agent_version,
         "local_bootstrap": local_bootstrap,
     }
+    if setup_token:
+        body["setup_token"] = setup_token.strip()
     with httpx.Client(timeout=20.0) as c:
         r = c.post(f"{backend_url.rstrip('/')}/api/devices/pair/complete", json=body)
         r.raise_for_status()
@@ -125,6 +128,15 @@ def pending_pairing_path() -> Path:
     return default_device_path().parent / "pending_pairing.json"
 
 
+def _read_local_setup_token(device_path: Path | None = None) -> str | None:
+    path = (device_path or default_device_path()).parent / "keys" / "setup_token.json"
+    try:
+        data = json.loads(path.read_text("utf-8"))
+        return str(data.get("token") or "").strip() or None
+    except Exception:
+        return None
+
+
 def bootstrap_pairing(
     hostname: str,
     agent_version: str,
@@ -160,6 +172,9 @@ def bootstrap_pairing(
     code = str(pending.get("code", "")).strip()
     backend_url = str(pending.get("backend_url", "")).strip()
     local_bootstrap = bool(pending.get("local_bootstrap", False))
+    setup_token = str(pending.get("setup_token", "")).strip()
+    if local_bootstrap and not setup_token:
+        setup_token = _read_local_setup_token(device_path) or ""
     if not code and not local_bootstrap:
         log.error("pending pairing file has no code; removing it")
         pending_path.unlink(missing_ok=True)
@@ -186,6 +201,7 @@ def bootstrap_pairing(
                 backend_url, code, hostname,
                 agent_version=agent_version,
                 local_bootstrap=local_bootstrap,
+                setup_token=setup_token,
             )
             save_credentials(device_id, token, backend_url, device_path)
             pending_path.unlink(missing_ok=True)

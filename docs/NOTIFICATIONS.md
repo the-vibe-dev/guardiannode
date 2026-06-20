@@ -13,8 +13,11 @@ Implemented:
 Later:
 - Windows toast on parent's PC (separated mode)
 
-Privacy note: all channels are parent-controlled and local/self-hosted by design —
-GuardianNode does not route notifications through any third-party SaaS.
+Privacy note: all channels are parent-controlled. GuardianNode does not route
+notifications through a GuardianNode vendor cloud, but alert summaries leave the
+local server if the parent configures an external SMTP host or webhook service.
+Webhook URLs that target private/internal addresses are blocked by default and
+require the explicit private/internal opt-in in Settings.
 
 ## Severity routing
 
@@ -33,6 +36,7 @@ Dashboard **Settings → Notifications**:
 - TLS mode (STARTTLS / SSL / none)
 - "From" address
 - Webhook URL (optional)
+- Private/internal webhook opt-in for LAN, loopback, or self-hosted endpoints
 - Test button — sends a synthetic test to **every configured channel** and records a
   per-channel result in the audit log. Test results never include the SMTP password
   or any secret, only the transport-level outcome.

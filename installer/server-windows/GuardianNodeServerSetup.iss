@@ -38,6 +38,7 @@ Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\PRIVACY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\shared\configure_ollama_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "show_setup_token.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\GuardianNode"; Permissions: system-modify
@@ -47,11 +48,14 @@ Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 
 [Icons]
 Name: "{commonprograms}\GuardianNode Server\Open Dashboard"; Filename: "http://127.0.0.1:8787/setup"
-Name: "{commonprograms}\GuardianNode Server\Show Setup Token"; Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""$p=Join-Path $env:ProgramData 'GuardianNode\keys\setup_token.json'; if(Test-Path $p){(Get-Content $p | ConvertFrom-Json).token | Write-Host; Read-Host 'Press Enter to close'} else {Write-Host 'Setup token file not found'; Read-Host 'Press Enter to close'}"""
+Name: "{commonprograms}\GuardianNode Server\Show Setup Token"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\show_setup_token.ps1"""
 Name: "{commonprograms}\GuardianNode Server\Stop service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"
 Name: "{commonprograms}\GuardianNode Server\Start service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"
 
 [Run]
+; Restrict server data to the backend service account and administrators before startup.
+Filename: "icacls.exe"; Parameters: """{commonappdata}\GuardianNode"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F"; Flags: runhidden waituntilterminated
+
 ; Install Ollama + pull models for detected tier (this is a SERVER install — always set up Ollama)
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configure_ollama_windows.ps1"" -Tier ""{code:GetTier}"" -TextModel ""{code:GetTextModel}"" -VisionModel ""{code:GetVisionModel}"" -OllamaUrl ""http://127.0.0.1:11434"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing Ollama and pulling AI models (this may take 5-20 minutes)..."
 

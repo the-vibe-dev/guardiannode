@@ -15,6 +15,10 @@ Separated mode sends child-device events to the parent-owned backend over the
 local network. Unless you add TLS or a VPN, this traffic is local-network HTTP.
 Use separated mode only on a trusted LAN during alpha testing.
 
+Fresh native installs bind to `127.0.0.1` until first-run setup is complete. The
+alpha does not yet include dashboard network controls; enabling LAN access is a
+manual administrator step described in the server + child install guide.
+
 ## Remote Access
 
 Recommended options:

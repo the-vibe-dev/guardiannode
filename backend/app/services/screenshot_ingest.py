@@ -115,7 +115,7 @@ def _blob_path(blob_id: str) -> Path:
 async def _vision_available() -> tuple[bool, list[str]]:
     """Check if a vision-capable model is installed on Ollama."""
     try:
-        client = OllamaClient()
+        client = OllamaClient(base_url=settings.vision_ollama_url_resolved)
         s = await client.status()
         if not s.available:
             return False, []

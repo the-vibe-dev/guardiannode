@@ -15,6 +15,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -69,13 +70,19 @@ def _verify_password_or_recovery(s: str) -> bool:
     # Local hash file (all-in-one installs that provisioned parent.json).
     if verify_password(s) or verify_recovery_code(s):
         return True
-    # Child-only installs have no local parent hash — verify against the
-    # parent server. A 200 on /api/auth/login means the password is right.
-    # (Server-side rate limiting applies, so this can't be brute-forced.)
+    # Child-only installs have no local parent hash. Never send a parent
+    # password over plaintext LAN HTTP; only allow remote verification over
+    # HTTPS or loopback.
     try:
+        backend_url = _backend_url().rstrip("/")
+        parsed = urlparse(backend_url)
+        is_loopback = parsed.hostname in {"127.0.0.1", "::1", "localhost"}
+        if parsed.scheme != "https" and not is_loopback:
+            log.warning("refusing remote parent-password check over non-HTTPS backend URL")
+            return False
         with httpx.Client(timeout=10.0) as c:
             r = c.post(
-                f"{_backend_url().rstrip('/')}/api/auth/login",
+                f"{backend_url}/api/auth/login",
                 json={"password": s},
             )
             return r.status_code == 200

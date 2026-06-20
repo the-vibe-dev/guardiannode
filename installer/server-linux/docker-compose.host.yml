@@ -10,6 +10,8 @@ services:
     network_mode: "host"
     environment:
       - GUARDIANNODE_OLLAMA_URL=http://127.0.0.1:11434
+      - GUARDIANNODE_BIND_HOST=0.0.0.0
+      - GUARDIANNODE_MDNS_ENABLED=true
     ports: !reset []
 
   ollama:

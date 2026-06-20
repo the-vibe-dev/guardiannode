@@ -211,5 +211,4 @@ jobs:
           file: installer/server-linux/Dockerfile.backend
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: |
-            ghcr.io/${{ github.repository }}/backend:latest
             ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }}

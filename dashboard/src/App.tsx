@@ -59,7 +59,7 @@ export default function App() {
   if (auth === "needs_setup") {
     return (
       <Routes>
-        <Route path="/setup" element={<Setup onComplete={() => setAuth("logged_in")} />} />
+        <Route path="/setup" element={<Setup onComplete={(u) => { setMe(u); setAuth("logged_in"); navigate("/"); }} />} />
         <Route path="*" element={<Navigate to="/setup" replace />} />
       </Routes>
     );

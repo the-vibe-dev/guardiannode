@@ -103,7 +103,8 @@ Type the URL and pairing code by hand.
 
 ## QR code
 
-Encodes `guardiannode://pair?host=<ip>&port=<port>&code=<code>&fp=<cert-fingerprint>`. Usable post-install via the tray "Connect to server" flow.
+QR pairing is planned for a later fingerprint-pinning flow. In this alpha, type
+the trusted server URL and pairing code explicitly.
 
 ## Failure modes
 

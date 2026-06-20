@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
+
 from src import __version__
 from src.backend_client import BackendClient
 from src.config import AgentConfig, default_config_path
@@ -190,6 +192,7 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
     """
     backoff = 1.0
     while True:
+        payload = None
         try:
             payload = await screenshot_queue.get()
             try:
@@ -214,24 +217,71 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                     result.get("status", "ok"),
                 )
                 backoff = 1.0
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status in (401, 403):
+                    log.error("screenshot upload unauthorized (%s); re-pair this device", status)
+                    backoff = 60.0
+                    await asyncio.sleep(backoff)
+                    continue
+                if status == 413:
+                    log.error("screenshot rejected as too large; discarding frame")
+                    backoff = 1.0
+                    continue
+                if status in (429, 503):
+                    retry_after = _retry_after_seconds(e.response.headers.get("Retry-After"), backoff)
+                    log.warning("backend busy (%s); retrying in %.0fs", status, retry_after)
+                    await _requeue_freshest(screenshot_queue, payload)
+                    await asyncio.sleep(retry_after)
+                    backoff = min(max(retry_after, backoff) * 2, 60)
+                    continue
+                if 400 <= status < 500:
+                    log.error("screenshot rejected permanently (%s); discarding frame", status)
+                    backoff = 1.0
+                    continue
+                log.warning("backend error (%s); requeueing", status)
+                await _requeue_freshest(screenshot_queue, payload)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+                log.warning("screenshot send transient failure (%s); requeueing", e)
+                await _requeue_freshest(screenshot_queue, payload)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
             except Exception as e:
                 log.warning("screenshot send failed (%s); requeueing", e)
                 # Keep the freshest frames if a transient failure backs us up.
-                while True:
-                    try:
-                        screenshot_queue.put_nowait(payload)
-                        break
-                    except asyncio.QueueFull:
-                        try:
-                            screenshot_queue.get_nowait()
-                            screenshot_queue.task_done()
-                        except asyncio.QueueEmpty:
-                            break
+                await _requeue_freshest(screenshot_queue, payload)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
         except Exception as e:
             log.warning("sender loop error: %s", e)
             await asyncio.sleep(5)
+        finally:
+            if payload is not None:
+                screenshot_queue.task_done()
+
+
+def _retry_after_seconds(value: str | None, fallback: float) -> float:
+    if not value:
+        return fallback
+    try:
+        return max(0.0, min(float(value), 300.0))
+    except ValueError:
+        return fallback
+
+
+async def _requeue_freshest(screenshot_queue: asyncio.Queue, payload: dict) -> None:
+    while True:
+        try:
+            screenshot_queue.put_nowait(payload)
+            return
+        except asyncio.QueueFull:
+            try:
+                screenshot_queue.get_nowait()
+                screenshot_queue.task_done()
+            except asyncio.QueueEmpty:
+                return
 
 
 async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue) -> None:

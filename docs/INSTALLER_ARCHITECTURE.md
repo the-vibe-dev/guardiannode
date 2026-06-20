@@ -36,6 +36,28 @@ protection relies on normal Windows administrator/UAC permissions plus service
 ACLs; do not describe uninstall as password-gated until a clean-machine Windows
 test proves that end-to-end path.
 
+## Windows ProgramData ACL Matrix
+
+Target ACLs for clean-machine testing:
+
+| Path | Contents | Intended access |
+|---|---|---|
+| `%ProgramData%\GuardianNode\keys\setup_token.json` | One-time setup token | SYSTEM + Administrators only; the server shortcut self-elevates before display |
+| `%ProgramData%\GuardianNode\keys\master.key` | Evidence encryption key | SYSTEM + Administrators only; future releases should wrap it with DPAPI |
+| `%ProgramData%\GuardianNode\evidence\` | Encrypted evidence blobs | SYSTEM + Administrators only |
+| `%ProgramData%\GuardianNode\server.env` | Backend service configuration | SYSTEM + Administrators modify |
+| `%ProgramData%\GuardianNode\agent.yaml` | Child capture configuration | Administrators modify; interactive users read |
+| `%ProgramData%\GuardianNode\pending_pairing.json` | Installer-to-agent enrollment handoff | Administrators create; interactive agent session reads and deletes |
+| `%ProgramData%\GuardianNode\device.json` | Device bearer token and backend URL | Current alpha requires interactive-agent read/write; this remains a release risk until replaced by DPAPI or a privileged local broker |
+| `%ProgramData%\GuardianNode\paused_until` | Local pause marker | Interactive tray writes; agent reads |
+| `%ProgramData%\GuardianNode\logs\` | Agent/tray/backend logs | Service/agent append; Administrators read |
+
+The unresolved design item is `device.json`: an agent that captures the
+interactive desktop must run in the user's session, so it can read any bearer
+token it uses directly. A stronger Windows design should store the token behind
+DPAPI for the task identity or move token use into a privileged local broker
+with a narrow named-pipe API.
+
 ## Windows Server Installer
 
 The shipped server installer is implemented in
@@ -51,8 +73,8 @@ Flow:
 Fresh installs bind to loopback and do not open a Windows Firewall LAN rule.
 First-run setup requires the one-time setup token stored in
 `%ProgramData%\GuardianNode\keys\setup_token.json`; the Start Menu includes a
-helper shortcut to display it. LAN access should be enabled only after an
-authenticated parent completes setup.
+helper shortcut to display it. For this alpha, LAN access is a manual
+administrator change after first-run setup, not a dashboard workflow.
 
 ## Linux Server Installer
 

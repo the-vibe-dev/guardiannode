@@ -5,11 +5,12 @@ vision models.
 
 ## Engines
 
-- **Primary**: PaddleOCR (Apache-2.0, accurate, ~300 MB)
-- **Fallback**: Tesseract (Apache-2.0, smaller, ~50 MB)
-- **None**: no classical OCR — the vision LLM reads text directly from the screenshot
+- **Tesseract**: current classical OCR engine used by the text-only and fallback paths.
+- **Vision model**: the default vision tier asks the local vision LLM to read
+  text directly from the screenshot.
+- **PaddleOCR**: planned optional plugin path; not enabled by the current installer.
 
-Configurable: `OCR_ENGINE=paddle|tesseract|none`
+Classical OCR is controlled by `GUARDIANNODE_TESSERACT_ENABLED`.
 
 ## Pipeline
 
@@ -19,10 +20,6 @@ Visible Windows session
 Capture active-window screenshot
   ↓
 Perceptual hash diff (skip if unchanged)
-  ↓
-Crop app-specific region if known
-  ↓
-Resize / grayscale / contrast (OpenCV)
   ↓
 Run OCR
   ↓

@@ -13,6 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import __version__
@@ -41,6 +43,31 @@ from app.settings import settings
 from app.workers import cleanup_worker, offline_monitor
 
 log = logging.getLogger("guardiannode")
+
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+class BrowserSecurityMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method in _MUTATING_METHODS:
+            origin = request.headers.get("origin")
+            if origin:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(origin)
+                host = request.headers.get("host", "")
+                if parsed.netloc != host:
+                    return JSONResponse({"detail": "invalid origin"}, status_code=403)
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+        )
+        return response
 
 
 def _ensure_session_secret() -> str:
@@ -112,6 +139,21 @@ def _patch_schema(engine) -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN profile_id VARCHAR(64)"))
             log.info("schema patch: added devices.profile_id")
+    if "users" in tables:
+        existing_indexes = {ix["name"] for ix in insp.get_indexes("users")}
+        if "ux_users_single_admin" not in existing_indexes:
+            with engine.begin() as conn:
+                if engine.dialect.name == "sqlite":
+                    conn.execute(text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_single_admin "
+                        "ON users(role) WHERE role = 'admin'"
+                    ))
+                elif engine.dialect.name == "postgresql":
+                    conn.execute(text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_single_admin "
+                        "ON users(role) WHERE role = 'admin'"
+                    ))
+            log.info("schema patch: ensured users single-admin index")
     if "risk_results" in tables:
         cols = {c["name"] for c in insp.get_columns("risk_results")}
         if "classifier_status" not in cols:
@@ -179,6 +221,12 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.dev_mode else None,
         openapi_url="/openapi.json" if settings.dev_mode else None,
     )
+
+    app.add_middleware(BrowserSecurityMiddleware)
+
+    allowed_hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    if allowed_hosts and allowed_hosts != ["*"]:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     app.add_middleware(
         SessionMiddleware,

@@ -42,9 +42,11 @@ def test_parse_rejects_legacy_and_garbage():
 
 def test_new_pairing_issues_structured_token(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    from app.services.setup_token import ensure_setup_token
+
     r = client.post(
         "/api/devices/pair/complete",
-        json={"hostname": "kid-pc", "local_bootstrap": True},
+        json={"hostname": "kid-pc", "local_bootstrap": True, "setup_token": ensure_setup_token()},
     )
     assert r.status_code == 200
     token = r.json()["device_token"]
@@ -104,7 +106,11 @@ def test_repeated_invalid_device_auth_is_rate_limited(monkeypatch, tmp_path):
 
 def test_valid_auth_resets_failure_count(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
-    r = client.post("/api/devices/pair/complete", json={"hostname": "kid-pc", "local_bootstrap": True})
+    from app.services.setup_token import ensure_setup_token
+    r = client.post(
+        "/api/devices/pair/complete",
+        json={"hostname": "kid-pc", "local_bootstrap": True, "setup_token": ensure_setup_token()},
+    )
     token = r.json()["device_token"]
 
     for _ in range(rate_limit.MAX_FAILURES - 1):
