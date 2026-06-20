@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from pathlib import Path
+from datetime import UTC
 
 from fastapi.testclient import TestClient
 
@@ -19,9 +19,9 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     settings_mod.settings.mdns_enabled = False
     rate_limit._clear_all()
     pipeline_metrics.reset_for_tests()
-    from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.main import create_app
 
     Base.metadata.create_all(bind=get_engine())
     return TestClient(create_app(), client=("127.0.0.1", 50000))
@@ -44,19 +44,22 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrf_token"]})
 
     # Seed one event + evidence blob with a real encrypted file on disk.
+    from datetime import datetime
+
+    from app.db.models import Device, Event, EvidenceBlob
     from app.db.session import get_sessionmaker
-    from app.db.models import Event, EvidenceBlob
     from app.services import encryption
     from app.settings import settings
-    from datetime import datetime, timezone
 
     blob_dir = settings.evidence_dir / "ab"
     blob_path = blob_dir / "blob1.enc"
     encryption.encrypt_blob_to_disk(b"fake-jpeg-bytes", blob_path, aad=b"blob1")
 
     s = get_sessionmaker()()
+    s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
+    s.flush()
     s.add(Event(event_id="e1", device_id="d1", source_type="image",
-                timestamp=datetime.now(timezone.utc), screenshot_blob_id="blob1"))
+                timestamp=datetime.now(UTC), screenshot_blob_id="blob1"))
     s.add(EvidenceBlob(blob_id="blob1", kind="screenshot",
                        encrypted_path=str(blob_path), size_bytes=15, event_id="e1"))
     s.commit()

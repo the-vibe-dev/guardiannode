@@ -1,8 +1,6 @@
 """Pytest fixtures: throwaway data dir + in-memory backend."""
 from __future__ import annotations
 
-import os
-import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -33,12 +31,14 @@ def db_session():
     from sqlalchemy.orm import sessionmaker
 
     from app.db.models import Base
+    from app.db.session import configure_sqlite_engine
 
-    engine = create_engine("sqlite:///:memory:", future=True)
+    engine = configure_sqlite_engine(create_engine("sqlite:///:memory:", future=True))
     Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-    s = SessionLocal()
+    session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    s = session_local()
     try:
         yield s
     finally:
         s.close()
+        engine.dispose()

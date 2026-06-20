@@ -4,14 +4,33 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
-from sqlalchemy import text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import settings as settings_mod
 
 _engine = None
 _SessionLocal: sessionmaker[Session] | None = None
+
+
+def configure_sqlite_engine(engine: Engine) -> Engine:
+    """Apply SQLite integrity and durability pragmas to every DB-API connection."""
+    if engine.dialect.name != "sqlite":
+        return engine
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cursor.close()
+
+    return engine
 
 
 def get_engine():
@@ -21,7 +40,7 @@ def get_engine():
         settings.ensure_dirs()
         url = settings.db_url_resolved
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        _engine = create_engine(url, connect_args=connect_args, future=True)
+        _engine = configure_sqlite_engine(create_engine(url, connect_args=connect_args, future=True))
     return _engine
 
 

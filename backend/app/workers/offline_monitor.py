@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 from ulid import ULID
@@ -38,7 +38,7 @@ def _ulid() -> str:
 def _raise_offline_alert(session: Session, device: Device, silent_seconds: int) -> str:
     """Synthesize an event+risk+alert so the offline event shows in the feed
     and flows through the normal notification path."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     summary = (
         f"Monitoring stopped on {device.hostname}: no data received for "
         f"{silent_seconds // 60} min. The device may be off, offline, or the "
@@ -55,6 +55,7 @@ def _raise_offline_alert(session: Session, device: Device, silent_seconds: int) 
         evidence_type="system",
     )
     session.add(event)
+    session.flush()
     risk = RiskResult(
         risk_id=_ulid(),
         event_id=event.event_id,
@@ -68,6 +69,7 @@ def _raise_offline_alert(session: Session, device: Device, silent_seconds: int) 
         confidence=1.0,
     )
     session.add(risk)
+    session.flush()
     alert = Alert(
         alert_id=_ulid(),
         risk_id=risk.risk_id,
@@ -101,7 +103,7 @@ def check_once(session: Session, *, now: datetime | None = None) -> list[str]:
     """
     if not settings.device_offline_alert_enabled:
         return []
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now - timedelta(seconds=settings.device_offline_after_seconds)
     transitioned: list[str] = []
     devices = (
@@ -118,7 +120,7 @@ def check_once(session: Session, *, now: datetime | None = None) -> list[str]:
             continue
         # Normalize naive timestamps (SQLite) to UTC for comparison.
         if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
+            last = last.replace(tzinfo=UTC)
         if last >= cutoff:
             continue
         silent_seconds = int((now - last).total_seconds())

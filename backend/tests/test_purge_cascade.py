@@ -1,23 +1,24 @@
 """Wipe/retention cascade behavior: no orphaned rows or evidence files."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
-from app.db.models import Alert, EvidenceBlob, Event, RiskResult
+from app.db.models import Alert, Device, Event, EvidenceBlob, RiskResult
 from app.services import purge, retention
 
 
 def _old(days: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 def _mk_chain(s, tmp_path, *, suffix: str, severity: str, age_days: int, with_blob=True):
     """Create a full event → risk → alert → blob chain."""
+    s.merge(Device(device_id="d1", hostname="kid-pc", paired=True))
     event_id = f"e-{suffix}"
     risk_id = f"r-{suffix}"
     blob_id = f"b-{suffix}" if with_blob else None
     blob_path = None
+    s.flush()
     if with_blob:
         blob_path = tmp_path / f"{blob_id}.enc"
         blob_path.write_bytes(b"ciphertext")
@@ -29,10 +30,12 @@ def _mk_chain(s, tmp_path, *, suffix: str, severity: str, age_days: int, with_bl
         event_id=event_id, device_id="d1", source_type="image",
         timestamp=_old(age_days), screenshot_blob_id=blob_id,
     ))
+    s.flush()
     s.add(RiskResult(
         risk_id=risk_id, event_id=event_id, risk_level=severity, score=50,
         created_at=_old(age_days),
     ))
+    s.flush()
     s.add(Alert(
         alert_id=f"a-{suffix}", risk_id=risk_id, severity=severity,
         created_at=_old(age_days),
@@ -63,7 +66,7 @@ def test_wipe_old_events_leaves_no_orphans(db_session, tmp_path):
     _mk_chain(s, tmp_path, suffix="old", severity="medium", age_days=40)
     keep_ids = _mk_chain(s, tmp_path, suffix="new", severity="medium", age_days=1)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    cutoff = datetime.now(UTC) - timedelta(days=30)
     old_ids = [r[0] for r in s.query(Event.event_id).filter(Event.timestamp < cutoff).all()]
     purge.delete_events(s, old_ids)
     s.commit()

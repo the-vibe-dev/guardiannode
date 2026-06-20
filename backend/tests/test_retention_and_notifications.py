@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.db.models import Alert, AuditLog, Event, EvidenceBlob, NotificationLog
+from app.db.models import Alert, AuditLog, Device, Event, EvidenceBlob, NotificationLog, RiskResult
 from app.services import notifications, retention
 
 
@@ -16,15 +16,37 @@ def _old(days: int) -> datetime:
     return datetime.now(UTC) - timedelta(days=days)
 
 
+def _add_alert_chain(session, *, alert_id: str, risk_id: str, severity: str, age_days: int) -> None:
+    event_id = f"event-{risk_id}"
+    session.flush()
+    session.add(Event(event_id=event_id, device_id="d1", source_type="system", timestamp=_old(age_days)))
+    session.flush()
+    session.add(
+        RiskResult(
+            risk_id=risk_id,
+            event_id=event_id,
+            risk_level=severity,
+            score=50,
+            categories=[],
+            summary="test alert",
+            evidence=[],
+            recommended_action="review",
+        )
+    )
+    session.flush()
+    session.add(Alert(alert_id=alert_id, risk_id=risk_id, severity=severity, created_at=_old(age_days)))
+
+
 def test_run_cleanup_removes_expired_rows(db_session, tmp_path):
     s = db_session
+    s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
 
     # Alerts: an old low-severity (1-day retention) should go; a fresh one stays.
-    s.add(Alert(alert_id="a-old", risk_id="r1", severity="low", created_at=_old(10)))
-    s.add(Alert(alert_id="a-new", risk_id="r2", severity="low", created_at=_old(0)))
+    _add_alert_chain(s, alert_id="a-old", risk_id="r1", severity="low", age_days=10)
+    _add_alert_chain(s, alert_id="a-new", risk_id="r2", severity="low", age_days=0)
     # An old critical with 90-day retention but aged 200 days should also go.
-    s.add(Alert(alert_id="a-crit-old", risk_id="r3", severity="critical", created_at=_old(200)))
-    s.add(Alert(alert_id="a-crit-new", risk_id="r4", severity="critical", created_at=_old(5)))
+    _add_alert_chain(s, alert_id="a-crit-old", risk_id="r3", severity="critical", age_days=200)
+    _add_alert_chain(s, alert_id="a-crit-new", risk_id="r4", severity="critical", age_days=5)
 
     # Orphan event (no RiskResult) older than the low cutoff → removed.
     s.add(Event(event_id="e-orphan", device_id="d1", source_type="browser", timestamp=_old(10)))
@@ -71,7 +93,8 @@ def test_run_cleanup_removes_expired_rows(db_session, tmp_path):
 def test_run_cleanup_zero_retention_keeps_severity(db_session):
     """A severity configured with 0 days is skipped (never auto-deleted)."""
     s = db_session
-    s.add(Alert(alert_id="keep", risk_id="r", severity="low", created_at=_old(999)))
+    s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
+    _add_alert_chain(s, alert_id="keep", risk_id="r", severity="low", age_days=999)
     s.commit()
     cfg = {**retention.DEFAULT_RETENTION_DAYS, "low": 0}
     retention.run_cleanup(s, cfg)
@@ -254,6 +277,23 @@ def test_dispatch_records_dashboard_email_and_webhook(db_session, monkeypatch):
         "password_enc": base64.b64encode(encryption.encrypt_text("s3cr3t")).decode("ascii"),
     }
     s.add(Setting(key="notification_settings", value=json.dumps(cfg)))
+    s.add(Device(device_id="dev1", hostname="kid-pc", paired=True))
+    s.flush()
+    s.add(Event(event_id="e", device_id="dev1", source_type="system", timestamp=datetime.now(UTC)))
+    s.flush()
+    s.add(
+        RiskResult(
+            risk_id="r",
+            event_id="e",
+            risk_level="critical",
+            score=90,
+            categories=["grooming"],
+            summary="grooming language detected",
+            evidence=[],
+            recommended_action="review",
+        )
+    )
+    s.flush()
     s.add(Alert(alert_id="al-1", risk_id="r", severity="critical"))
     s.commit()
 

@@ -1,17 +1,20 @@
 """Repeated identical findings fold into one alert instead of flooding the feed."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from app.db.models import Alert, Event, RiskResult
+from app.db.models import Alert, Device, Event, RiskResult
 from app.services.alert_dedup import upsert_alert
 
 
 def _add_risk(db, risk_id: str, event_id: str) -> None:
+    db.merge(Device(device_id="dev1", hostname="kid-pc", paired=True))
+    db.flush()
     db.add(Event(
         event_id=event_id, device_id="dev1", source_type="screenshot",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     ))
+    db.flush()
     db.add(RiskResult(
         risk_id=risk_id, event_id=event_id, risk_level="critical", score=95,
         categories=["self_harm", "sexual_content"], summary="note", evidence=[],

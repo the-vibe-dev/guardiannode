@@ -25,15 +25,22 @@ import asyncio
 import hashlib
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import ChildProfile, Device, EvidenceBlob, Event, RiskResult
-from app.services import classifier, encryption, image_safety, multimodal_risk, pipeline_metrics, risk_rules
+from app.db.models import ChildProfile, Device, Event, EvidenceBlob, RiskResult
+from app.services import (
+    classifier,
+    encryption,
+    image_safety,
+    multimodal_risk,
+    pipeline_metrics,
+    risk_rules,
+)
 from app.services.ollama_client import OllamaClient
 from app.services.profile_resolution import resolve_profile
 from app.settings import settings
@@ -195,7 +202,7 @@ async def ingest_screenshot(
     source_ip: str | None = None,
 ) -> dict[str, Any]:
     """Run the tiered pipeline. Returns result dict (also writes DB rows)."""
-    timestamp = timestamp or datetime.now(timezone.utc)
+    timestamp = timestamp or datetime.now(UTC)
     sha256 = hashlib.sha256(image_bytes).hexdigest()
     event_id = _ulid()
     tier = settings.classifier_tier if settings.classifier_tier in VALID_TIERS else "vision_only"
@@ -437,15 +444,16 @@ async def _ingest_inner(
             "tesseract_used": tesseract_used,
             "extracted_text_chars": len(extracted_text),
         },
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         key_version=encryption.current_key_version(),
     )
     session.add(event)
 
     # Update device heartbeat
     if device is not None:
-        device.last_seen = datetime.now(timezone.utc)
+        device.last_seen = datetime.now(UTC)
         device.status = "online"
+    session.flush()
 
     # ----- Step 5: RiskResult -----
     risk_id = _ulid()
@@ -473,6 +481,7 @@ async def _ingest_inner(
         ),
     )
     session.add(rr)
+    session.flush()
 
     # ----- Step 6: Alert per the child's privacy/threshold policy -----
     alert_id: str | None = None

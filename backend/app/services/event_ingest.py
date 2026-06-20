@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -10,7 +10,6 @@ from ulid import ULID
 
 from app.db.models import Device, Event, RiskResult
 from app.services import classifier, encryption, redaction
-from app.services.audit import log_action
 from app.services.profile_resolution import resolve_profile
 
 log = logging.getLogger(__name__)
@@ -42,9 +41,9 @@ async def ingest_event(
     event_id = payload.get("event_id") or _ulid()
     ts_str = payload.get("timestamp")
     try:
-        timestamp = datetime.fromisoformat(ts_str.replace("Z", "+00:00")) if ts_str else datetime.now(timezone.utc)
+        timestamp = datetime.fromisoformat(ts_str.replace("Z", "+00:00")) if ts_str else datetime.now(UTC)
     except Exception:
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
 
     metadata = dict(payload.get("metadata") or {})
     metadata.setdefault("capture_scope", payload.get("capture_scope", "browser_dom"))
@@ -81,14 +80,14 @@ async def ingest_event(
         screenshot_blob_id=payload.get("screenshot_blob_id"),
         image_blob_id=payload.get("image_blob_id"),
         event_metadata=metadata,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         key_version=encryption.current_key_version(),
     )
     session.add(event)
 
     # Update device last_seen
     if device is not None:
-        device.last_seen = datetime.now(timezone.utc)
+        device.last_seen = datetime.now(UTC)
         device.status = "online"
 
     # Classify
@@ -120,7 +119,9 @@ async def ingest_event(
         rules_version=cls_result["rules_version"],
         classifier_status=cls_result.get("status", "ok"),
     )
+    session.flush()
     session.add(rr)
+    session.flush()
 
     severity = cls_result["risk_level"]
     alert_id: str | None = None
