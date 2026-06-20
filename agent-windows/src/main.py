@@ -22,6 +22,7 @@ import httpx
 from src import __version__
 from src.backend_client import BackendClient
 from src.config import AgentConfig, default_config_path
+from src.durable_queue import DurableScreenshotQueue
 from src.pairing_client import bootstrap_pairing, load_credentials, pair_with_server, save_credentials
 from src.process_watcher import get_active_process, is_monitored
 from src.screenshot_capture import capture_active, capture_full, hamming
@@ -195,6 +196,7 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
         payload = None
         try:
             payload = await screenshot_queue.get()
+            handled = False
             try:
                 result = await client.send_screenshot(
                     image_bytes=payload["image_bytes"],
@@ -207,6 +209,7 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                     policy_version=payload.get("policy_version"),
                     collector_version=payload.get("collector_version"),
                     timestamp=payload.get("timestamp"),
+                    idempotency_key=payload.get("idempotency_key"),
                 )
                 # The backend stores the frame and classifies it in the
                 # background, so this returns immediately with a queued ack.
@@ -217,41 +220,68 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                     result.get("status", "ok"),
                 )
                 backoff = 1.0
+                _ack_payload(screenshot_queue, payload)
+                handled = True
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status in (401, 403):
                     log.error("screenshot upload unauthorized (%s); re-pair this device", status)
                     backoff = 60.0
+                    _retry_payload(
+                        screenshot_queue,
+                        payload,
+                        delay_seconds=backoff,
+                        error=f"unauthorized: {status}",
+                    )
+                    handled = True
                     await asyncio.sleep(backoff)
                     continue
                 if status == 413:
                     log.error("screenshot rejected as too large; discarding frame")
                     backoff = 1.0
+                    _drop_payload(screenshot_queue, payload, reason="payload too large")
+                    handled = True
                     continue
                 if status in (429, 503):
                     retry_after = _retry_after_seconds(e.response.headers.get("Retry-After"), backoff)
                     log.warning("backend busy (%s); retrying in %.0fs", status, retry_after)
-                    await _requeue_freshest(screenshot_queue, payload)
+                    _retry_payload(
+                        screenshot_queue,
+                        payload,
+                        delay_seconds=retry_after,
+                        error=f"backend busy: {status}",
+                    )
+                    handled = True
                     await asyncio.sleep(retry_after)
                     backoff = min(max(retry_after, backoff) * 2, 60)
                     continue
                 if 400 <= status < 500:
                     log.error("screenshot rejected permanently (%s); discarding frame", status)
                     backoff = 1.0
+                    _drop_payload(screenshot_queue, payload, reason=f"permanent rejection: {status}")
+                    handled = True
                     continue
                 log.warning("backend error (%s); requeueing", status)
-                await _requeue_freshest(screenshot_queue, payload)
+                _retry_payload(
+                    screenshot_queue,
+                    payload,
+                    delay_seconds=backoff,
+                    error=f"backend error: {status}",
+                )
+                handled = True
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
             except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
                 log.warning("screenshot send transient failure (%s); requeueing", e)
-                await _requeue_freshest(screenshot_queue, payload)
+                _retry_payload(screenshot_queue, payload, delay_seconds=backoff, error=str(e))
+                handled = True
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
             except Exception as e:
                 log.warning("screenshot send failed (%s); requeueing", e)
                 # Keep the freshest frames if a transient failure backs us up.
-                await _requeue_freshest(screenshot_queue, payload)
+                _retry_payload(screenshot_queue, payload, delay_seconds=backoff, error=str(e))
+                handled = True
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
         except Exception as e:
@@ -259,6 +289,13 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
             await asyncio.sleep(5)
         finally:
             if payload is not None:
+                if not handled:
+                    _retry_payload(
+                        screenshot_queue,
+                        payload,
+                        delay_seconds=5.0,
+                        error="sender loop exited before handling payload",
+                    )
                 screenshot_queue.task_done()
 
 
@@ -282,6 +319,42 @@ async def _requeue_freshest(screenshot_queue: asyncio.Queue, payload: dict) -> N
                 screenshot_queue.task_done()
             except asyncio.QueueEmpty:
                 return
+
+
+def _ack_payload(screenshot_queue: asyncio.Queue, payload: dict) -> None:
+    ack = getattr(screenshot_queue, "ack_payload", None)
+    if callable(ack):
+        ack(payload)
+
+
+def _drop_payload(screenshot_queue: asyncio.Queue, payload: dict, *, reason: str) -> None:
+    drop = getattr(screenshot_queue, "drop_payload", None)
+    if callable(drop):
+        drop(payload, reason=reason)
+
+
+def _retry_payload(
+    screenshot_queue: asyncio.Queue,
+    payload: dict,
+    *,
+    delay_seconds: float,
+    error: str,
+) -> None:
+    retry = getattr(screenshot_queue, "retry_payload", None)
+    if callable(retry):
+        retry(payload, delay_seconds=delay_seconds, error=error)
+    else:
+        # In tests and dry development paths the queue may still be an
+        # asyncio.Queue. Schedule the previous freshest-frame retry behavior.
+        try:
+            screenshot_queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            try:
+                screenshot_queue.get_nowait()
+                screenshot_queue.task_done()
+                screenshot_queue.put_nowait(payload)
+            except asyncio.QueueEmpty:
+                pass
 
 
 async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue) -> None:
@@ -334,8 +407,14 @@ async def main_async(cfg: AgentConfig) -> None:
     if not token and not cfg.dry_run:
         log.warning("no device token — agent will only queue events locally until paired")
 
-    # In-memory screenshot queue (size-capped for backpressure)
-    screenshot_queue: asyncio.Queue = asyncio.Queue(maxsize=20)
+    if cfg.durable_queue_enabled:
+        screenshot_queue = DurableScreenshotQueue(
+            max_items=cfg.durable_queue_max_items,
+            max_bytes=cfg.durable_queue_max_bytes,
+            max_age_seconds=cfg.durable_queue_max_age_seconds,
+        )
+    else:
+        screenshot_queue = asyncio.Queue(maxsize=20)
     client = BackendClient(backend_url, token)
 
     log.info(

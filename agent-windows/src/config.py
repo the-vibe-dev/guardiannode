@@ -60,6 +60,10 @@ class AgentConfig:
     ])
     log_level: str = "INFO"
     dry_run: bool = False
+    durable_queue_enabled: bool = True
+    durable_queue_max_items: int = 200
+    durable_queue_max_bytes: int = 256 * 1024 * 1024
+    durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
 
     @classmethod
     def from_path(cls, path: Path) -> "AgentConfig":

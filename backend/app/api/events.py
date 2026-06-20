@@ -56,7 +56,7 @@ def _validate_image_bytes(image_bytes: bytes) -> str:
     except HTTPException:
         raise
     except (UnidentifiedImageError, OSError, ValueError):
-        raise HTTPException(400, "Invalid screenshot image")
+        raise HTTPException(400, "Invalid screenshot image") from None
 
 
 class IngestRequest(BaseModel):
@@ -186,7 +186,7 @@ def get_event_text(
     try:
         plain = encryption.decrypt_text(e.redacted_text_enc)
     except Exception:
-        raise HTTPException(500, "Decryption failed")
+        raise HTTPException(500, "Decryption failed") from None
     from app.services.audit import log_action
     log_action(db, actor=str(user.id), action="evidence.view_text", target=event_id)
     db.commit()
@@ -215,6 +215,7 @@ async def ingest_screenshot(
     policy_version: str | None = Form(default=None, max_length=64),
     collector_version: str | None = Form(default=None, max_length=64),
     timestamp: str | None = Form(default=None, max_length=64),
+    idempotency_key: str | None = Form(default=None, max_length=128),
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
@@ -261,6 +262,7 @@ async def ingest_screenshot(
             "policy_version": policy_version,
             "collector_version": collector_version,
             "timestamp": timestamp,
+            "idempotency_key": idempotency_key,
             "mime_type": mime_type,
             "source_ip": request.client.host if request.client else None,
         },

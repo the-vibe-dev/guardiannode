@@ -41,6 +41,7 @@ class BackendClient:
         policy_version: str | None = None,
         collector_version: str | None = None,
         timestamp: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
         files = {"image": ("screen.jpg", image_bytes, "image/jpeg")}
         data: dict[str, str] = {"age_group": age_group, "capture_scope": capture_scope}
@@ -60,6 +61,8 @@ class BackendClient:
             data["collector_version"] = collector_version
         if timestamp:
             data["timestamp"] = timestamp
+        if idempotency_key:
+            data["idempotency_key"] = idempotency_key
         async with httpx.AsyncClient(timeout=max(self.timeout, 120.0)) as c:
             r = await c.post(
                 f"{self.base_url}/api/events/screenshot",
