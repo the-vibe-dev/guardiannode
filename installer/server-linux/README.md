@@ -63,8 +63,9 @@ LAN/VPN after first-run setup.
 Do not expose the backend directly to the public internet. Use a trusted LAN,
 Tailscale/WireGuard, or a reverse proxy with TLS and access controls.
 
-Alpha images are version-pinned by tag, not digest. Before a stable release,
-publish digest-pinned images plus SBOM and provenance attestations.
+Base and Ollama images are pinned by tag and manifest digest. Before a stable
+release, publish GuardianNode-built images with SBOM and provenance
+attestations.
 
 For NVIDIA GPU support: install `nvidia-container-toolkit` on the host and uncomment the `deploy.resources` block in `docker-compose.yml`.
 

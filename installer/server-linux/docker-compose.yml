@@ -16,7 +16,7 @@
 
 services:
   ollama:
-    image: ollama/ollama:0.13.5
+    image: ollama/ollama:0.13.5@sha256:2c9595c555fd70a28363489ac03bd5bf9e7c5bdf2890373c3a830ffd7252ce6d
     container_name: guardiannode_ollama
     restart: unless-stopped
     security_opt:
