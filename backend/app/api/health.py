@@ -30,7 +30,7 @@ class RuntimeSettingsResponse(BaseModel):
     bind: dict[str, str | int]
     security: dict[str, str | bool | list[str]]
     classifier: dict[str, str | int | bool | None]
-    ollama: dict[str, str]
+    ollama: dict[str, str | int]
     retention: dict[str, int | bool]
     device_offline: dict[str, int | bool]
     database: dict[str, str]
@@ -69,6 +69,8 @@ def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse
             "base_url": settings.ollama_url,
             "text_url": settings.text_ollama_url_resolved,
             "vision_url": settings.vision_ollama_url_resolved,
+            "status_timeout_seconds": settings.ollama_status_timeout_seconds,
+            "pull_timeout_seconds": settings.ollama_pull_timeout_seconds,
         },
         retention={
             "cleanup_enabled": settings.retention_cleanup_enabled,

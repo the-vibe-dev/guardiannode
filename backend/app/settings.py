@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     # otherwise-valid JSON on real 1600x900 desktop frames.
     vision_num_ctx: int = 8192
     classifier_timeout_seconds: int = 30
+    ollama_status_timeout_seconds: int = 5
+    ollama_pull_timeout_seconds: int = 1800
     rules_version: str = "0.1.0-alpha.1"
     # Classifier tier: governs which paths run per screenshot.
     #  "full"        — vision LLM + text LLM hot together; needs 16+ GB VRAM

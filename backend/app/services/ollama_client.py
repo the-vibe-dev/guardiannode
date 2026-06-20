@@ -34,13 +34,21 @@ class OllamaContextLengthError(OllamaError):
 
 
 class OllamaClient:
-    def __init__(self, base_url: str | None = None, timeout: float = 60.0):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = 60.0,
+        status_timeout: float | None = None,
+        pull_timeout: float | None = None,
+    ):
         self.base_url = (base_url or settings.ollama_url).rstrip("/")
         self.timeout = timeout
+        self.status_timeout = status_timeout if status_timeout is not None else settings.ollama_status_timeout_seconds
+        self.pull_timeout = pull_timeout if pull_timeout is not None else settings.ollama_pull_timeout_seconds
 
     async def status(self) -> OllamaStatus:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=self.status_timeout) as client:
                 r = await client.get(f"{self.base_url}/api/tags")
                 r.raise_for_status()
                 data = r.json()
@@ -131,10 +139,19 @@ class OllamaClient:
             format_json=format_json,
         )
 
-    async def pull(self, model: str) -> None:
+    async def pull(self, model: str, *, timeout: float | None = None) -> None:
         """Pull a model. Note: streaming progress is not exposed here."""
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
+            pull_timeout = max(1.0, float(timeout if timeout is not None else self.pull_timeout))
+            short_timeout = min(30.0, pull_timeout)
+            client_timeout = httpx.Timeout(
+                timeout=pull_timeout,
+                connect=short_timeout,
+                read=pull_timeout,
+                write=short_timeout,
+                pool=short_timeout,
+            )
+            async with httpx.AsyncClient(timeout=client_timeout) as client:
                 async with client.stream(
                     "POST", f"{self.base_url}/api/pull", json={"name": model, "stream": True}
                 ) as r:
