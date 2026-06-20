@@ -8,7 +8,7 @@
 # Run with: curl -fsSL ... | sudo bash
 #       or: sudo ./install.sh
 
-set -euo pipefail
+set -Eeuo pipefail
 
 # ---------- Config ----------
 GN_VERSION="${GN_VERSION:-v0.1.0-alpha.1}"
@@ -20,7 +20,13 @@ GN_BIND_HOST="${GN_BIND_HOST:-127.0.0.1}"
 GN_BIND_PORT="${GN_BIND_PORT:-8787}"
 GN_REPO_URL="${GN_REPO_URL:-https://github.com/the-vibe-dev/guardiannode}"
 GN_SRC_ZIP="${GN_SRC_ZIP:-}"     # if set, install from local zip instead of git
+GN_SRC_SHA256="${GN_SRC_SHA256:-}" # optional sha256 for GN_SRC_ZIP
 GN_NO_OLLAMA="${GN_NO_OLLAMA:-0}"
+GN_RELEASE_ID="${GN_RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
+GN_STAGED_SRC=""
+GN_STAGED_VENV=""
+GN_PREV_SRC=""
+GN_PREV_VENV=""
 
 # ---------- Helpers ----------
 red()   { printf "\033[31m%s\033[0m\n" "$*" >&2; }
@@ -52,20 +58,20 @@ install_system_packages() {
     ubuntu|debian|raspbian|linuxmint|pop)
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
-      apt-get install -y -qq python3 python3-venv python3-pip sqlite3 curl ca-certificates git avahi-daemon libnss-mdns tesseract-ocr
+      apt-get install -y -qq python3 python3-venv python3-pip sqlite3 curl ca-certificates git unzip avahi-daemon libnss-mdns tesseract-ocr
       systemctl enable --now avahi-daemon || true
       ;;
     fedora|rhel|centos|rocky|almalinux)
-      dnf install -y python3 python3-pip sqlite curl ca-certificates git avahi nss-mdns tesseract || \
-        yum install -y python3 python3-pip sqlite curl git avahi nss-mdns tesseract
+      dnf install -y python3 python3-pip sqlite curl ca-certificates git unzip avahi nss-mdns tesseract || \
+        yum install -y python3 python3-pip sqlite curl git unzip avahi nss-mdns tesseract
       systemctl enable --now avahi-daemon || true
       ;;
     arch|manjaro|endeavouros)
-      pacman -Sy --noconfirm python python-pip sqlite curl ca-certificates git avahi nss-mdns tesseract tesseract-data-eng
+      pacman -Sy --noconfirm python python-pip sqlite curl ca-certificates git unzip avahi nss-mdns tesseract tesseract-data-eng
       systemctl enable --now avahi-daemon || true
       ;;
     opensuse*|sles)
-      zypper -n install python3 python3-pip sqlite3 curl git avahi nss-mdns tesseract-ocr
+      zypper -n install python3 python3-pip sqlite3 curl git unzip avahi nss-mdns tesseract-ocr
       systemctl enable --now avahi-daemon || true
       ;;
     *)
@@ -110,35 +116,154 @@ PY
   GN_SETUP_TOKEN="$token"
 }
 
-fetch_source() {
-  local target="$GN_HOME/src"
-  if [ -e "$target" ]; then
-    local archived
-    archived="$GN_HOME/archived-src/$(date -u +%Y%m%dT%H%M%SZ)"
-    blue "Moving existing source tree to $archived ..."
-    mkdir -p "$(dirname "$archived")"
-    mv "$target" "$archived"
+verify_source_checksum() {
+  if [ -z "$GN_SRC_SHA256" ]; then
+    return
   fi
-  if [ -n "$GN_SRC_ZIP" ] && [ -r "$GN_SRC_ZIP" ]; then
-    blue "Extracting GuardianNode from $GN_SRC_ZIP ..."
-    mkdir -p "$target"
-    if command -v unzip >/dev/null; then
-      unzip -q -o "$GN_SRC_ZIP" -d "$target"
-    else
-      tar -xzf "$GN_SRC_ZIP" -C "$target"
+  if [ -z "$GN_SRC_ZIP" ] || [ ! -r "$GN_SRC_ZIP" ]; then
+    red "GN_SRC_SHA256 was set, but GN_SRC_ZIP is not readable."
+    exit 1
+  fi
+  blue "Verifying source archive checksum..."
+  local actual
+  actual="$(sha256sum "$GN_SRC_ZIP" | awk '{print $1}')"
+  if [ "$actual" != "$GN_SRC_SHA256" ]; then
+    red "Source archive checksum mismatch. Expected $GN_SRC_SHA256 but got $actual."
+    exit 1
+  fi
+}
+
+validate_source_tree() {
+  local src="$1"
+  local missing=0
+  for path in LICENSE VERSION backend/pyproject.toml backend/app/main.py installer/shared/configure_ollama_linux.sh; do
+    if [ ! -e "$src/$path" ]; then
+      red "Source archive is missing required path: $path"
+      missing=1
     fi
-  else
-    blue "Cloning $GN_REPO_URL ($GN_VERSION) into $target ..."
-    git clone --depth 1 --branch "$GN_VERSION" "$GN_REPO_URL" "$target"
+  done
+  if [ "$missing" -ne 0 ]; then
+    return 1
   fi
-  chown -R "$GN_USER:$GN_USER" "$target"
+}
+
+normalize_extracted_source() {
+  local extract_dir="$1"
+  local target="$2"
+  local candidate="$extract_dir"
+  local entries=()
+  local entry
+  while IFS= read -r entry; do
+    entries+=("$entry")
+  done < <(find "$extract_dir" -mindepth 1 -maxdepth 1 ! -name "__MACOSX" | sort)
+
+  if [ "${#entries[@]}" -eq 1 ] && [ -d "${entries[0]}" ] && [ -d "${entries[0]}/backend" ]; then
+    candidate="${entries[0]}"
+  fi
+
+  validate_source_tree "$candidate"
+  mkdir -p "$target"
+  (
+    shopt -s dotglob nullglob
+    mv "$candidate"/* "$target"/
+  )
+}
+
+fetch_source() {
+  local stage_root="$GN_HOME/staging/source-$GN_RELEASE_ID"
+  GN_STAGED_SRC="$stage_root/src"
+  if [ -e "$stage_root" ]; then
+    local archived_stage="$GN_HOME/archived-src/stale-stage-$GN_RELEASE_ID"
+    yellow "Moving existing staging directory to $archived_stage ..."
+    mkdir -p "$(dirname "$archived_stage")"
+    mv "$stage_root" "$archived_stage"
+  fi
+  mkdir -p "$stage_root"
+
+  if [ -n "$GN_SRC_ZIP" ] && [ -r "$GN_SRC_ZIP" ]; then
+    verify_source_checksum
+    blue "Staging GuardianNode source from $GN_SRC_ZIP ..."
+    local extract_dir="$stage_root/extract"
+    mkdir -p "$extract_dir"
+    case "$GN_SRC_ZIP" in
+      *.zip)
+        if ! command -v unzip >/dev/null; then
+          red "unzip is required for .zip source archives."
+          exit 1
+        fi
+        unzip -q "$GN_SRC_ZIP" -d "$extract_dir"
+        ;;
+      *.tar.gz|*.tgz)
+        tar -xzf "$GN_SRC_ZIP" -C "$extract_dir"
+        ;;
+      *)
+        red "Unsupported source archive extension: $GN_SRC_ZIP"
+        exit 1
+        ;;
+    esac
+    normalize_extracted_source "$extract_dir" "$GN_STAGED_SRC"
+  else
+    blue "Cloning $GN_REPO_URL ($GN_VERSION) into staging ..."
+    git clone --depth 1 --branch "$GN_VERSION" "$GN_REPO_URL" "$GN_STAGED_SRC"
+    validate_source_tree "$GN_STAGED_SRC"
+  fi
+  chown -R "$GN_USER:$GN_USER" "$stage_root"
 }
 
 install_backend() {
-  blue "Setting up Python venv..."
-  sudo -u "$GN_USER" python3 -m venv "$GN_HOME/venv"
-  sudo -u "$GN_USER" "$GN_HOME/venv/bin/pip" install --quiet --upgrade pip
-  sudo -u "$GN_USER" "$GN_HOME/venv/bin/pip" install --quiet -e "$GN_HOME/src/backend"
+  blue "Setting up staged Python venv..."
+  GN_STAGED_VENV="$GN_HOME/staging/venv-$GN_RELEASE_ID"
+  if [ -e "$GN_STAGED_VENV" ]; then
+    local archived_venv="$GN_HOME/archived-venv/stale-stage-$GN_RELEASE_ID"
+    yellow "Moving existing staged venv to $archived_venv ..."
+    mkdir -p "$(dirname "$archived_venv")"
+    mv "$GN_STAGED_VENV" "$archived_venv"
+  fi
+  sudo -u "$GN_USER" python3 -m venv "$GN_STAGED_VENV"
+  sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/pip" install --quiet --upgrade pip
+  sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/pip" install --quiet -e "$GN_STAGED_SRC/backend"
+  sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/python" - <<'PY'
+import importlib
+importlib.import_module("app.main")
+PY
+}
+
+activate_release() {
+  blue "Activating staged source and virtualenv..."
+  mkdir -p "$GN_HOME/archived-src" "$GN_HOME/archived-venv"
+  if [ -e "$GN_HOME/src" ] || [ -L "$GN_HOME/src" ]; then
+    GN_PREV_SRC="$GN_HOME/archived-src/previous-$GN_RELEASE_ID"
+    mv "$GN_HOME/src" "$GN_PREV_SRC"
+  fi
+  if [ -e "$GN_HOME/venv" ] || [ -L "$GN_HOME/venv" ]; then
+    GN_PREV_VENV="$GN_HOME/archived-venv/previous-$GN_RELEASE_ID"
+    mv "$GN_HOME/venv" "$GN_PREV_VENV"
+  fi
+  mv "$GN_STAGED_SRC" "$GN_HOME/src"
+  mv "$GN_STAGED_VENV" "$GN_HOME/venv"
+  chown -R "$GN_USER:$GN_USER" "$GN_HOME/src" "$GN_HOME/venv"
+}
+
+rollback_release() {
+  yellow "Rolling back to previous source/venv, if available..."
+  local failed_id
+  failed_id="$(date -u +%Y%m%dT%H%M%SZ)"
+  if [ -e "$GN_HOME/src" ] || [ -L "$GN_HOME/src" ]; then
+    mkdir -p "$GN_HOME/archived-src"
+    mv "$GN_HOME/src" "$GN_HOME/archived-src/failed-$failed_id"
+  fi
+  if [ -e "$GN_HOME/venv" ] || [ -L "$GN_HOME/venv" ]; then
+    mkdir -p "$GN_HOME/archived-venv"
+    mv "$GN_HOME/venv" "$GN_HOME/archived-venv/failed-$failed_id"
+  fi
+  if [ -n "$GN_PREV_SRC" ] && [ -e "$GN_PREV_SRC" ]; then
+    mv "$GN_PREV_SRC" "$GN_HOME/src"
+  fi
+  if [ -n "$GN_PREV_VENV" ] && [ -e "$GN_PREV_VENV" ]; then
+    mv "$GN_PREV_VENV" "$GN_HOME/venv"
+  fi
+  chown -R "$GN_USER:$GN_USER" "$GN_HOME/src" "$GN_HOME/venv" 2>/dev/null || true
+  return 0
 }
 
 probe_hardware_and_pick_tier() {
@@ -277,11 +402,16 @@ main() {
   create_setup_token
   fetch_source
   install_backend
+  activate_release
+  trap 'rollback_release' ERR
   probe_hardware_and_pick_tier
   install_ollama
   write_systemd_unit
-  wait_for_health || exit 1
+  wait_for_health
+  trap - ERR
   print_done
 }
 
-main "$@"
+if [ "${GN_INSTALLER_LIBRARY_ONLY:-0}" != "1" ]; then
+  main "$@"
+fi

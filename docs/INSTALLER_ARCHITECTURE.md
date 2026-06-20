@@ -96,9 +96,15 @@ settings, loopback bind settings, and non-secret runtime defaults.
 1. Detects the distro and installs Python, SQLite, Tesseract, Git, curl, and Avahi packages.
 2. Creates a `guardiannode` system user and `/var/lib/guardiannode`.
 3. Creates a root/service-user-only one-time setup token.
-4. Installs the backend into `/opt/guardiannode/venv`.
-5. Probes hardware, pulls Ollama models unless disabled, and writes systemd.
-6. Starts `guardiannode-backend.service` and prints the local URL plus setup token.
+4. Stages the source tree under `/opt/guardiannode/staging`, normalizing both
+   flat archives and GitHub-style archives with one top-level directory.
+5. Validates required source files and builds a staged virtualenv before moving
+   the live `/opt/guardiannode/src` or `/opt/guardiannode/venv` trees.
+6. Moves the previous source/venv into archived directories only after staged
+   validation succeeds, and rolls back those trees if the new backend fails its
+   health check.
+7. Probes hardware, pulls Ollama models unless disabled, writes systemd, starts
+   `guardiannode-backend.service`, and prints the local URL plus setup token.
 
 Fresh Linux installs bind to `127.0.0.1` and set `GUARDIANNODE_MDNS_ENABLED=false`.
 Do not expose the service on a LAN until after first-run setup is complete.

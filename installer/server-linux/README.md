@@ -12,11 +12,15 @@ What it does:
 1. Detects distro (apt/dnf/pacman/zypper)
 2. Installs python3, sqlite, avahi packages, and Tesseract
 3. Creates a `guardiannode` system user
-4. Clones repo into `/opt/guardiannode/src/`
-5. Builds a Python venv at `/opt/guardiannode/venv/`
-6. Installs Ollama via its upstream installer
-7. Registers `guardiannode-backend.service` as systemd
-8. Starts the service and prints the local dashboard URL plus one-time setup token
+4. Stages source from git or `GN_SRC_ZIP`, accepting both flat and
+   GitHub-style top-level archive layouts
+5. Builds and import-checks a staged Python venv before replacing the live
+   `/opt/guardiannode/src/` and `/opt/guardiannode/venv/`
+6. Archives the previous source/venv and rolls them back if the new service
+   fails its health check
+7. Installs Ollama via its upstream installer when needed
+8. Registers `guardiannode-backend.service` as systemd
+9. Starts the service and prints the local dashboard URL plus one-time setup token
 
 Open the printed loopback URL in a browser on the server to complete first-run
 setup (admin account + recovery code). Fresh installs do not bind to the LAN.
