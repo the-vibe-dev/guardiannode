@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # ---------- Config ----------
-GN_VERSION="${GN_VERSION:-0.1.0-alpha.1}"
+GN_VERSION="${GN_VERSION:-v0.1.0-alpha.1}"
 GN_USER="guardiannode"
 GN_HOME="/opt/guardiannode"
 GN_DATA="/var/lib/guardiannode"
@@ -112,6 +112,13 @@ PY
 
 fetch_source() {
   local target="$GN_HOME/src"
+  if [ -e "$target" ]; then
+    local archived
+    archived="$GN_HOME/archived-src/$(date -u +%Y%m%dT%H%M%SZ)"
+    blue "Moving existing source tree to $archived ..."
+    mkdir -p "$(dirname "$archived")"
+    mv "$target" "$archived"
+  fi
   if [ -n "$GN_SRC_ZIP" ] && [ -r "$GN_SRC_ZIP" ]; then
     blue "Extracting GuardianNode from $GN_SRC_ZIP ..."
     mkdir -p "$target"
@@ -121,9 +128,8 @@ fetch_source() {
       tar -xzf "$GN_SRC_ZIP" -C "$target"
     fi
   else
-    blue "Cloning $GN_REPO_URL into $target ..."
-    rm -rf "$target"
-    git clone --depth 1 "$GN_REPO_URL" "$target"
+    blue "Cloning $GN_REPO_URL ($GN_VERSION) into $target ..."
+    git clone --depth 1 --branch "$GN_VERSION" "$GN_REPO_URL" "$target"
   fi
   chown -R "$GN_USER:$GN_USER" "$target"
 }

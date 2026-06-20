@@ -126,13 +126,13 @@ start "GuardianNode Tray" "C:\path\to\guardiannode\agent-windows\.venv\Scripts\p
 On the server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/installer/server-linux/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
 ```
 
 For test systems without model downloads:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/installer/server-linux/install.sh | sudo GN_NO_OLLAMA=1 bash
+curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo GN_NO_OLLAMA=1 bash
 ```
 
 After install, open `http://<server-ip>:8787/setup`, create the admin account,

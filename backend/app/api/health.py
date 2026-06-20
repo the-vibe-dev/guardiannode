@@ -78,6 +78,21 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
         protection_level = "full"
 
     from app.services import screenshot_async
+    pending = screenshot_async.pending_count()
+    throughput = snap.get("throughput", {})
+    latency_basis_ms = (
+        throughput.get("p95_latency_ms")
+        or throughput.get("avg_latency_ms")
+        or int(settings.classifier_timeout_seconds * 1000)
+    )
+    estimated_delay_ms = int(pending * latency_basis_ms)
+    if pending >= 50 or estimated_delay_ms >= 10 * 60 * 1000:
+        classification_capacity = "unhealthy"
+    elif pending > 0:
+        classification_capacity = "backlog"
+    else:
+        classification_capacity = "ok"
+
     return {
         "status": "ok",
         "version": __version__,
@@ -85,7 +100,12 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
         "protection": {"level": protection_level, "warnings": warnings},
         "tesseract_available": tesseract_available,
         "queue": snap,
-        "pending_classification": screenshot_async.pending_count(),
+        "pending_classification": pending,
+        "classification_capacity": {
+            "status": classification_capacity,
+            "estimated_delay_ms": estimated_delay_ms,
+            "latency_basis_ms": int(latency_basis_ms),
+        },
         "agent_queues": pipeline_metrics.agent_queues(),
         "ollama": {
             "url": vision_status.base_url,

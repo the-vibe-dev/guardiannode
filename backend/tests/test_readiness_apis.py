@@ -84,6 +84,35 @@ def test_settings_audit_and_storage_endpoints(monkeypatch, tmp_path):
     assert any(row["action"] == "settings.retention.update" for row in audit)
 
 
+def test_profile_delete_refuses_referenced_profile(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    r = client.post(
+        "/api/profiles",
+        json={"display_name": "Kid", "age_group": "10_13", "custom_watch_phrases": []},
+    )
+    assert r.status_code == 200
+    profile_id = r.json()["profile_id"]
+
+    from app.db.session import get_sessionmaker
+
+    s = get_sessionmaker()()
+    s.add(
+        Device(
+            device_id="device-1",
+            hostname="kidpc",
+            platform="windows",
+            paired=True,
+            profile_id=profile_id,
+        )
+    )
+    s.commit()
+    s.close()
+
+    r = client.delete(f"/api/profiles/{profile_id}")
+    assert r.status_code == 409
+    assert r.json()["detail"]["references"]["devices"] == 1
+
+
 @pytest.mark.asyncio
 async def test_text_event_passes_profile_custom_watch_phrases(db_session, monkeypatch):
     db_session.add(

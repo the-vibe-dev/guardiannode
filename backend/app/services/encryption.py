@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import struct
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -19,6 +20,8 @@ from app.settings import settings
 _MASTER_KEY_FILE = "master.key"
 _KEY_VERSION = 1
 _NONCE_SIZE = 12  # AES-GCM standard
+_STREAM_MAGIC = b"GNSTREAM1\n"
+_STREAM_CHUNK_SIZE = 4 * 1024 * 1024
 
 
 class EncryptionError(Exception):
@@ -109,6 +112,78 @@ def encrypt_blob_to_disk(plaintext: bytes, dest: Path, *, aad: bytes | None = No
 
 def decrypt_blob_from_disk(src: Path, *, aad: bytes | None = None) -> bytes:
     return decrypt_bytes(src.read_bytes(), aad=aad)
+
+
+def _chunk_aad(aad: bytes | None, index: int) -> bytes:
+    prefix = aad or b""
+    return prefix + b":chunk:" + index.to_bytes(8, "big")
+
+
+def encrypt_file_to_disk(
+    src: Path,
+    dest: Path,
+    *,
+    aad: bytes | None = None,
+    chunk_size: int = _STREAM_CHUNK_SIZE,
+) -> None:
+    """Encrypt a file without loading it all into memory.
+
+    Output format:
+        magic || repeated(uint32_be length || nonce || ciphertext+tag) || 0 length
+    """
+    if chunk_size <= 0:
+        raise EncryptionError("chunk_size must be positive")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    aes = AESGCM(get_master_key())
+    index = 0
+    with src.open("rb") as inp, tmp.open("wb") as out:
+        out.write(_STREAM_MAGIC)
+        while True:
+            plaintext = inp.read(chunk_size)
+            if not plaintext:
+                break
+            nonce = secrets.token_bytes(_NONCE_SIZE)
+            encrypted = nonce + aes.encrypt(nonce, plaintext, _chunk_aad(aad, index))
+            out.write(struct.pack(">I", len(encrypted)))
+            out.write(encrypted)
+            index += 1
+        out.write(struct.pack(">I", 0))
+    tmp.replace(dest)
+
+
+def decrypt_stream_file_from_disk(src: Path, *, aad: bytes | None = None) -> bytes:
+    """Decrypt a chunked stream file into memory.
+
+    This is intended for tests and admin tooling. Runtime exports use
+    ``encrypt_file_to_disk`` so the hot path stays bounded by chunk size.
+    """
+    aes = AESGCM(get_master_key())
+    out = bytearray()
+    with src.open("rb") as inp:
+        if inp.read(len(_STREAM_MAGIC)) != _STREAM_MAGIC:
+            raise EncryptionError("not a GuardianNode stream ciphertext")
+        index = 0
+        while True:
+            raw_len = inp.read(4)
+            if len(raw_len) != 4:
+                raise EncryptionError("stream ciphertext truncated")
+            frame_len = struct.unpack(">I", raw_len)[0]
+            if frame_len == 0:
+                break
+            if frame_len < _NONCE_SIZE + 16:
+                raise EncryptionError("stream frame too short")
+            frame = inp.read(frame_len)
+            if len(frame) != frame_len:
+                raise EncryptionError("stream frame truncated")
+            nonce, ct = frame[:_NONCE_SIZE], frame[_NONCE_SIZE:]
+            try:
+                out.extend(aes.decrypt(nonce, ct, _chunk_aad(aad, index)))
+            except Exception as e:
+                raise EncryptionError(f"stream decryption failed: {e}") from e
+            index += 1
+    return bytes(out)
 
 
 def current_key_version() -> int:

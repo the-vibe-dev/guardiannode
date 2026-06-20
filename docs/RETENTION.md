@@ -44,10 +44,10 @@ Wipes are real deletions, not soft-deletes.
 
 ## Export format
 
-`POST /api/storage/export` writes `<data>/exports/<id>.gnexport` — an AES-256-GCM
-encrypted ZIP containing:
+`POST /api/storage/export` writes `<data>/exports/<id>.gnexport` — a chunked
+AES-256-GCM encrypted container around a ZIP containing:
 
-- `manifest.json` — export id, timestamp, format (`guardiannode-full-export-v2`), blob counts
+- `manifest.json` — export id, timestamp, format (`guardiannode-full-export-v3`), blob counts
 - `alerts.jsonl`, `events.jsonl`, `risk_results.jsonl`, `audit_logs.jsonl`
 - `evidence_manifest.json` — one entry per evidence blob (id, sha256, size, source event)
 - `evidence/<blob_id>.enc` — the actual encrypted screenshot evidence files,

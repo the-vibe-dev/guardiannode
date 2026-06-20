@@ -16,8 +16,10 @@ an alert when a device stops sending heartbeats — see the offline monitor.
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
 import os
+import re
 import subprocess
 import time
 
@@ -30,16 +32,55 @@ WATCHED = [
 ]
 
 
-def _process_running_windows(image: str) -> bool:
-    """True if the process exists in any session (SYSTEM sees them all)."""
+def _parse_quser_session_ids(output: str) -> set[int]:
+    sessions: set[int] = set()
+    for line in output.splitlines():
+        if "USERNAME" in line and "STATE" in line:
+            continue
+        m = re.search(r"\s+(\d+)\s+Active\s+", line)
+        if m:
+            sessions.add(int(m.group(1)))
+    return sessions
+
+
+def _parse_tasklist_session_ids(output: str) -> set[int]:
+    sessions: set[int] = set()
+    for row in csv.reader(output.splitlines()):
+        if len(row) >= 4 and row[3].strip().isdigit():
+            sessions.add(int(row[3].strip()))
+    return sessions
+
+
+def _active_user_session_ids_windows() -> set[int] | None:
+    """Return active interactive session IDs, or None if quser is unavailable."""
+    try:
+        out = subprocess.run(["quser"], capture_output=True, text=True, timeout=10)
+        if out.returncode != 0 and not (out.stdout or "").strip():
+            if "No User exists" in (out.stderr or ""):
+                return set()
+            return None
+        return _parse_quser_session_ids(out.stdout or "")
+    except Exception:
+        return None
+
+
+def _process_session_ids_windows(image: str) -> set[int] | None:
+    """Session IDs where an image exists. SYSTEM can see all user sessions."""
     try:
         out = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH"],
+            ["tasklist", "/FI", f"IMAGENAME eq {image}", "/FO", "CSV", "/NH"],
             capture_output=True, text=True, timeout=10,
         )
-        return image.lower() in (out.stdout or "").lower()
+        if out.returncode != 0:
+            return None
+        return _parse_tasklist_session_ids(out.stdout or "")
     except Exception:
-        return False
+        return None
+
+
+def _process_running_windows(image: str) -> bool:
+    sessions = _process_session_ids_windows(image)
+    return bool(sessions)
 
 
 def _any_user_logged_in() -> bool:
@@ -94,13 +135,25 @@ def watchdog_loop(interval: int = 5, peer_service: str | None = None) -> None:
     log.info("watchdog started (interval=%ds, peer=%s)", interval, peer_service or "none")
     while True:
         if os.name == "nt":
-            user_present = _any_user_logged_in()
+            active_sessions = _active_user_session_ids_windows()
+            user_present = bool(active_sessions) if active_sessions is not None else _any_user_logged_in()
             for image, task_name in WATCHED:
-                # The tray is user-session-only; skip it when nobody is signed in.
-                if image == "GuardianNodeTray.exe" and not user_present:
+                # These are user-session tasks; skip them when nobody is signed in.
+                if not user_present:
                     continue
-                if not _process_running_windows(image):
-                    log.warning("%s not running; re-running task %s", image, task_name)
+                running_sessions = _process_session_ids_windows(image)
+                missing_sessions: set[int] = set()
+                if active_sessions is not None and running_sessions is not None:
+                    missing_sessions = active_sessions - running_sessions
+                    missing = bool(missing_sessions)
+                else:
+                    missing = not _process_running_windows(image)
+                if missing:
+                    detail = (
+                        f" missing from sessions {sorted(missing_sessions)}"
+                        if missing_sessions else ""
+                    )
+                    log.warning("%s not running%s; re-running task %s", image, detail, task_name)
                     _task_run_windows(task_name)
             # Revive the peer watchdog if it has been stopped.
             if peer_service and not _service_running_windows(peer_service):

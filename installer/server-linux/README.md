@@ -5,7 +5,7 @@ Two ways to install:
 ## A) Native install (recommended for low-overhead deployments)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/installer/server-linux/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
 ```
 
 What it does:
@@ -73,8 +73,10 @@ vision endpoints can see the installed models.
 
 ```bash
 sudo systemctl disable --now guardiannode-backend
-sudo rm /etc/systemd/system/guardiannode-backend.service
-sudo userdel -r guardiannode
-sudo rm -rf /opt/guardiannode /var/lib/guardiannode /var/log/guardiannode
+archive="/root/guardiannode-uninstall-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo mkdir -p "$archive"
+sudo mv /etc/systemd/system/guardiannode-backend.service "$archive"/
+sudo userdel guardiannode
+sudo mv /opt/guardiannode /var/lib/guardiannode /var/log/guardiannode "$archive"/
 sudo systemctl daemon-reload
 ```

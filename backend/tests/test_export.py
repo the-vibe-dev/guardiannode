@@ -67,7 +67,7 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     assert export_path.exists()
 
     # Decrypt the outer .gnexport and verify package contents.
-    payload = encryption.decrypt_blob_from_disk(
+    payload = encryption.decrypt_stream_file_from_disk(
         export_path, aad=r.json()["export_id"].encode("ascii"))
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
         names = set(zf.namelist())

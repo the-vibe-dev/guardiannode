@@ -85,7 +85,7 @@ No GPU in the kid's PC? Use the [two-machine setup](PARENT_GUIDES/install-server
 **Linux server:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/installer/server-linux/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
 ```
 
 Then on the child's PC, get a pairing code from the dashboard (**Devices → Add device**) and run the installer with **"Connect to existing server"**.

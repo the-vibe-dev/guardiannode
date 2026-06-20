@@ -134,7 +134,7 @@ must review the license and performance of any Ollama model they install. See
 On the server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/installer/server-linux/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
 ```
 
 Or with Docker:

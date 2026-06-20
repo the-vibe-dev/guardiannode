@@ -30,6 +30,11 @@ interface Health {
     };
   };
   pending_classification?: number;
+  classification_capacity?: {
+    status: "ok" | "backlog" | "unhealthy";
+    estimated_delay_ms: number;
+    latency_basis_ms: number;
+  };
   agent_queues?: {
     device_id: string;
     hostname: string;
@@ -86,6 +91,7 @@ export default function PipelineHealth() {
   const backlog = (h.agent_queues || []).filter((q) => q.queued_frames > 0);
   const backlogTotal = backlog.reduce((sum, q) => sum + q.queued_frames, 0);
   const pending = h.pending_classification || 0;
+  const capacity = h.classification_capacity;
 
   const protection = h.protection;
 
@@ -112,6 +118,15 @@ export default function PipelineHealth() {
           </ul>
         </div>
       )}
+      {capacity?.status === "unhealthy" && (
+        <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <div className="font-semibold mb-1">Classification backlog is high</div>
+          <div>
+            Estimated review delay is {fmtMs(capacity.estimated_delay_ms)} for {pending} waiting frame
+            {pending === 1 ? "" : "s"}.
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-semibold">Pipeline status</h2>
         <div className="flex items-center gap-2 text-xs">
@@ -121,7 +136,11 @@ export default function PipelineHealth() {
             label={busy ? `Processing ${h.queue.in_flight_count}` : "Idle"}
           />
           {pending > 0 && (
-            <Pulse on color="bg-blue-400" label={`${pending} waiting to classify`} />
+            <Pulse
+              on
+              color={capacity?.status === "unhealthy" ? "bg-red-500" : "bg-blue-400"}
+              label={`${pending} waiting to classify`}
+            />
           )}
           {backlogTotal > 0 && (
             <Pulse on color="bg-orange-400" label={`${backlogTotal} waiting upload`} />
@@ -172,10 +191,11 @@ export default function PipelineHealth() {
       )}
 
       {/* Throughput */}
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs lg:grid-cols-5">
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs lg:grid-cols-6">
         <Stat label="Frames (5m)" value={String(h.queue.throughput.frames_in_window)} />
         <Stat label="Avg latency" value={fmtMs(h.queue.throughput.avg_latency_ms)} />
         <Stat label="P95 latency" value={fmtMs(h.queue.throughput.p95_latency_ms)} />
+        <Stat label="Queue delay" value={capacity ? fmtMs(capacity.estimated_delay_ms) : "—"} />
         <Stat label="Severity" value={fmtSev(h.queue.throughput.severity_counts)} />
         <Stat label="Last classified" value={fmtWhen(h.queue.last_classified_at)} />
       </div>

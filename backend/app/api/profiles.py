@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app.api.deps import current_user, get_db_dep
-from app.db.models import ChildProfile, User
+from app.db.models import Alert, ChildProfile, ChildRequest, Device, Event, Policy, User
 from app.services import profile_policy
 from app.services.audit import log_action
 
@@ -163,6 +163,21 @@ def delete_profile(
     p = db.get(ChildProfile, profile_id)
     if p is None:
         raise HTTPException(404, "Profile not found")
+    references = {
+        "devices": db.query(Device).filter(Device.profile_id == profile_id).count(),
+        "events": db.query(Event).filter(Event.profile_id == profile_id).count(),
+        "alerts": db.query(Alert).filter(Alert.profile_id == profile_id).count(),
+        "child_requests": db.query(ChildRequest).filter(ChildRequest.profile_id == profile_id).count(),
+        "policies": db.query(Policy).filter(Policy.profile_id == profile_id).count(),
+    }
+    if any(references.values()):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Profile is still referenced; reassign devices and retain history before deleting.",
+                "references": references,
+            },
+        )
     db.delete(p)
     log_action(db, actor=str(user.id), action="profile.delete", target=profile_id)
     db.commit()

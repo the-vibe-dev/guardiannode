@@ -1,7 +1,6 @@
 """Storage usage, encrypted export, and wipe controls."""
 from __future__ import annotations
 
-import io
 import json
 import os
 import zipfile
@@ -48,25 +47,41 @@ def storage_overview(
     }
 
 
-def _rows(rows) -> list[dict]:
+def _row_dict(row) -> dict:
     from sqlalchemy import inspect as sa_inspect
 
-    out = []
-    for row in rows:
-        data = {}
-        # Iterate ORM attributes, not raw columns: the events table maps the
-        # "metadata" column to the event_metadata attribute, and a plain
-        # getattr(row, "metadata") would return SQLAlchemy's MetaData object.
-        for attr in sa_inspect(row).mapper.column_attrs:
-            value = getattr(row, attr.key)
-            col_name = attr.columns[0].name
-            if isinstance(value, datetime):
-                value = value.isoformat()
-            elif isinstance(value, bytes):
-                value = f"<encrypted:{len(value)} bytes>"
-            data[col_name] = value
-        out.append(data)
-    return out
+    data = {}
+    # Iterate ORM attributes, not raw columns: the events table maps the
+    # "metadata" column to the event_metadata attribute, and a plain
+    # getattr(row, "metadata") would return SQLAlchemy's MetaData object.
+    for attr in sa_inspect(row).mapper.column_attrs:
+        value = getattr(row, attr.key)
+        col_name = attr.columns[0].name
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        elif isinstance(value, bytes):
+            value = f"<encrypted:{len(value)} bytes>"
+        data[col_name] = value
+    return data
+
+
+def _write_jsonl(zf: zipfile.ZipFile, name: str, rows) -> None:
+    with zf.open(name, "w") as out:
+        for row in rows.yield_per(500):
+            out.write(json.dumps(_row_dict(row), separators=(",", ":")).encode("utf-8"))
+            out.write(b"\n")
+
+
+def _write_json_array(zf: zipfile.ZipFile, name: str, rows) -> None:
+    first = True
+    with zf.open(name, "w") as out:
+        out.write(b"[\n")
+        for row in rows.yield_per(500):
+            if not first:
+                out.write(b",\n")
+            out.write(json.dumps(_row_dict(row), separators=(",", ":")).encode("utf-8"))
+            first = False
+        out.write(b"\n]\n")
 
 
 @router.post("/export")
@@ -78,43 +93,53 @@ def export_storage(
     """Full local evidence export.
 
     The package contains all metadata (JSONL) plus every encrypted evidence
-    blob file (`evidence/<blob_id>.enc`, AES-GCM as stored on disk). The whole
-    zip is then encrypted again into a `.gnexport`. Evidence stays local and
-    decryptable only with this server's master key.
+    blob file (`evidence/<blob_id>.enc`, AES-GCM as stored on disk). The zip is
+    written to a temporary file, then encrypted in chunks into a `.gnexport`.
+    Evidence stays local and decryptable only with this server's master key.
     """
     export_id = str(ULID())
-    blobs = db.query(EvidenceBlob).all()
     missing_files: list[str] = []
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("alerts.jsonl", "\n".join(json.dumps(r) for r in _rows(db.query(Alert).all())))
-        zf.writestr("events.jsonl", "\n".join(json.dumps(r) for r in _rows(db.query(Event).all())))
-        zf.writestr("risk_results.jsonl", "\n".join(json.dumps(r) for r in _rows(db.query(RiskResult).all())))
-        zf.writestr("audit_logs.jsonl", "\n".join(json.dumps(r) for r in _rows(db.query(AuditLog).all())))
-        zf.writestr("evidence_manifest.json", json.dumps(_rows(blobs), indent=2))
-        for blob in blobs:
-            src = Path(blob.encrypted_path)
-            if not src.is_file():
-                missing_files.append(blob.blob_id)
-                continue
-            # Stored ciphertext is copied as-is; aad = blob_id, key = master key.
-            zf.write(src, arcname=f"evidence/{blob.blob_id}.enc")
-        manifest = {
-            "export_id": export_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "format": "guardiannode-full-export-v2",
-            "includes_evidence_blobs": True,
-            "evidence_blob_count": len(blobs) - len(missing_files),
-            "evidence_blobs_missing": missing_files,
-            "note": (
-                "evidence/*.enc files are AES-256-GCM ciphertext exactly as stored; "
-                "decryption requires this server's master key (keys/master.key) "
-                "with the blob_id as associated data."
-            ),
-        }
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
     dest = _exports_dir() / f"{export_id}.gnexport"
-    encryption.encrypt_blob_to_disk(buf.getvalue(), dest, aad=export_id.encode("ascii"))
+    tmp_dir = _exports_dir() / ".tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_zip = tmp_dir / f"{export_id}.zip"
+    included_blob_count = 0
+    try:
+        with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            _write_jsonl(zf, "alerts.jsonl", db.query(Alert))
+            _write_jsonl(zf, "events.jsonl", db.query(Event))
+            _write_jsonl(zf, "risk_results.jsonl", db.query(RiskResult))
+            _write_jsonl(zf, "audit_logs.jsonl", db.query(AuditLog))
+            _write_json_array(zf, "evidence_manifest.json", db.query(EvidenceBlob))
+            for blob in db.query(EvidenceBlob).yield_per(100):
+                src = Path(blob.encrypted_path)
+                if not src.is_file():
+                    missing_files.append(blob.blob_id)
+                    continue
+                # Stored ciphertext is copied as-is; aad = blob_id, key = master key.
+                zf.write(src, arcname=f"evidence/{blob.blob_id}.enc")
+                included_blob_count += 1
+            manifest = {
+                "export_id": export_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "format": "guardiannode-full-export-v3",
+                "outer_encryption": "chunked-aes-256-gcm",
+                "includes_evidence_blobs": True,
+                "evidence_blob_count": included_blob_count,
+                "evidence_blobs_missing": missing_files,
+                "note": (
+                    "evidence/*.enc files are AES-256-GCM ciphertext exactly as stored; "
+                    "decryption requires this server's master key (keys/master.key) "
+                    "with the blob_id as associated data."
+                ),
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+        encryption.encrypt_file_to_disk(tmp_zip, dest, aad=export_id.encode("ascii"))
+    finally:
+        try:
+            tmp_zip.unlink(missing_ok=True)
+        except OSError:
+            pass
     if os.name != "nt":
         try:
             os.chmod(dest, 0o600)
