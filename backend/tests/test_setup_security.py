@@ -60,7 +60,8 @@ def test_setup_token_is_single_use(monkeypatch, tmp_path):
     r = client.post("/api/auth/setup", json=_setup_body(token))
     assert r.status_code == 200, r.text
 
-    r = client.post("/api/auth/setup", json=_setup_body(token))
+    csrf = client.get("/api/auth/csrf").json()["csrf_token"]
+    r = client.post("/api/auth/setup", json=_setup_body(token), headers={"X-CSRF-Token": csrf})
     assert r.status_code in {400, 401}
 
 

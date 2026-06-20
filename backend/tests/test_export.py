@@ -41,6 +41,7 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
         },
     )
     assert r.status_code == 200
+    client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrf_token"]})
 
     # Seed one event + evidence blob with a real encrypted file on disk.
     from app.db.session import get_sessionmaker

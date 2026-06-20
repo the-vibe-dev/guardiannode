@@ -1,16 +1,45 @@
 // Typed API client. Uses cookie auth (no token to manage in localStorage).
 
 const API_BASE = "/api";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+let cachedCsrfToken: string | null = null;
+
+async function getCsrfToken(): Promise<string> {
+  if (cachedCsrfToken) return cachedCsrfToken;
+  const res = await fetch(`${API_BASE}/auth/csrf`, { credentials: "same-origin" });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  const data = await res.json();
+  cachedCsrfToken = String(data.csrf_token);
+  return cachedCsrfToken;
+}
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(API_BASE + path, {
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
+  const method = (init.method || "GET").toUpperCase();
+  const mutating = MUTATING_METHODS.has(method);
+  const headers = new Headers(init.headers || undefined);
+  headers.set("Content-Type", "application/json");
+  if (mutating) {
+    headers.set("X-CSRF-Token", await getCsrfToken());
+  }
+
+  let res = await fetch(API_BASE + path, {
     ...init,
+    credentials: "same-origin",
+    headers,
   });
+  if (res.status === 403 && mutating) {
+    cachedCsrfToken = null;
+    headers.set("X-CSRF-Token", await getCsrfToken());
+    res = await fetch(API_BASE + path, {
+      ...init,
+      credentials: "same-origin",
+      headers,
+    });
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`API ${res.status}: ${text}`);

@@ -38,7 +38,8 @@ def _client(monkeypatch, tmp_path) -> TestClient:
         },
     )
     assert r.status_code == 200
-    client.post("/api/auth/logout")
+    csrf = client.get("/api/auth/csrf").json()["csrf_token"]
+    client.post("/api/auth/logout", headers={"X-CSRF-Token": csrf})
     return client
 
 
@@ -61,8 +62,13 @@ def test_login_success_resets_counter(monkeypatch, tmp_path):
         client.post("/api/auth/login", json={"password": "wrong-password"})
     r = client.post("/api/auth/login", json={"password": "correct horse battery"})
     assert r.status_code == 200
+    csrf = client.get("/api/auth/csrf").json()["csrf_token"]
     # Counter reset: failures start from zero again.
-    r = client.post("/api/auth/login", json={"password": "wrong-password"})
+    r = client.post(
+        "/api/auth/login",
+        json={"password": "wrong-password"},
+        headers={"X-CSRF-Token": csrf},
+    )
     assert r.status_code == 401
 
 

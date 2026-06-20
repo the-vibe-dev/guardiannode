@@ -1,11 +1,12 @@
 """FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
+import hmac
 import logging
 import os
 import secrets
 import sys
-import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -46,6 +47,14 @@ from app.workers import cleanup_worker, offline_monitor
 log = logging.getLogger("guardiannode")
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_CSRF_EXEMPT_API_PATHS = {
+    "/api/devices/pair/complete",
+    "/api/devices/bootstrap-local",
+    "/api/devices/heartbeat",
+    "/api/events",
+    "/api/events/screenshot",
+    "/api/child-requests",
+}
 
 
 class BrowserSecurityMiddleware(BaseHTTPMiddleware):
@@ -59,6 +68,11 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
                 host = request.headers.get("host", "")
                 if parsed.netloc != host:
                     return JSONResponse({"detail": "invalid origin"}, status_code=403)
+            if self._requires_csrf(request):
+                expected = str(request.session.get("csrf_token") or "")
+                supplied = request.headers.get("x-csrf-token", "")
+                if not expected or not hmac.compare_digest(expected, supplied):
+                    return JSONResponse({"detail": "invalid csrf token"}, status_code=403)
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
@@ -69,6 +83,16 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
             "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'",
         )
         return response
+
+    @staticmethod
+    def _requires_csrf(request: Request) -> bool:
+        if not request.url.path.startswith("/api/"):
+            return False
+        if request.url.path in _CSRF_EXEMPT_API_PATHS:
+            return False
+        if request.headers.get("authorization", "").lower().startswith("bearer "):
+            return False
+        return bool(request.session.get("user_id"))
 
 
 def _ensure_session_secret() -> str:

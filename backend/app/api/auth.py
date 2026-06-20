@@ -1,6 +1,7 @@
 """Authentication: login, logout, current user, password reset via recovery code."""
 from __future__ import annotations
 
+import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -45,6 +46,15 @@ def _enforce_rate_limit(scope: str, request: Request) -> None:
             detail="Too many failed attempts. Try again later.",
             headers={"Retry-After": str(retry_after)},
         )
+
+
+@router.get("/csrf")
+def csrf_token(request: Request):
+    token = request.session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        request.session["csrf_token"] = token
+    return {"csrf_token": token}
 
 
 @router.post("/login", response_model=LoginResponse)

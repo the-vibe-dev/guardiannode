@@ -1,6 +1,8 @@
 """Loopback-only first-device pairing bootstrap for all-in-one installs."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi.testclient import TestClient
 
 from app.services import rate_limit
@@ -91,6 +93,18 @@ def test_device_bootstrap_token_is_single_use(monkeypatch, tmp_path):
 
     r = client.post("/api/devices/bootstrap-local", json=body)
     assert r.status_code == 401
+
+
+def test_device_bootstrap_token_creation_is_concurrency_safe(monkeypatch, tmp_path):
+    _app(monkeypatch, tmp_path)
+    from app.services.device_bootstrap_token import ensure_device_bootstrap_token, token_path
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        tokens = list(pool.map(lambda _: ensure_device_bootstrap_token(), range(8)))
+
+    assert all(tokens)
+    assert token_path().exists()
+    assert not list(token_path().parent.glob(".device_bootstrap_token.json.*.tmp"))
 
 
 def test_pair_complete_does_not_accept_local_bootstrap_fields(monkeypatch, tmp_path):

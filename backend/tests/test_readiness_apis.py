@@ -31,6 +31,7 @@ def _client(monkeypatch, tmp_path):
         },
     )
     assert r.status_code == 200
+    client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrf_token"]})
     return client
 
 

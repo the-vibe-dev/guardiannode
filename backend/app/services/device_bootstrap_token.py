@@ -52,7 +52,7 @@ def verify_and_consume_device_bootstrap_token(candidate: str | None) -> bool:
 
 def _write_token(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
     if os.name != "nt":
         try:
