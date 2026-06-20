@@ -39,6 +39,7 @@ Dashboard **Storage** page shows current usage and offers:
 - Wipe all low-severity events (removes the events and risk results too, not just the alert rows)
 - Wipe all events older than N days (full chain, including evidence files)
 - Export everything as an encrypted package
+- Download or delete existing encrypted exports
 
 Wipes are real deletions, not soft-deletes.
 
@@ -57,8 +58,10 @@ The export is **local and parent-controlled**. Decrypting it (and the inner
 `evidence/*.enc` files) requires this server's master key
 (`<data>/keys/master.key`); each blob uses its `blob_id` as AES-GCM associated
 data. There is no cloud upload and no recipient-key scheme. The dashboard
-currently creates the export on the server filesystem and returns that local
-path; remote browsers do not receive a streamed download.
+creates the export on the server filesystem, lists existing `.gnexport` files,
+and downloads them through the authenticated
+`GET /api/storage/exports/<id>/download` endpoint. Deleting an export removes
+only that `.gnexport` file and writes an audit-log entry.
 
 ## Audit
 

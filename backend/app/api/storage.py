@@ -7,7 +7,8 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -28,6 +29,24 @@ def _exports_dir() -> Path:
     return path
 
 
+def _export_path(export_id: str) -> Path:
+    if not export_id or not all(c.isalnum() for c in export_id):
+        raise HTTPException(status_code=400, detail="Invalid export id")
+    path = _exports_dir() / f"{export_id}.gnexport"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Export not found")
+    return path
+
+
+class ExportDTO(BaseModel):
+    export_id: str
+    filename: str
+    path: str
+    size_bytes: int
+    created_at: datetime
+    download_url: str
+
+
 @router.get("")
 def storage_overview(
     db: Session = Depends(get_db_dep),
@@ -45,6 +64,62 @@ def storage_overview(
         "evidence_bytes": int(blob_bytes),
         "export_bytes": int(export_bytes),
     }
+
+
+@router.get("/exports", response_model=list[ExportDTO])
+def list_exports(_: User = Depends(current_user)):
+    exports: list[ExportDTO] = []
+    for path in sorted(_exports_dir().glob("*.gnexport"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not path.is_file():
+            continue
+        export_id = path.stem
+        stat = path.stat()
+        exports.append(
+            ExportDTO(
+                export_id=export_id,
+                filename=path.name,
+                path=str(path),
+                size_bytes=stat.st_size,
+                created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
+                download_url=f"/api/storage/exports/{export_id}/download",
+            )
+        )
+    return exports
+
+
+@router.get("/exports/{export_id}/download")
+def download_export(export_id: str, _: User = Depends(current_user)):
+    path = _export_path(export_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+@router.delete("/exports/{export_id}")
+def delete_export(
+    export_id: str,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+):
+    path = _export_path(export_id)
+    size_bytes = path.stat().st_size
+    try:
+        path.unlink()
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete export: {e}") from e
+    log_action(
+        db,
+        actor=str(user.id),
+        action="storage.export.delete",
+        target=export_id,
+        details={"path": str(path), "size_bytes": size_bytes},
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return {"ok": True}
 
 
 def _row_dict(row) -> dict:
@@ -154,7 +229,13 @@ def export_storage(
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
-    return {"ok": True, "export_id": export_id, "path": str(dest), "size_bytes": dest.stat().st_size}
+    return {
+        "ok": True,
+        "export_id": export_id,
+        "path": str(dest),
+        "download_url": f"/api/storage/exports/{export_id}/download",
+        "size_bytes": dest.stat().st_size,
+    }
 
 
 class WipeRequest(BaseModel):

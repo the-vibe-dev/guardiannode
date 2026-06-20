@@ -41,19 +41,22 @@ export default function Settings() {
   const [notifications, setNotifications] = useState<any>(null);
   const [retention, setRetention] = useState<any>(null);
   const [storage, setStorage] = useState<any>(null);
+  const [exportsList, setExportsList] = useState<any[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   async function reload() {
-    const [n, r, s] = await Promise.all([
+    const [n, r, s, e] = await Promise.all([
       api.notificationSettings(),
       api.retentionSettings(),
       api.storage(),
+      api.exports(),
     ]);
     setNotifications({ ...n, password: "" });
     setRetention(r);
     setStorage(s);
+    setExportsList(e);
   }
 
   useEffect(() => {
@@ -233,6 +236,47 @@ export default function Settings() {
             Wipe screenshots
           </button>
         </div>
+        {exportsList.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="min-w-[640px] w-full text-sm">
+              <thead className="text-left text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="py-2 pr-3">Export</th>
+                  <th className="py-2 pr-3">Created</th>
+                  <th className="py-2 pr-3">Size</th>
+                  <th className="py-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exportsList.map((item) => (
+                  <tr key={item.export_id} className="border-t">
+                    <td className="py-2 pr-3 font-mono text-xs">{item.filename}</td>
+                    <td className="py-2 pr-3">{fmtDate(item.created_at)}</td>
+                    <td className="py-2 pr-3">{fmtBytes(item.size_bytes)}</td>
+                    <td className="py-2">
+                      <div className="flex flex-wrap gap-2">
+                        <a
+                          href={item.download_url}
+                          download={item.filename}
+                          className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-2 py-1 rounded text-xs"
+                        >
+                          Download
+                        </a>
+                        <button
+                          onClick={() => run("delete-export", () => api.deleteExport(item.export_id), "Export deleted.")}
+                          disabled={busy !== null}
+                          className="bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 border border-red-200 px-2 py-1 rounded text-xs"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -266,4 +310,8 @@ function fmtBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleString();
 }

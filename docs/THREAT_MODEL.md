@@ -41,8 +41,8 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
 ## 3. Adversaries and what we do about them
 
 ### 3.1 A curious or motivated child (on the monitored device)
-- **Tamper / kill the agent.** Mitigation: agent runs as a scheduled task; the
-  backend tracks `last_seen` and surfaces tamper/offline status to the parent. We
+- **Monitoring interruption.** Mitigation: agent runs as a scheduled task; the
+  backend tracks `last_seen` and surfaces offline/heartbeat gaps to the parent. We
   do **not** hide the agent — GuardianNode is visible monitoring by design (a tray
   icon and clear install footprint), not stealthware.
 - **Local pause abuse.** A local `paused_until` file can pause capture; pauses are

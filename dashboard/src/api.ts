@@ -98,7 +98,10 @@ export const api = {
   runRetentionCleanup: () =>
     request<any>("/settings/retention/run-cleanup", { method: "POST" }),
   storage: () => request<any>("/storage"),
+  exports: () => request<any[]>("/storage/exports"),
   exportStorage: () => request<any>("/storage/export", { method: "POST" }),
+  deleteExport: (export_id: string) =>
+    request<any>(`/storage/exports/${export_id}`, { method: "DELETE" }),
   wipeStorage: (body: any) =>
     request<any>("/storage/wipe", { method: "POST", body: JSON.stringify(body) }),
   audit: (params: Record<string, string> = {}) => {

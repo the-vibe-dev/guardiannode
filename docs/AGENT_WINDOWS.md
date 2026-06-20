@@ -68,7 +68,7 @@ Pairing credentials live separately in
 - `process_watcher.py` — `psutil`-based active process detection
 - `window_tracker.py` — `pywin32` active window detection
 - `screenshot_capture.py` — `mss`-based fast capture
-- `ocr_engine.py` — pluggable PaddleOCR / Tesseract / none
+- `ocr_engine.py` — Tesseract OCR wrapper; PaddleOCR is only a planned optional path
 - `redactor.py` — best-effort text filtering helpers where used
 - `event_queue.py` — local SQLite queue for offline resilience
 - `backend_client.py` — HTTP client to backend

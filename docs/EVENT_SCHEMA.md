@@ -42,7 +42,7 @@ JSON Schema files live in `shared/schemas/`. Pydantic equivalents in `shared/pyt
   "summary": "Asked the child to move to Discord and keep it secret.",
   "evidence": ["asked to move to Discord", "told child not to tell parents"],
   "recommended_action": "alert_parent",
-  "model": "qwen2.5:7b-instruct",
+  "model": "llama3.2:3b",
   "rules_triggered": ["off_platform_contact", "secrecy_phrase"],
   "confidence": 0.84,
   "prompt_version": "abc1234",

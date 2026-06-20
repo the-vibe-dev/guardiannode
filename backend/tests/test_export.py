@@ -65,10 +65,20 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     assert r.status_code == 200
     export_path = Path(r.json()["path"])
     assert export_path.exists()
+    export_id = r.json()["export_id"]
+    assert r.json()["download_url"] == f"/api/storage/exports/{export_id}/download"
+
+    listed = client.get("/api/storage/exports")
+    assert listed.status_code == 200
+    assert listed.json()[0]["export_id"] == export_id
+
+    downloaded = client.get(r.json()["download_url"])
+    assert downloaded.status_code == 200
+    assert downloaded.content == export_path.read_bytes()
 
     # Decrypt the outer .gnexport and verify package contents.
     payload = encryption.decrypt_stream_file_from_disk(
-        export_path, aad=r.json()["export_id"].encode("ascii"))
+        export_path, aad=export_id.encode("ascii"))
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
         names = set(zf.namelist())
         assert {"manifest.json", "alerts.jsonl", "events.jsonl",
@@ -80,3 +90,8 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
         # The embedded blob is the exact ciphertext from disk and still decrypts.
         inner = zf.read("evidence/blob1.enc")
         assert encryption.decrypt_bytes(inner, aad=b"blob1") == b"fake-jpeg-bytes"
+
+    deleted = client.delete(f"/api/storage/exports/{export_id}")
+    assert deleted.status_code == 200
+    assert not export_path.exists()
+    assert client.get("/api/storage/exports").json() == []
