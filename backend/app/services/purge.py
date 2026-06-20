@@ -8,12 +8,12 @@ these helpers or it strands orphaned rows and undeletable evidence files.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Alert, EvidenceBlob, Event, RiskResult
+from app.db.models import Alert, Event, EvidenceBlob, RiskResult
+from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,9 @@ def delete_blob(session: Session, blob: EvidenceBlob) -> bool:
     """Delete one evidence blob row and its encrypted file. Returns True if the
     row was deleted (file-unlink failures are logged but don't strand the row)."""
     try:
-        Path(blob.encrypted_path).unlink(missing_ok=True)
+        resolve_stored_evidence_path(blob.encrypted_path).unlink(missing_ok=True)
+    except (FileNotFoundError, UnsafeEvidencePathError) as e:
+        log.warning("skipping unsafe or missing evidence file %s: %s", blob.encrypted_path, e)
     except Exception as e:
         log.warning("could not unlink evidence file %s: %s", blob.encrypted_path, e)
     session.delete(blob)

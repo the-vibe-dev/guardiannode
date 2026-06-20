@@ -54,6 +54,8 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     blob_dir = settings.evidence_dir / "ab"
     blob_path = blob_dir / "blob1.enc"
     encryption.encrypt_blob_to_disk(b"fake-jpeg-bytes", blob_path, aad=b"blob1")
+    outside_path = tmp_path / "outside-secret.enc"
+    outside_path.write_bytes(b"do-not-export")
 
     s = get_sessionmaker()()
     s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
@@ -62,6 +64,10 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
                 timestamp=datetime.now(UTC), screenshot_blob_id="blob1"))
     s.add(EvidenceBlob(blob_id="blob1", kind="screenshot",
                        encrypted_path=str(blob_path), size_bytes=15, event_id="e1"))
+    s.add(Event(event_id="e2", device_id="d1", source_type="image",
+                timestamp=datetime.now(UTC), screenshot_blob_id="evilblob"))
+    s.add(EvidenceBlob(blob_id="evilblob", kind="screenshot",
+                       encrypted_path=str(outside_path), size_bytes=13, event_id="e2"))
     s.commit()
     s.close()
 
@@ -93,12 +99,14 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
         assert {"manifest.json", "alerts.jsonl", "events.jsonl",
                 "risk_results.jsonl", "audit_logs.jsonl", "evidence_manifest.json"} <= names
         assert "evidence/blob1.enc" in names
+        assert "evidence/evilblob.enc" not in names
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["includes_evidence_blobs"] is True
         assert manifest["evidence_blob_count"] == 1
+        assert manifest["evidence_blobs_missing"] == ["evilblob"]
         evidence_manifest = json.loads(zf.read("evidence_manifest.json"))
-        assert evidence_manifest[0]["blob_id"] == "blob1"
-        assert "encrypted_path" not in evidence_manifest[0]
+        assert {row["blob_id"] for row in evidence_manifest} == {"blob1", "evilblob"}
+        assert all("encrypted_path" not in row for row in evidence_manifest)
         # The embedded blob is the exact ciphertext from disk and still decrypts.
         inner = zf.read("evidence/blob1.enc")
         assert encryption.decrypt_bytes(inner, aad=b"blob1") == b"fake-jpeg-bytes"
@@ -106,6 +114,7 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     deleted = client.delete(f"/api/storage/exports/{export_id}")
     assert deleted.status_code == 200
     assert not export_path.exists()
+    assert outside_path.exists()
     assert client.get("/api/storage/exports").json() == []
 
     audit = client.get("/api/audit").json()

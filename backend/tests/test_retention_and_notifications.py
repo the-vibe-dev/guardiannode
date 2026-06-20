@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from app import settings as settings_mod
 from app.db.models import Alert, AuditLog, Device, Event, EvidenceBlob, NotificationLog, RiskResult
 from app.services import notifications, retention
 
@@ -37,7 +38,7 @@ def _add_alert_chain(session, *, alert_id: str, risk_id: str, severity: str, age
     session.add(Alert(alert_id=alert_id, risk_id=risk_id, severity=severity, created_at=_old(age_days)))
 
 
-def test_run_cleanup_removes_expired_rows(db_session, tmp_path):
+def test_run_cleanup_removes_expired_rows(db_session):
     s = db_session
     s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
 
@@ -54,7 +55,8 @@ def test_run_cleanup_removes_expired_rows(db_session, tmp_path):
     s.add(Event(event_id="e-recent", device_id="d1", source_type="browser", timestamp=_old(0)))
 
     # Stale, unreferenced evidence blob with a real file on disk → removed + unlinked.
-    blob_path = tmp_path / "stale.bin"
+    blob_path = settings_mod.settings.evidence_dir / "b-" / "b-stale.enc"
+    blob_path.parent.mkdir(parents=True, exist_ok=True)
     blob_path.write_bytes(b"ciphertext")
     s.add(
         EvidenceBlob(

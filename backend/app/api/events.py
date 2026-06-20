@@ -14,6 +14,7 @@ from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, Event, User
 from app.services import encryption, event_ingest, screenshot_async
 from app.services.device_state import is_device_paused
+from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
 from app.services.input_bounds import InputBoundsError, sanitize_metadata
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -290,11 +291,13 @@ def get_event_screenshot(
     blob = db.get(EvidenceBlob, e.screenshot_blob_id)
     if blob is None:
         raise HTTPException(404, "Blob missing")
-    from pathlib import Path
     try:
-        pt = encryption.decrypt_blob_from_disk(Path(blob.encrypted_path), aad=blob.blob_id.encode("ascii"))
-    except Exception:
-        raise HTTPException(500, "Decryption failed")
+        path = resolve_stored_evidence_path(blob.encrypted_path)
+        pt = encryption.decrypt_blob_from_disk(path, aad=blob.blob_id.encode("ascii"))
+    except (FileNotFoundError, UnsafeEvidencePathError) as e:
+        raise HTTPException(404, "Blob missing") from e
+    except Exception as e:
+        raise HTTPException(500, "Decryption failed") from e
     from app.services.audit import log_action
     log_action(db, actor=str(user.id), action="evidence.view", target=event_id)
     db.commit()

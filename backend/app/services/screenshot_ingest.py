@@ -41,6 +41,7 @@ from app.services import (
     pipeline_metrics,
     risk_rules,
 )
+from app.services.evidence_paths import evidence_blob_path
 from app.services.ollama_client import OllamaClient
 from app.services.profile_resolution import resolve_profile
 from app.settings import settings
@@ -116,7 +117,7 @@ def _apply_rules_floor(current: dict[str, Any], rules_result: dict[str, Any]) ->
 
 def _blob_path(blob_id: str) -> Path:
     # Shard into subdirs by hash prefix to avoid one big directory
-    return settings.evidence_dir / blob_id[:2] / f"{blob_id}.enc"
+    return evidence_blob_path(blob_id)
 
 
 async def _vision_available() -> tuple[bool, list[str]]:

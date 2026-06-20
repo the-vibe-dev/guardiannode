@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from app import settings as settings_mod
 from app.db.models import Alert, Device, Event, EvidenceBlob, RiskResult
 from app.services import purge, retention
 
@@ -20,7 +21,8 @@ def _mk_chain(s, tmp_path, *, suffix: str, severity: str, age_days: int, with_bl
     blob_path = None
     s.flush()
     if with_blob:
-        blob_path = tmp_path / f"{blob_id}.enc"
+        blob_path = settings_mod.settings.evidence_dir / blob_id[:2] / f"{blob_id}.enc"
+        blob_path.parent.mkdir(parents=True, exist_ok=True)
         blob_path.write_bytes(b"ciphertext")
         s.add(EvidenceBlob(
             blob_id=blob_id, kind="screenshot", encrypted_path=str(blob_path),
@@ -119,7 +121,8 @@ def test_flagged_screenshot_blob_expires_before_alert_metadata(db_session, tmp_p
 
 def test_orphaned_blob_sweep(db_session, tmp_path):
     s = db_session
-    blob_path = tmp_path / "orphan.enc"
+    blob_path = settings_mod.settings.evidence_dir / "b-" / "b-orphan.enc"
+    blob_path.parent.mkdir(parents=True, exist_ok=True)
     blob_path.write_bytes(b"x")
     s.add(EvidenceBlob(
         blob_id="b-orphan", kind="screenshot", encrypted_path=str(blob_path),
@@ -132,6 +135,32 @@ def test_orphaned_blob_sweep(db_session, tmp_path):
     assert n == 1
     assert s.get(EvidenceBlob, "b-orphan") is None
     assert not blob_path.exists()
+
+
+def test_delete_blob_refuses_path_outside_evidence_root(db_session, tmp_path):
+    s = db_session
+    outside_path = tmp_path / "outside.enc"
+    outside_path.write_bytes(b"do-not-touch")
+    s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
+    s.flush()
+    s.add(Event(
+        event_id="e-outside", device_id="d1", source_type="image",
+        timestamp=_old(0), screenshot_blob_id="b-outside",
+    ))
+    s.flush()
+    s.add(EvidenceBlob(
+        blob_id="b-outside", kind="screenshot", encrypted_path=str(outside_path),
+        size_bytes=12, event_id="e-outside",
+    ))
+    s.commit()
+
+    blob = s.get(EvidenceBlob, "b-outside")
+    assert blob is not None
+    purge.delete_blob(s, blob)
+    s.commit()
+
+    assert s.get(EvidenceBlob, "b-outside") is None
+    assert outside_path.exists()
 
 
 def test_wipe_low_severity_removes_chain(db_session, tmp_path):

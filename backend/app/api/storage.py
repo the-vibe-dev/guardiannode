@@ -6,7 +6,7 @@ import os
 import shutil
 import threading
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,9 +18,10 @@ from ulid import ULID
 
 from app import settings as settings_mod
 from app.api.deps import current_user, get_db_dep, require_recent_auth
-from app.db.models import Alert, AuditLog, EvidenceBlob, Event, RiskResult, User
+from app.db.models import Alert, AuditLog, Event, EvidenceBlob, RiskResult, User
 from app.services import encryption
 from app.services.audit import log_action
+from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
 
 router = APIRouter(prefix="/storage", tags=["storage"])
 
@@ -141,7 +142,7 @@ def list_exports(_: User = Depends(current_user)):
                 export_id=export_id,
                 filename=path.name,
                 size_bytes=stat.st_size,
-                created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
+                created_at=datetime.fromtimestamp(stat.st_mtime, UTC),
                 download_url=f"/api/storage/exports/{export_id}/download",
             )
         )
@@ -300,8 +301,9 @@ def export_storage(
                 _write_jsonl(zf, "audit_logs.jsonl", db.query(AuditLog))
                 _write_evidence_manifest(zf, db.query(EvidenceBlob))
                 for blob in db.query(EvidenceBlob).yield_per(100):
-                    src = Path(blob.encrypted_path).resolve(strict=False)
-                    if src.is_symlink() or not src.is_file():
+                    try:
+                        src = resolve_stored_evidence_path(blob.encrypted_path)
+                    except (FileNotFoundError, UnsafeEvidencePathError):
                         missing_files.append(blob.blob_id)
                         continue
                     # Stored ciphertext is copied as-is; aad = blob_id, key = master key.
@@ -309,7 +311,7 @@ def export_storage(
                     included_blob_count += 1
                 manifest = {
                     "export_id": export_id,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "format": "guardiannode-full-export-v3",
                     "outer_encryption": "chunked-aes-256-gcm",
                     "includes_evidence_blobs": True,
@@ -395,7 +397,7 @@ def wipe_storage(
         deleted["blobs"] += counts["blobs"]
 
     if req.older_than_days is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=req.older_than_days)
+        cutoff = datetime.now(UTC) - timedelta(days=req.older_than_days)
         old_ids = [r[0] for r in db.query(Event.event_id).filter(Event.timestamp < cutoff).all()]
         counts = purge.delete_events(db, old_ids)
         deleted["old_events"] = counts["events"]
