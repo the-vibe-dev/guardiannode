@@ -31,3 +31,18 @@ Then open `http://127.0.0.1:8787/setup`.
 The current alpha initializes SQLite with SQLAlchemy `Base.metadata.create_all()`
 and idempotent startup schema patches. Formal Alembic migrations are planned
 before stable release; do not run `alembic upgrade head` in this checkout.
+
+## Database Maintenance
+
+File-backed SQLite installs include a small maintenance command:
+
+```bash
+guardiannode-db integrity
+guardiannode-db backup ~/guardiannode-backup.sqlite
+guardiannode-db restore ~/guardiannode-backup.sqlite
+```
+
+`backup` uses SQLite's online backup API and verifies the generated file before
+publishing it. `restore` verifies the backup first and moves the previous live
+database into `backups/` instead of deleting it. Stop the backend before running
+`restore`.
