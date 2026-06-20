@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     https_only_cookies: bool = False
     mdns_enabled: bool = True
     cors_allow_origin: str | None = None  # for dashboard dev server
-    allowed_hosts: str = "*"
+    allowed_hosts: str = "127.0.0.1,localhost,::1,testserver"
     text_model: str = "llama3.2:3b"
     # qwen2.5vl:7b is fast (~2-3s warm per frame at the settings below) and reads
     # on-screen text + classifies images in one pass. It nominally offloads ~2 GB
@@ -116,6 +116,17 @@ class Settings(BaseSettings):
     @property
     def text_ollama_url_resolved(self) -> str:
         return self.text_ollama_url or self.ollama_url
+
+    def effective_allowed_hosts(self) -> list[str]:
+        configured = [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
+        if configured == ["*"]:
+            if self.dev_mode:
+                return ["*"]
+            configured = []
+        hosts = configured or ["127.0.0.1", "localhost", "::1", "testserver"]
+        if self.bind_host not in {"0.0.0.0", "::", ""}:
+            hosts.append(self.bind_host)
+        return list(dict.fromkeys(hosts))
 
     def ensure_dirs(self) -> None:
         for d in (self.data_dir, self.keys_dir, self.evidence_dir, self.logs_dir):

@@ -15,25 +15,53 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
 from app.api import (
     alerts as alerts_api,
+)
+from app.api import (
     audit as audit_api,
+)
+from app.api import (
     auth as auth_api,
+)
+from app.api import (
     child_requests as child_requests_api,
+)
+from app.api import (
     dashboard as dashboard_api,
+)
+from app.api import (
     devices as devices_api,
+)
+from app.api import (
     events as events_api,
+)
+from app.api import (
     health as health_api,
+)
+from app.api import (
     models as models_api,
+)
+from app.api import (
     policies as policies_api,
+)
+from app.api import (
     profiles as profiles_api,
+)
+from app.api import (
     risks as risks_api,
-    setup as setup_api,
+)
+from app.api import (
     settings as settings_api,
+)
+from app.api import (
+    setup as setup_api,
+)
+from app.api import (
     storage as storage_api,
 )
 from app.db.models import Base
@@ -258,7 +286,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(BrowserSecurityMiddleware)
 
-    allowed_hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    allowed_hosts = settings.effective_allowed_hosts()
     if allowed_hosts and allowed_hosts != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 

@@ -44,12 +44,11 @@ def _database_driver() -> str:
 @router.get("/health/runtime-settings", response_model=RuntimeSettingsResponse)
 def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse:
     """Parent-only diagnostic view of effective non-secret runtime settings."""
-    allowed_hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
     return RuntimeSettingsResponse(
         version=__version__,
         bind={"host": settings.bind_host, "port": settings.bind_port},
         security={
-            "allowed_hosts": allowed_hosts,
+            "allowed_hosts": settings.effective_allowed_hosts(),
             "cors_allow_origin_configured": settings.cors_allow_origin is not None,
             "dev_mode": settings.dev_mode,
             "https_only_cookies": settings.https_only_cookies,

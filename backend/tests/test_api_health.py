@@ -21,6 +21,32 @@ def test_health(monkeypatch, tmp_path):
     assert "version" in body
 
 
+def test_default_trusted_hosts_reject_unknown_host(monkeypatch, tmp_path):
+    monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("GUARDIANNODE_ALLOWED_HOSTS", raising=False)
+    from app import settings as settings_mod
+    settings_mod.settings = settings_mod.Settings()
+    settings_mod.settings.mdns_enabled = False
+    from app.main import create_app
+
+    client = TestClient(create_app())
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/health", headers={"host": "evil.example"}).status_code == 400
+
+
+def test_wildcard_allowed_hosts_only_survives_in_dev_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GUARDIANNODE_ALLOWED_HOSTS", "*")
+    from app import settings as settings_mod
+
+    settings_mod.settings = settings_mod.Settings()
+    settings_mod.settings.dev_mode = False
+    assert settings_mod.settings.effective_allowed_hosts() != ["*"]
+
+    settings_mod.settings.dev_mode = True
+    assert settings_mod.settings.effective_allowed_hosts() == ["*"]
+
+
 def test_runtime_settings_requires_parent_and_reports_effective_config(monkeypatch, tmp_path):
     monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("GUARDIANNODE_CLASSIFIER_TIER", "text_only")
