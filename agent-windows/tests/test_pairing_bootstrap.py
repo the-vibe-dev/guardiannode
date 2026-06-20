@@ -42,8 +42,6 @@ def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
         hostname,
         platform="windows",
         agent_version="0.1.0-alpha.1",
-        local_bootstrap=False,
-        setup_token=None,
     ):
         assert backend_url == "http://srv:8787"
         assert code == "123456"
@@ -61,29 +59,27 @@ def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
     assert not pending.exists(), "pending file must be removed after success"
 
 
-def test_bootstrap_reads_setup_token_for_local_bootstrap(tmp_path, monkeypatch):
+def test_bootstrap_reads_device_token_for_local_bootstrap(tmp_path, monkeypatch):
     pending = tmp_path / "pending_pairing.json"
     pending.write_text(json.dumps({"backend_url": "http://127.0.0.1:8787", "local_bootstrap": True}))
     device = tmp_path / "device.json"
     token_dir = tmp_path / "keys"
     token_dir.mkdir()
-    (token_dir / "setup_token.json").write_text(json.dumps({"token": "setup-secret"}))
+    (token_dir / "device_bootstrap_token.json").write_text(json.dumps({"token": "device-secret"}))
 
-    def fake_pair(
+    def fake_bootstrap(
         backend_url,
-        code,
+        device_bootstrap_token,
         hostname,
         platform="windows",
         agent_version="0.1.0-alpha.1",
-        local_bootstrap=False,
-        setup_token=None,
     ):
         assert backend_url == "http://127.0.0.1:8787"
-        assert local_bootstrap is True
-        assert setup_token == "setup-secret"
+        assert device_bootstrap_token == "device-secret"
+        assert hostname == "family-pc"
         return "dev-local", "tok-local"
 
-    monkeypatch.setattr(pairing_client, "pair_with_server", fake_pair)
+    monkeypatch.setattr(pairing_client, "bootstrap_local_with_server", fake_bootstrap)
     result = pairing_client.bootstrap_pairing(
         "family-pc", "0.1.0-alpha.1", pending_path=pending, device_path=device,
     )
@@ -105,6 +101,27 @@ def test_bootstrap_removes_pending_on_rejected_code(tmp_path, monkeypatch):
     )
     assert result is None
     assert not pending.exists(), "rejected single-use code must not be retried forever"
+
+
+def test_bootstrap_keeps_pending_on_local_bootstrap_auth_failure(tmp_path, monkeypatch):
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({
+        "backend_url": "http://127.0.0.1:8787",
+        "local_bootstrap": True,
+        "device_bootstrap_token": "stale-token",
+    }))
+
+    def fake_bootstrap(*args, **kwargs):
+        req = httpx.Request("POST", "http://127.0.0.1:8787/api/devices/bootstrap-local")
+        resp = httpx.Response(401, request=req)
+        raise httpx.HTTPStatusError("rejected", request=req, response=resp)
+
+    monkeypatch.setattr(pairing_client, "bootstrap_local_with_server", fake_bootstrap)
+    result = pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.1", pending_path=pending, device_path=tmp_path / "device.json",
+    )
+    assert result is None
+    assert pending.exists(), "installer repair must be able to resume local bootstrap"
 
 
 def test_bootstrap_keeps_pending_on_transient_failure(tmp_path, monkeypatch):

@@ -39,16 +39,15 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
 
 def _pair(client: TestClient) -> tuple[str, str]:
-    from app.services.setup_token import ensure_setup_token
+    from app.services.device_bootstrap_token import ensure_device_bootstrap_token
 
     r = client.post(
-        "/api/devices/pair/complete",
+        "/api/devices/bootstrap-local",
         json={
             "hostname": "kid-pc",
             "platform": "windows",
             "agent_version": "0.1.0-alpha.1",
-            "local_bootstrap": True,
-            "setup_token": ensure_setup_token(),
+            "device_bootstrap_token": ensure_device_bootstrap_token(),
         },
     )
     assert r.status_code == 200

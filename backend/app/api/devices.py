@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from ulid import ULID
 
@@ -12,9 +12,9 @@ from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, User
 from app.db.session import begin_immediate_if_sqlite
 from app.services import device_tokens, pairing as pairing_svc, rate_limit
-from app.services.device_state import effective_paused_until, is_device_paused
 from app.services.audit import log_action
-from app.services.setup_token import verify_setup_token
+from app.services.device_bootstrap_token import verify_and_consume_device_bootstrap_token
+from app.services.device_state import effective_paused_until, is_device_paused
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -117,14 +117,21 @@ def pair_start(
 
 
 class PairCompleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     code: str = Field(default="", max_length=8)
     hostname: str = Field(max_length=256)
     platform: str = "windows"
     agent_version: str = "0.1.0-alpha.1"
-    # All-in-one installs: the agent and backend share the machine, and no
-    # parent account exists yet to issue a code. Loopback-only, first-device-only.
-    local_bootstrap: bool = False
-    setup_token: str | None = Field(default=None, max_length=256)
+
+
+class LocalBootstrapRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    device_bootstrap_token: str = Field(max_length=256)
+    hostname: str = Field(max_length=256)
+    platform: str = "windows"
+    agent_version: str = "0.1.0-alpha.1"
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -133,6 +140,41 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 class PairCompleteResponse(BaseModel):
     device_id: str
     device_token: str
+
+
+def _create_paired_device(
+    db: Session,
+    *,
+    hostname: str,
+    platform: str,
+    agent_version: str,
+    client_ip: str,
+    local_bootstrap: bool,
+) -> PairCompleteResponse:
+    device_id = str(ULID())
+    token, token_hash = device_tokens.issue_token(device_id)
+    device = Device(
+        device_id=device_id,
+        hostname=hostname,
+        platform=platform,
+        agent_version=agent_version,
+        token_hash=token_hash,
+        paired=True,
+        status="online",
+        last_seen=datetime.now(timezone.utc),
+    )
+    db.add(device)
+    log_action(
+        db, actor=device_id, action="device.pair.complete",
+        target=device_id, details={
+            "hostname": hostname,
+            "platform": platform,
+            "local_bootstrap": local_bootstrap,
+        },
+        source_ip=client_ip,
+    )
+    db.commit()
+    return PairCompleteResponse(device_id=device_id, device_token=token)
 
 
 @router.post("/pair/complete", response_model=PairCompleteResponse)
@@ -150,24 +192,7 @@ def pair_complete(
             headers={"Retry-After": str(retry_after)},
         )
 
-    if req.local_bootstrap:
-        begin_immediate_if_sqlite(db)
-        # No code needed for the very first device pairing from this machine
-        # itself: nothing else can reach loopback, and once any device is
-        # paired this path closes permanently.
-        if client_ip not in _LOOPBACK_HOSTS:
-            db.rollback()
-            rate_limit.record_failure("pairing", client_ip)
-            raise HTTPException(status_code=400, detail="Local bootstrap is loopback-only")
-        if not verify_setup_token(req.setup_token):
-            db.rollback()
-            rate_limit.record_failure("pairing", client_ip)
-            raise HTTPException(status_code=401, detail="Invalid or expired setup token")
-        if db.query(Device).filter(Device.paired.is_(True)).count() > 0:
-            db.rollback()
-            rate_limit.record_failure("pairing", client_ip)
-            raise HTTPException(status_code=400, detail="Local bootstrap unavailable: a device is already paired")
-    elif not pairing_svc.verify_and_consume(db, req.code.strip()):
+    if not pairing_svc.verify_and_consume(db, req.code.strip()):
         rate_limit.record_failure("pairing", client_ip)
         log_action(
             db, actor="anonymous", action="device.pair.fail",
@@ -176,32 +201,53 @@ def pair_complete(
         db.commit()
         raise HTTPException(status_code=400, detail="Invalid or expired pairing code")
     rate_limit.reset("pairing", client_ip)
+    return _create_paired_device(
+        db, hostname=req.hostname, platform=req.platform,
+        agent_version=req.agent_version, client_ip=client_ip,
+        local_bootstrap=False,
+    )
 
-    device_id = str(ULID())
-    token, token_hash = device_tokens.issue_token(device_id)
-    device = Device(
-        device_id=device_id,
-        hostname=req.hostname,
-        platform=req.platform,
-        agent_version=req.agent_version,
-        token_hash=token_hash,
-        paired=True,
-        status="online",
-        last_seen=datetime.now(timezone.utc),
+
+@router.post("/bootstrap-local", response_model=PairCompleteResponse)
+def bootstrap_local(
+    req: LocalBootstrapRequest,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+):
+    client_ip = request.client.host if request.client else "unknown"
+    blocked, retry_after = rate_limit.is_blocked("pairing", client_ip)
+    if blocked:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed pairing attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    begin_immediate_if_sqlite(db)
+    if client_ip not in _LOOPBACK_HOSTS:
+        db.rollback()
+        rate_limit.record_failure("pairing", client_ip)
+        raise HTTPException(status_code=400, detail="Local bootstrap is loopback-only")
+    if db.query(Device).filter(Device.paired.is_(True)).count() > 0:
+        db.rollback()
+        rate_limit.record_failure("pairing", client_ip)
+        raise HTTPException(status_code=400, detail="Local bootstrap unavailable: a device is already paired")
+    if not verify_and_consume_device_bootstrap_token(req.device_bootstrap_token):
+        db.rollback()
+        rate_limit.record_failure("pairing", client_ip)
+        log_action(
+            db, actor="anonymous", action="device.bootstrap_local.fail",
+            source_ip=client_ip,
+        )
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or expired device bootstrap token")
+
+    rate_limit.reset("pairing", client_ip)
+    return _create_paired_device(
+        db, hostname=req.hostname, platform=req.platform,
+        agent_version=req.agent_version, client_ip=client_ip,
+        local_bootstrap=True,
     )
-    db.add(device)
-    log_action(
-        db, actor=device_id, action="device.pair.complete",
-        target=device_id,
-        details={
-            "hostname": req.hostname,
-            "platform": req.platform,
-            "local_bootstrap": req.local_bootstrap,
-        },
-        source_ip=client_ip,
-    )
-    db.commit()
-    return PairCompleteResponse(device_id=device_id, device_token=token)
 
 
 @router.get("/capture-config")

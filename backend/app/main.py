@@ -38,6 +38,7 @@ from app.api import (
 from app.db.models import Base
 from app.db.session import get_engine
 from app.services import mdns_advertiser
+from app.services.device_bootstrap_token import ensure_device_bootstrap_token
 from app.services.setup_token import ensure_setup_token
 from app.settings import settings
 from app.workers import cleanup_worker, offline_monitor
@@ -172,11 +173,12 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _patch_schema(engine)
     storage_api._cleanup_abandoned_exports()
-    from app.db.models import User
+    from app.db.models import Device, User
     from app.db.session import get_sessionmaker
     s = get_sessionmaker()()
     try:
         admin_exists = s.query(User).filter(User.role == "admin").first() is not None
+        paired_device_exists = s.query(Device).filter(Device.paired.is_(True)).first() is not None
     finally:
         s.close()
     if not admin_exists:
@@ -184,6 +186,13 @@ async def lifespan(app: FastAPI):
         log.warning(
             "first-run setup token required; read it from %s (current token starts with %s...)",
             settings.keys_dir / "setup_token.json",
+            token[:6],
+        )
+    if not paired_device_exists:
+        token = ensure_device_bootstrap_token()
+        log.warning(
+            "local device bootstrap token available at %s (current token starts with %s...)",
+            settings.keys_dir / "device_bootstrap_token.json",
             token[:6],
         )
     if settings.mdns_enabled:

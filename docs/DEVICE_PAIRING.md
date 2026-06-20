@@ -15,8 +15,11 @@ loop (`pairing_client.bootstrap_pairing`):
   this alpha because a LAN advertisement does not authenticate the parent server.
 - Transient failures (server still booting) retry 5 times, 10s apart, then
   leave the file in place for the next agent start.
-- A definitive rejection (HTTP 4xx) deletes the file — codes are single-use
-  and expire in 10 minutes, so retrying one forever is pointless.
+- A definitive pairing-code rejection (HTTP 4xx) deletes the file — codes are
+  single-use and expire in 10 minutes, so retrying one forever is pointless.
+- A local-bootstrap authorization failure leaves the file in place so an
+  installer repair can issue a fresh device-bootstrap token and resume
+  enrollment.
 
 Manual pairing is also available:
 `GuardianNodeAgent.exe --pair --server http://192.168.1.42:8787 --code 123456`
@@ -24,20 +27,22 @@ Manual pairing is also available:
 ## Local bootstrap (all-in-one installs)
 
 When agent and backend share one machine, there is no parent account yet at
-install time, so no one can issue a code. `POST /api/devices/pair/complete`
-therefore accepts `{"local_bootstrap": true}` **only** when both hold:
+install time, so no one can issue a code. `POST /api/devices/bootstrap-local`
+accepts a purpose-bound `device_bootstrap_token` **only** when both hold:
 
 1. The request originates from loopback (127.0.0.1 / ::1), and
 2. **Zero** devices are currently paired.
 
-Once the first device pairs, this path closes permanently. Every use is
+The administrator setup token is never accepted at a device endpoint. Once the
+first device pairs, the local-bootstrap path closes permanently. Every use is
 audit-logged with `local_bootstrap: true` in the details.
 
 ## Brute-force protection
 
-`pair/complete` is rate-limited per source IP: 10 failed attempts per
-15 minutes, then HTTP 429 with `Retry-After`. Combined with the 10-minute
-TTL and single-use codes, online guessing of a 6-digit code is impractical.
+`pair/complete` and `bootstrap-local` are rate-limited per source IP: 10 failed
+attempts per 15 minutes, then HTTP 429 with `Retry-After`. Combined with the
+10-minute TTL and single-use codes, online guessing of a 6-digit code is
+impractical.
 
 ## Flow
 

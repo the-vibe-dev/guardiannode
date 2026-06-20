@@ -438,9 +438,10 @@ begin
     SaveStringsToFile(CfgPath, CfgFile, False);
 
     // Drop the pending pairing handshake for the agent to complete on first
-    // start. All-in-one uses the loopback-only bootstrap (no code needed);
-    // separated mode uses the parent-issued 6-digit code. The agent deletes
-    // this file once pairing succeeds.
+    // start. All-in-one uses a loopback-only device bootstrap token generated
+    // by the backend in keys\device_bootstrap_token.json; separated mode uses
+    // the parent-issued 6-digit code. The agent deletes this file once pairing
+    // succeeds.
     PairPath := ExpandConstant('{commonappdata}\GuardianNode\pending_pairing.json');
     SetArrayLength(PairFile, 1);
     if IsAllInOne then

@@ -43,6 +43,7 @@ Target ACLs for clean-machine testing:
 | Path | Contents | Intended access |
 |---|---|---|
 | `%ProgramData%\GuardianNode\keys\setup_token.json` | One-time setup token | SYSTEM + Administrators only; the server shortcut self-elevates before display |
+| `%ProgramData%\GuardianNode\keys\device_bootstrap_token.json` | One-time local device enrollment token | SYSTEM + Administrators create; current alpha agent reads during all-in-one enrollment only |
 | `%ProgramData%\GuardianNode\keys\master.key` | Evidence encryption key | SYSTEM + Administrators only; future releases should wrap it with DPAPI |
 | `%ProgramData%\GuardianNode\evidence\` | Encrypted evidence blobs | SYSTEM + Administrators only |
 | `%ProgramData%\GuardianNode\server.env` | Backend service configuration | SYSTEM + Administrators modify |
@@ -75,6 +76,11 @@ First-run setup requires the one-time setup token stored in
 `%ProgramData%\GuardianNode\keys\setup_token.json`; the Start Menu includes a
 helper shortcut to display it. For this alpha, LAN access is a manual
 administrator change after first-run setup, not a dashboard workflow.
+
+All-in-one device enrollment uses a separate
+`%ProgramData%\GuardianNode\keys\device_bootstrap_token.json` against
+`POST /api/devices/bootstrap-local`. The administrator setup token must never
+be copied into `pending_pairing.json` or sent to a device-pairing endpoint.
 
 ## Linux Server Installer
 

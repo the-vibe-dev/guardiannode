@@ -75,8 +75,6 @@ def pair_with_server(
     hostname: str,
     platform: str = "windows",
     agent_version: str = "0.1.0-alpha.1",
-    local_bootstrap: bool = False,
-    setup_token: str | None = None,
 ) -> tuple[str, str]:
     """Run the pair/complete handshake. Returns (device_id, device_token)."""
     body = {
@@ -84,12 +82,30 @@ def pair_with_server(
         "hostname": hostname,
         "platform": platform,
         "agent_version": agent_version,
-        "local_bootstrap": local_bootstrap,
     }
-    if setup_token:
-        body["setup_token"] = setup_token.strip()
     with httpx.Client(timeout=20.0) as c:
         r = c.post(f"{backend_url.rstrip('/')}/api/devices/pair/complete", json=body)
+        r.raise_for_status()
+        data = r.json()
+    return data["device_id"], data["device_token"]
+
+
+def bootstrap_local_with_server(
+    backend_url: str,
+    device_bootstrap_token: str,
+    hostname: str,
+    platform: str = "windows",
+    agent_version: str = "0.1.0-alpha.1",
+) -> tuple[str, str]:
+    """Enroll the first all-in-one device with the purpose-bound local token."""
+    body = {
+        "device_bootstrap_token": device_bootstrap_token.strip(),
+        "hostname": hostname,
+        "platform": platform,
+        "agent_version": agent_version,
+    }
+    with httpx.Client(timeout=20.0) as c:
+        r = c.post(f"{backend_url.rstrip('/')}/api/devices/bootstrap-local", json=body)
         r.raise_for_status()
         data = r.json()
     return data["device_id"], data["device_token"]
@@ -128,8 +144,8 @@ def pending_pairing_path() -> Path:
     return default_device_path().parent / "pending_pairing.json"
 
 
-def _read_local_setup_token(device_path: Path | None = None) -> str | None:
-    path = (device_path or default_device_path()).parent / "keys" / "setup_token.json"
+def _read_local_device_bootstrap_token(device_path: Path | None = None) -> str | None:
+    path = (device_path or default_device_path()).parent / "keys" / "device_bootstrap_token.json"
     try:
         data = json.loads(path.read_text("utf-8"))
         return str(data.get("token") or "").strip() or None
@@ -172,9 +188,9 @@ def bootstrap_pairing(
     code = str(pending.get("code", "")).strip()
     backend_url = str(pending.get("backend_url", "")).strip()
     local_bootstrap = bool(pending.get("local_bootstrap", False))
-    setup_token = str(pending.get("setup_token", "")).strip()
-    if local_bootstrap and not setup_token:
-        setup_token = _read_local_setup_token(device_path) or ""
+    device_bootstrap_token = str(pending.get("device_bootstrap_token", "")).strip()
+    if local_bootstrap and not device_bootstrap_token:
+        device_bootstrap_token = _read_local_device_bootstrap_token(device_path) or ""
     if not code and not local_bootstrap:
         log.error("pending pairing file has no code; removing it")
         pending_path.unlink(missing_ok=True)
@@ -197,12 +213,14 @@ def bootstrap_pairing(
 
     for attempt in range(1, attempts + 1):
         try:
-            device_id, token = pair_with_server(
-                backend_url, code, hostname,
-                agent_version=agent_version,
-                local_bootstrap=local_bootstrap,
-                setup_token=setup_token,
-            )
+            if local_bootstrap:
+                device_id, token = bootstrap_local_with_server(
+                    backend_url, device_bootstrap_token, hostname, agent_version=agent_version,
+                )
+            else:
+                device_id, token = pair_with_server(
+                    backend_url, code, hostname, agent_version=agent_version,
+                )
             save_credentials(device_id, token, backend_url, device_path)
             pending_path.unlink(missing_ok=True)
             log.info("paired with %s as device %s", backend_url, device_id)
@@ -210,6 +228,9 @@ def bootstrap_pairing(
         except httpx.HTTPStatusError as e:
             log.error("pairing rejected by %s: %s", backend_url, e.response.status_code)
             if 400 <= e.response.status_code < 500:
+                if local_bootstrap and e.response.status_code in {401, 403}:
+                    log.warning("local bootstrap still pending; use installer repair to issue a fresh device token")
+                    return None
                 pending_path.unlink(missing_ok=True)
                 return None
         except Exception as e:
