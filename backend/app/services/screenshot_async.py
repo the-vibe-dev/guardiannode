@@ -20,7 +20,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ _queue: asyncio.Queue | None = None
 _MAX_PENDING = 500  # backpressure: refuse new frames if the server is this far behind
 _MAX_ATTEMPTS = 5
 _BACKOFF_SECONDS = (30, 120, 300, 900, 1800)
+_PENDING_STATE_READY = "ready"
 
 
 def _pending_dir() -> Path:
@@ -58,7 +60,8 @@ def get_queue() -> asyncio.Queue:
 
 def pending_count() -> int:
     try:
-        return len(list(_pending_dir().glob("*.json")))
+        d = _pending_dir()
+        return sum(1 for jf in d.glob("*.json") if (d / f"{jf.stem}.enc").is_file())
     except Exception:
         return 0
 
@@ -67,13 +70,68 @@ def max_pending() -> int:
     return _MAX_PENDING
 
 
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _fsync_dir(path: Path) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{ULID()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(tmp, flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            fd = -1
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        _fsync_dir(path.parent)
+    finally:
+        if fd != -1:
+            os.close(fd)
+        if tmp.exists():
+            try:
+                tmp.replace(_dead_letter_dir() / tmp.name)
+            except OSError:
+                pass
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    _atomic_write(
+        path,
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+    )
+
+
 def store_pending(image_bytes: bytes, meta: dict[str, Any]) -> str:
     """Persist a frame (encrypted) + its metadata, return its token. Fast."""
     token = str(ULID())
     d = _pending_dir()
-    encryption.encrypt_blob_to_disk(image_bytes, d / f"{token}.enc", aad=token.encode("ascii"))
-    meta = {**meta, "token": token, "stored_at": datetime.now(timezone.utc).isoformat()}
-    (d / f"{token}.json").write_text(json.dumps(meta), encoding="utf-8")
+    enc = encryption.encrypt_bytes(image_bytes, aad=token.encode("ascii"))
+    meta = {
+        **meta,
+        "token": token,
+        "stored_at": _now_iso(),
+        "storage_state": _PENDING_STATE_READY,
+    }
+    # The final metadata file is the readiness marker. If the process crashes
+    # after ciphertext finalization but before metadata finalization, startup
+    # reconciliation will dead-letter the orphan ciphertext instead of treating
+    # it as a complete pending frame.
+    _atomic_write(d / f"{token}.enc", enc)
+    _atomic_write_json(d / f"{token}.json", meta)
     return token
 
 
@@ -93,7 +151,7 @@ def _load_meta(token: str) -> dict[str, Any] | None:
 
 
 def _write_meta(token: str, meta: dict[str, Any]) -> None:
-    (_pending_dir() / f"{token}.json").write_text(json.dumps(meta), encoding="utf-8")
+    _atomic_write_json(_pending_dir() / f"{token}.json", meta)
 
 
 def _discard(token: str) -> None:
@@ -110,6 +168,12 @@ def discard(token: str) -> None:
 
 def _quarantine(token: str, reason: str) -> None:
     dead = _dead_letter_dir()
+    meta = _load_meta(token) or {"token": token}
+    meta["dead_letter_reason"] = reason
+    meta["dead_lettered_at"] = _now_iso()
+    json_src = _pending_dir() / f"{token}.json"
+    if json_src.exists():
+        _write_meta(token, meta)
     for suffix in (".enc", ".json"):
         src = _pending_dir() / f"{token}{suffix}"
         if not src.exists():
@@ -119,6 +183,12 @@ def _quarantine(token: str, reason: str) -> None:
             src.replace(dst)
         except OSError:
             log.warning("pending frame %s could not move to dead letter: %s", token, reason)
+    if not (dead / f"{token}.json").exists():
+        try:
+            _atomic_write_json(dead / f"{token}.json", meta)
+        except OSError:
+            log.warning("pending frame %s could not record dead-letter metadata: %s", token, reason)
+    _fsync_dir(dead)
 
 
 def _record_failure(token: str, exc: Exception) -> None:
@@ -128,7 +198,7 @@ def _record_failure(token: str, exc: Exception) -> None:
     attempts = int(meta.get("attempts", 0) or 0) + 1
     meta["attempts"] = attempts
     meta["last_error"] = str(exc)[:500]
-    meta["last_error_at"] = datetime.now(timezone.utc).isoformat()
+    meta["last_error_at"] = datetime.now(UTC).isoformat()
     if attempts >= _MAX_ATTEMPTS:
         meta["dead_letter_reason"] = meta["last_error"]
         _write_meta(token, meta)
@@ -136,13 +206,35 @@ def _record_failure(token: str, exc: Exception) -> None:
         return
     delay = _BACKOFF_SECONDS[min(attempts - 1, len(_BACKOFF_SECONDS) - 1)]
     meta["next_attempt_at"] = (
-        datetime.now(timezone.utc).timestamp() + delay
+        datetime.now(UTC).timestamp() + delay
     )
     _write_meta(token, meta)
 
 
+def _reconcile_pending_files() -> None:
+    d = _pending_dir()
+    for tmp in sorted(d.glob("*.tmp")) + sorted(d.glob(".*.tmp")):
+        if not tmp.is_file():
+            continue
+        try:
+            tmp.replace(_dead_letter_dir() / tmp.name)
+        except OSError:
+            log.warning("could not dead-letter abandoned pending temp file %s", tmp)
+
+    enc_tokens = {p.stem for p in d.glob("*.enc") if p.is_file()}
+    json_tokens = {p.stem for p in d.glob("*.json") if p.is_file()}
+    for token in sorted(enc_tokens - json_tokens):
+        _quarantine(token, "missing pending metadata")
+    for token in sorted(json_tokens - enc_tokens):
+        _quarantine(token, "missing pending ciphertext")
+    for token in sorted(enc_tokens & json_tokens):
+        if _load_meta(token) is None:
+            _quarantine(token, "invalid pending metadata")
+
+
 def _ready_tokens() -> list[str]:
-    now = datetime.now(timezone.utc).timestamp()
+    _reconcile_pending_files()
+    now = datetime.now(UTC).timestamp()
     tokens: list[str] = []
     for jf in sorted(_pending_dir().glob("*.json")):
         meta = _load_meta(jf.stem)
@@ -162,7 +254,7 @@ async def _classify_token(token: str) -> None:
 
     meta = _load_meta(token)
     if meta is None:
-        _discard(token)
+        _quarantine(token, "missing pending metadata")
         return
     try:
         image_bytes = encryption.decrypt_blob_from_disk(
@@ -175,9 +267,9 @@ async def _classify_token(token: str) -> None:
 
     ts = meta.get("timestamp")
     try:
-        timestamp = datetime.fromisoformat(ts) if ts else datetime.now(timezone.utc)
+        timestamp = datetime.fromisoformat(ts) if ts else datetime.now(UTC)
     except Exception:
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
 
     session = get_sessionmaker()()
     try:
@@ -221,7 +313,7 @@ async def loop() -> None:
     while True:
         try:
             token = await asyncio.wait_for(q.get(), timeout=30.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             for token in _ready_tokens():
                 if q.full():
                     break
