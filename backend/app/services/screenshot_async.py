@@ -27,8 +27,8 @@ from typing import Any
 
 from ulid import ULID
 
+from app import settings as settings_mod
 from app.services import encryption, screenshot_ingest
-from app.settings import settings
 
 log = logging.getLogger(__name__)
 
@@ -40,13 +40,13 @@ _PENDING_STATE_READY = "ready"
 
 
 def _pending_dir() -> Path:
-    p = settings.data_dir / "pending"
+    p = settings_mod.settings.data_dir / "pending"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def _dead_letter_dir() -> Path:
-    p = settings.data_dir / "pending_dead_letter"
+    p = settings_mod.settings.data_dir / "pending_dead_letter"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

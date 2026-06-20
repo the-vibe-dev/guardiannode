@@ -11,7 +11,6 @@ def _reload_screenshot_async(monkeypatch, tmp_path):
     from app.services import encryption, screenshot_async
 
     encryption._reset_cache()
-    screenshot_async.settings = settings_mod.settings
     return screenshot_async
 
 

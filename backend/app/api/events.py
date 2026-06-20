@@ -8,10 +8,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_device, current_user, get_db_dep
-from app.db.models import Device, Event, User
+from app.db.models import Device, Event, ScreenshotUploadReceipt, User
 from app.services import encryption, event_ingest, screenshot_async
 from app.services.device_state import is_device_paused
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
@@ -201,6 +202,33 @@ class ScreenshotIngestResponse(BaseModel):
     queued: bool
 
 
+def _receipt_response(receipt: ScreenshotUploadReceipt) -> ScreenshotIngestResponse:
+    return ScreenshotIngestResponse(
+        event_id=receipt.upload_id,
+        status=receipt.status,
+        queued=receipt.status == "queued",
+    )
+
+
+def _existing_screenshot_receipt(
+    db: Session,
+    *,
+    device_id: str,
+    idempotency_key: str | None,
+) -> ScreenshotUploadReceipt | None:
+    key = (idempotency_key or "").strip()
+    if not key:
+        return None
+    return (
+        db.query(ScreenshotUploadReceipt)
+        .filter(
+            ScreenshotUploadReceipt.device_id == device_id,
+            ScreenshotUploadReceipt.idempotency_key == key,
+        )
+        .first()
+    )
+
+
 @router.post("/screenshot", response_model=ScreenshotIngestResponse)
 async def ingest_screenshot(
     request: Request,
@@ -222,6 +250,15 @@ async def ingest_screenshot(
     """Receive a raw screenshot, persist it immediately, and queue it for
     background classification (vision LLM → rules → alert). Returns fast so the
     agent's local queue never backs up and frames aren't lost on power-off."""
+    idempotency_key = (idempotency_key or "").strip() or None
+    existing_receipt = _existing_screenshot_receipt(
+        db,
+        device_id=device.device_id,
+        idempotency_key=idempotency_key,
+    )
+    if existing_receipt is not None:
+        return _receipt_response(existing_receipt)
+
     if is_device_paused(device):
         # Honor pause server-side: drop quietly, don't store.
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
@@ -274,6 +311,27 @@ async def ingest_screenshot(
             "Screenshot classifier backlog is full",
             headers={"Retry-After": "30"},
         )
+    if idempotency_key:
+        receipt = ScreenshotUploadReceipt(
+            device_id=device.device_id,
+            idempotency_key=idempotency_key,
+            upload_id=token,
+            status="queued",
+        )
+        db.add(receipt)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            screenshot_async.discard(token)
+            existing_receipt = _existing_screenshot_receipt(
+                db,
+                device_id=device.device_id,
+                idempotency_key=idempotency_key,
+            )
+            if existing_receipt is not None:
+                return _receipt_response(existing_receipt)
+            raise HTTPException(409, "Duplicate screenshot upload") from None
     return ScreenshotIngestResponse(event_id=token, status="queued", queued=True)
 
 

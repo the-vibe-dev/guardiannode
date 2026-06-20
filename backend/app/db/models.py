@@ -67,6 +67,20 @@ class Device(Base):
     profile_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class ScreenshotUploadReceipt(Base):
+    __tablename__ = "screenshot_upload_receipts"
+    __table_args__ = (
+        Index("ux_screenshot_upload_device_key", "device_id", "idempotency_key", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_id: Mapped[str] = mapped_column(String(64), ForeignKey("devices.device_id"))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    upload_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ChildProfile(Base):
     __tablename__ = "child_profiles"
 
