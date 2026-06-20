@@ -71,6 +71,8 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: run
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
 
 [Code]
+#include "..\shared\server_env_windows.iss"
+
 var
   HardwareSummaryPage: TOutputMsgWizardPage;
   DetectedTier: String;
@@ -143,20 +145,16 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  CfgPath: String;
-  CfgFile: TArrayOfString;
+  DataDir: String;
 begin
   if CurStep = ssPostInstall then begin
-    CfgPath := ExpandConstant('{commonappdata}\GuardianNode\server.env');
-    SetArrayLength(CfgFile, 8);
-    CfgFile[0] := 'GUARDIANNODE_BIND_HOST=127.0.0.1';
-    CfgFile[1] := 'GUARDIANNODE_BIND_PORT=8787';
-    CfgFile[2] := 'GUARDIANNODE_DATA_DIR=' + ExpandConstant('{commonappdata}\GuardianNode');
-    CfgFile[3] := 'GUARDIANNODE_MDNS_ENABLED=false';
-    CfgFile[4] := 'GUARDIANNODE_CLASSIFIER_TIER=' + DetectedTier;
-    CfgFile[5] := 'GUARDIANNODE_TEXT_MODEL=' + DetectedTextModel;
-    CfgFile[6] := 'GUARDIANNODE_VISION_MODEL=' + DetectedVisionModel;
-    CfgFile[7] := 'GUARDIANNODE_OLLAMA_URL=http://127.0.0.1:11434';
-    SaveStringsToFile(CfgPath, CfgFile, False);
+    DataDir := ExpandConstant('{commonappdata}\GuardianNode');
+    WriteGuardianNodeServerEnv(
+      DataDir,
+      DetectedTier,
+      DetectedTextModel,
+      DetectedVisionModel,
+      'http://127.0.0.1:11434'
+    );
   end;
 end;

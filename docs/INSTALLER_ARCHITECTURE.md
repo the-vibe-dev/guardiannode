@@ -82,6 +82,13 @@ All-in-one device enrollment uses a separate
 `POST /api/devices/bootstrap-local`. The administrator setup token must never
 be copied into `pending_pairing.json` or sent to a device-pairing endpoint.
 
+Both the server-only and all-in-one Windows installers write
+`%ProgramData%\GuardianNode\server.env` through the shared
+`installer/shared/server_env_windows.iss` helper before the backend service is
+started. That file records the detected classifier tier, text/vision model
+names, local Ollama URLs for each role, classifier timeout/context/image
+settings, loopback bind settings, and non-secret runtime defaults.
+
 ## Linux Server Installer
 
 `installer/server-linux/install.sh`:

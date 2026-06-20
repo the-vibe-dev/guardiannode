@@ -168,6 +168,8 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: run
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 
 [Code]
+#include "..\shared\server_env_windows.iss"
+
 var
   ModePage: TInputOptionWizardPage;
   ChildProfilePage: TInputOptionWizardPage;
@@ -414,14 +416,24 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  CfgPath, PairPath, ServerUrl: String;
+  CfgPath, PairPath, ServerDataDir, ServerUrl: String;
   CfgFile, PairFile: TArrayOfString;
 begin
   if CurStep = ssPostInstall then begin
     ServerUrl := Trim(ServerConnectionPage.Values[0]);
+    ServerDataDir := ExpandConstant('{commonappdata}\GuardianNode');
+
+    if IsAllInOne then
+      WriteGuardianNodeServerEnv(
+        ServerDataDir,
+        DetectedTier,
+        DetectedTextModel,
+        DetectedVisionModel,
+        'http://127.0.0.1:11434'
+      );
 
     // Write the agent config based on wizard inputs
-    CfgPath := ExpandConstant('{commonappdata}\GuardianNode\agent.yaml');
+    CfgPath := AddBackslash(ServerDataDir) + 'agent.yaml';
     SetArrayLength(CfgFile, 9);
     if IsAllInOne or (ServerUrl = '') then
       CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
