@@ -16,14 +16,14 @@ import logging
 import smtplib
 import socket
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from typing import Any
 from urllib.parse import ParseResult, urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Alert, NotificationLog, Setting
+from app.db.models import Alert, NotificationJob, NotificationLog, Setting
 from app.services import encryption
 
 log = logging.getLogger(__name__)
@@ -297,6 +297,7 @@ def dispatch(
     alert: Alert,
     risk_summary: str,
     immediate: bool | None = None,
+    include_dashboard: bool = True,
 ) -> list[NotificationLog]:
     """Dispatch a notification according to severity routing."""
     routing = SEVERITY_ROUTING.get(alert.severity, {})
@@ -304,15 +305,16 @@ def dispatch(
     logs: list[NotificationLog] = []
 
     # 1) Dashboard — always recorded (the dashboard reads from alerts table)
-    nl = NotificationLog(
-        alert_id=alert.alert_id,
-        channel="dashboard",
-        severity=alert.severity,
-        result="ok",
-        detail=None,
-    )
-    session.add(nl)
-    logs.append(nl)
+    if include_dashboard:
+        nl = NotificationLog(
+            alert_id=alert.alert_id,
+            channel="dashboard",
+            severity=alert.severity,
+            result="ok",
+            detail=None,
+        )
+        session.add(nl)
+        logs.append(nl)
 
     # 2) Email if SMTP configured and severity warrants immediate
     cfg = _get_smtp_config(session)
@@ -361,3 +363,101 @@ def dispatch(
         logs.append(nl)
 
     return logs
+
+
+def enqueue(
+    session: Session,
+    *,
+    alert: Alert,
+    risk_summary: str,
+    immediate: bool | None = None,
+) -> NotificationJob | None:
+    """Record dashboard visibility now and queue external delivery after commit."""
+    routing = SEVERITY_ROUTING.get(alert.severity, {})
+    is_immediate = immediate if immediate is not None else routing.get("immediate", False)
+    session.add(
+        NotificationLog(
+            alert_id=alert.alert_id,
+            channel="dashboard",
+            severity=alert.severity,
+            result="ok",
+            detail=None,
+        )
+    )
+    if not is_immediate:
+        return None
+    job = NotificationJob(
+        alert_id=alert.alert_id,
+        severity=alert.severity,
+        risk_summary=risk_summary,
+        immediate=bool(is_immediate),
+        status="queued",
+        next_attempt_at=datetime.now(UTC),
+    )
+    session.add(job)
+    return job
+
+
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _retry_delay_seconds(attempts: int) -> int:
+    return (60, 300, 900, 3600)[min(max(attempts - 1, 0), 3)]
+
+
+def process_pending(session: Session, *, limit: int = 10, now: datetime | None = None) -> int:
+    """Deliver queued notification jobs. Returns the number of jobs processed."""
+    now = now or datetime.now(UTC)
+    candidates = (
+        session.query(NotificationJob)
+        .filter(NotificationJob.status.in_(["queued", "retry"]))
+        .order_by(NotificationJob.created_at.asc())
+        .limit(limit)
+        .all()
+    )
+    processed = 0
+    for job in candidates:
+        due = _as_aware_utc(job.next_attempt_at)
+        if due is not None and due > now:
+            continue
+        alert = session.get(Alert, job.alert_id)
+        if alert is None:
+            job.status = "dead"
+            job.last_error = "alert no longer exists"
+            job.updated_at = now
+            processed += 1
+            continue
+        job.status = "processing"
+        job.attempts = int(job.attempts or 0) + 1
+        job.updated_at = now
+        logs = dispatch(
+            session,
+            alert=alert,
+            risk_summary=job.risk_summary or "",
+            immediate=job.immediate,
+            include_dashboard=False,
+        )
+        failures = [row for row in logs if row.channel != "dashboard" and row.result != "ok"]
+        if failures:
+            detail = "; ".join((row.detail or row.channel)[:200] for row in failures)[:500]
+            job.last_error = detail
+            if job.attempts >= 5:
+                job.status = "dead"
+                job.next_attempt_at = None
+            else:
+                job.status = "retry"
+                job.next_attempt_at = now + timedelta(seconds=_retry_delay_seconds(job.attempts))
+        else:
+            job.status = "sent"
+            job.last_error = None
+            job.next_attempt_at = None
+        job.updated_at = now
+        processed += 1
+    if processed:
+        session.commit()
+    return processed

@@ -70,7 +70,7 @@ from app.services import mdns_advertiser
 from app.services.device_bootstrap_token import ensure_device_bootstrap_token
 from app.services.setup_token import ensure_setup_token
 from app.settings import settings
-from app.workers import cleanup_worker, offline_monitor
+from app.workers import cleanup_worker, notification_worker, offline_monitor
 
 log = logging.getLogger("guardiannode")
 
@@ -261,6 +261,8 @@ async def lifespan(app: FastAPI):
         background_tasks.append(asyncio.create_task(cleanup_worker.loop()))
     if settings.device_offline_alert_enabled:
         background_tasks.append(asyncio.create_task(offline_monitor.loop()))
+    if settings.notification_worker_enabled:
+        background_tasks.append(asyncio.create_task(notification_worker.loop()))
     log.info("GuardianNode backend %s listening on %s:%s", __version__, settings.bind_host, settings.bind_port)
     try:
         yield

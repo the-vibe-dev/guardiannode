@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     device_offline_alert_enabled: bool = True
     device_offline_after_seconds: int = 180
     device_offline_check_interval_seconds: int = 60
+    notification_worker_enabled: bool = True
+    notification_worker_interval_seconds: int = 10
     # Safety cap on the long edge (px) sent to the vision model. qwen3-vl:8b has
     # ~4.6 GB headroom on a 12 GB card, so full-res frames OCR best and are left
     # untouched; this only shrinks enormous 4K+ frames. Downscaling degrades OCR

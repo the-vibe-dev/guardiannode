@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -56,7 +56,7 @@ def upsert_alert(
     absorbed this finding. When ``notify`` is set, sends email/webhook on the
     first occurrence (repeats don't re-notify).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = dedup_key(device_id, profile_id, severity, categories)
     window = timedelta(seconds=settings.alert_dedup_window_seconds)
     if window.total_seconds() > 0:
@@ -108,12 +108,10 @@ def upsert_alert(
         source_ip=source_ip,
     )
     if notify:
-        # Email/webhook on the first occurrence only. Failures are logged and
-        # never block the alert from being recorded.
         try:
             from app.services import notifications
             session.flush()
-            notifications.dispatch(session, alert=alert, risk_summary=risk_summary, immediate=True)
+            notifications.enqueue(session, alert=alert, risk_summary=risk_summary, immediate=True)
         except Exception as e:  # pragma: no cover
-            log.warning("alert notification failed: %s", e)
+            log.warning("alert notification enqueue failed: %s", e)
     return alert_id, True

@@ -21,7 +21,6 @@ from ulid import ULID
 
 from app.db.models import Alert, Device, Event, RiskResult
 from app.db.session import get_sessionmaker
-from app.services import notifications
 from app.services.audit import log_action
 from app.services.device_state import is_device_paused
 from app.settings import settings
@@ -90,9 +89,10 @@ def _raise_offline_alert(session: Session, device: Device, silent_seconds: int) 
         details={"hostname": device.hostname, "silent_seconds": silent_seconds},
     )
     try:
-        notifications.dispatch(session, alert=alert, risk_summary=summary, immediate=True)
-    except Exception as e:  # notification failures must not block the alert
-        log.warning("offline-alert notification failed: %s", e)
+        from app.services import notifications
+        notifications.enqueue(session, alert=alert, risk_summary=summary, immediate=True)
+    except Exception as e:  # notification enqueue failures must not block the alert
+        log.warning("offline-alert notification enqueue failed: %s", e)
     return alert.alert_id
 
 
