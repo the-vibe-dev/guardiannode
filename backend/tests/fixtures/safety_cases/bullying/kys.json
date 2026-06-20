@@ -1,0 +1,11 @@
+{
+  "name": "direct bullying with kys",
+  "input_type": "ocr_text",
+  "text": "nobody likes you. youre trash. just kys already",
+  "age_group": "10_13",
+  "expected": {
+    "min_severity": "medium",
+    "categories_any": ["bullying"],
+    "alert": true
+  }
+}

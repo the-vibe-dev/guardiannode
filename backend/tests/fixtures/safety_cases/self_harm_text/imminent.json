@@ -1,0 +1,13 @@
+{
+  "name": "imminent self-harm statement in chat",
+  "input_type": "ocr_text",
+  "text": "i cant do this anymore. i want to kill myself tonight",
+  "age_group": "14_17",
+  "expected": {
+    "min_severity": "critical",
+    "categories_any": ["self_harm"],
+    "alert": true,
+    "notify": true,
+    "reason_contains": "protected"
+  }
+}

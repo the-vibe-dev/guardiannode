@@ -1,0 +1,130 @@
+/* GuardianNode brand kit — see assets/brand/README.md
+   Deep Teal #0D3B4A · Forest Green #275E3D · Slate Gray #475569
+   Sky Blue #7EC6F5 · Light Neutral #F3F6F8 */
+
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@600;700&display=swap");
+
+:root {
+  --md-primary-fg-color: #0d3b4a;
+  --md-primary-fg-color--light: #1a5468;
+  --md-primary-fg-color--dark: #092b36;
+  --md-accent-fg-color: #275e3d;
+  --gn-deep-teal: #0d3b4a;
+  --gn-forest-green: #275e3d;
+  --gn-slate: #475569;
+  --gn-sky: #7ec6f5;
+  --gn-neutral: #f3f6f8;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-header__topic,
+.gn-hero h1 {
+  font-family: "Sora", var(--md-text-font-family, sans-serif);
+  font-weight: 600;
+}
+
+/* ---------- Landing page ---------- */
+
+.gn-hidden-title {
+  display: none;
+}
+
+.gn-hero {
+  text-align: center;
+  padding: 2.5rem 1rem 1.5rem;
+}
+
+.gn-hero img.gn-hero-logo {
+  max-width: min(420px, 80%);
+  margin-bottom: 1rem;
+}
+
+.gn-hero p.gn-tagline {
+  font-size: 1.15rem;
+  color: var(--gn-slate);
+  max-width: 38rem;
+  margin: 0 auto 1.5rem;
+}
+
+.gn-hero .md-button--primary {
+  background-color: var(--gn-forest-green);
+  border-color: var(--gn-forest-green);
+}
+
+.gn-hero .md-button--primary:hover {
+  background-color: var(--gn-deep-teal);
+  border-color: var(--gn-deep-teal);
+}
+
+.gn-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.9rem;
+  margin: 1.5rem 0;
+}
+
+.gn-card {
+  background: var(--gn-neutral);
+  border: 1px solid #dde6ea;
+  border-radius: 0.6rem;
+  padding: 1rem 1.1rem;
+}
+
+[data-md-color-scheme="slate"] .gn-card {
+  background: #16323d;
+  border-color: #234a59;
+}
+
+.gn-card h3 {
+  margin: 0 0 0.4rem !important;
+  font-size: 0.95rem !important;
+  color: var(--gn-deep-teal);
+}
+
+[data-md-color-scheme="slate"] .gn-card h3 {
+  color: var(--gn-sky);
+}
+
+.gn-card p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--gn-slate);
+}
+
+[data-md-color-scheme="slate"] .gn-card p {
+  color: #b9c6cd;
+}
+
+.gn-flow {
+  text-align: center;
+  font-size: 0.85rem;
+  background: var(--gn-neutral);
+  border-radius: 0.6rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  color: var(--gn-deep-teal);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+[data-md-color-scheme="slate"] .gn-flow {
+  background: #16323d;
+  color: var(--gn-sky);
+}
+
+.gn-flow b {
+  display: inline-block;
+  background: white;
+  border: 1px solid #dde6ea;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  margin: 0.15rem;
+  font-weight: 600;
+}
+
+[data-md-color-scheme="slate"] .gn-flow b {
+  background: #0d3b4a;
+  border-color: #234a59;
+}

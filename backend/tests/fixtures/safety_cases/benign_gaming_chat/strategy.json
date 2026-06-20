@@ -1,0 +1,10 @@
+{
+  "name": "minecraft strategy chat must not alert",
+  "input_type": "ocr_text",
+  "text": "meet at the village, bring iron and torches. creeper blew up my house lol",
+  "age_group": "under_10",
+  "expected": {
+    "max_severity": "low",
+    "alert": false
+  }
+}

@@ -1,0 +1,25 @@
+[Unit]
+Description=GuardianNode Backend
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=guardiannode
+Group=guardiannode
+Environment="GUARDIANNODE_DATA_DIR=/var/lib/guardiannode"
+Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"
+Environment="GUARDIANNODE_BIND_PORT=8787"
+Environment="GUARDIANNODE_LOG_LEVEL=INFO"
+WorkingDirectory=/opt/guardiannode/src/backend
+ExecStart=/opt/guardiannode/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8787
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/guardiannode /var/log/guardiannode
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

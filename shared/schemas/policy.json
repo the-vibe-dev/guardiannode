@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/policy.json",
+  "title": "Policy",
+  "type": "object",
+  "required": ["policy_id", "profile_id"],
+  "properties": {
+    "policy_id": {"type": "string"},
+    "profile_id": {"type": "string"},
+    "monitored_apps": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "monitored_domains": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "ocr_cadence_seconds": {"type": "integer", "minimum": 1, "maximum": 600},
+    "image_safety_enabled": {"type": "boolean"},
+    "clipboard_monitoring_enabled": {"type": "boolean"},
+    "severity_thresholds": {
+      "type": "object",
+      "properties": {
+        "alert_at": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+        "notify_at": {"type": "string", "enum": ["low", "medium", "high", "critical"]}
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "properties": {
+        "on_critical": {"type": "array", "items": {"type": "string"}},
+        "on_high": {"type": "array", "items": {"type": "string"}},
+        "on_medium": {"type": "array", "items": {"type": "string"}},
+        "on_low": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "retention_days": {
+      "type": "object",
+      "properties": {
+        "critical": {"type": "integer", "minimum": 1},
+        "high": {"type": "integer", "minimum": 1},
+        "medium": {"type": "integer", "minimum": 1},
+        "low": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "additionalProperties": false
+}

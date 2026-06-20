@@ -1,0 +1,7 @@
+app: chrome.exe
+regions:
+  page_body:
+    x_pct: 0.00
+    y_pct: 0.10
+    w_pct: 1.00
+    h_pct: 0.85

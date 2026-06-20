@@ -1,0 +1,11 @@
+{
+  "name": "firearm visible in non-game context",
+  "input_type": "synthetic_image",
+  "requires": "vision_tier",
+  "description": "A screenshot showing a real firearm listing/photo outside a game context.",
+  "expected": {
+    "min_severity": "high",
+    "categories_any": ["weapons"],
+    "alert": true
+  }
+}

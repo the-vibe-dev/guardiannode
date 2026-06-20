@@ -1,0 +1,17 @@
+# Optional host-network override for LAN discovery/mDNS on Linux hosts.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+#
+# Do not expose the GuardianNode backend directly to the public internet.
+
+services:
+  backend:
+    network_mode: "host"
+    environment:
+      - GUARDIANNODE_OLLAMA_URL=http://127.0.0.1:11434
+    ports: !reset []
+
+  ollama:
+    network_mode: "host"
+    ports: !reset []

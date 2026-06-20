@@ -1,0 +1,34 @@
+# GuardianNode backend Docker image.
+# Multi-stage: build dashboard with Node, install backend Python deps, run with uvicorn.
+
+# ---- Stage 1: build dashboard ----
+FROM node:22-alpine AS dashboard-build
+WORKDIR /build
+COPY dashboard/package*.json ./dashboard/
+RUN cd dashboard && npm ci --no-audit --no-fund
+COPY dashboard/ ./dashboard/
+RUN cd dashboard && npm run build
+
+# ---- Stage 2: Python runtime ----
+FROM python:3.12-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates sqlite3 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY backend/pyproject.toml backend/README.md ./backend/
+COPY backend/app ./backend/app
+
+RUN pip install --no-cache-dir -e ./backend
+
+# Copy built dashboard into backend's static dir
+COPY --from=dashboard-build /build/dashboard/dist /app/backend/app/static
+
+ENV GUARDIANNODE_DATA_DIR=/data
+ENV GUARDIANNODE_BIND_HOST=0.0.0.0
+ENV GUARDIANNODE_BIND_PORT=8787
+
+VOLUME ["/data"]
+EXPOSE 8787
+
+CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "/app/backend", "--host", "0.0.0.0", "--port", "8787"]

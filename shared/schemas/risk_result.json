@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/risk_result.json",
+  "title": "RiskResult",
+  "type": "object",
+  "required": ["risk_id", "event_id", "risk_level", "score"],
+  "properties": {
+    "risk_id": {"type": "string"},
+    "event_id": {"type": "string"},
+    "risk_level": {
+      "type": "string",
+      "enum": ["none", "low", "medium", "high", "critical"]
+    },
+    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "categories": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "summary": {"type": "string", "maxLength": 2048},
+    "evidence": {
+      "type": "array",
+      "items": {"type": "string", "maxLength": 1024}
+    },
+    "recommended_action": {
+      "type": "string",
+      "enum": ["none", "log", "alert_parent", "pause_app", "block_app", "emergency_review"]
+    },
+    "model": {"type": ["string", "null"]},
+    "rules_triggered": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "false_positive_notes": {"type": "string", "maxLength": 2048},
+    "prompt_version": {"type": ["string", "null"]},
+    "rules_version": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

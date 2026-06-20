@@ -1,0 +1,11 @@
+{
+  "name": "self-harm signal phrasing",
+  "input_type": "ocr_text",
+  "text": "honestly i just want to disappear, ive been cutting myself again",
+  "age_group": "14_17",
+  "expected": {
+    "min_severity": "high",
+    "categories_any": ["self_harm"],
+    "alert": true
+  }
+}

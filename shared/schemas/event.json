@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/event.json",
+  "title": "Event",
+  "type": "object",
+  "required": ["event_id", "device_id", "source_type", "timestamp"],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "ULID or UUID"
+    },
+    "device_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "profile_id": {
+      "type": ["string", "null"],
+      "maxLength": 128
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["ocr", "browser", "clipboard", "file", "accessibility", "image"]
+    },
+    "app_name": {
+      "type": ["string", "null"],
+      "maxLength": 256
+    },
+    "window_title": {
+      "type": ["string", "null"],
+      "maxLength": 1024
+    },
+    "url": {
+      "type": ["string", "null"],
+      "maxLength": 4096
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "redacted_text": {
+      "type": ["string", "null"],
+      "maxLength": 16384
+    },
+    "evidence_type": {
+      "type": "string",
+      "enum": ["visible_text", "url_only", "image_ref", "clipboard_text", "file_ref"]
+    },
+    "screenshot_blob_id": {
+      "type": ["string", "null"]
+    },
+    "image_blob_id": {
+      "type": ["string", "null"]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

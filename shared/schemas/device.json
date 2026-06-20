@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/device.json",
+  "title": "Device",
+  "type": "object",
+  "required": ["device_id", "hostname", "created_at"],
+  "properties": {
+    "device_id": {"type": "string"},
+    "hostname": {"type": "string", "maxLength": 256},
+    "platform": {"type": "string", "enum": ["windows", "linux", "macos", "unknown"]},
+    "agent_version": {"type": "string"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "last_seen": {"type": ["string", "null"], "format": "date-time"},
+    "paired": {"type": "boolean"},
+    "profile_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "status": {
+      "type": "string",
+      "enum": ["online", "offline", "paused", "disabled"]
+    }
+  },
+  "additionalProperties": false
+}

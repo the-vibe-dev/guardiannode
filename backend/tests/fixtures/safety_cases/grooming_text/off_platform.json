@@ -1,0 +1,11 @@
+{
+  "name": "off-platform move attempt with age probe",
+  "input_type": "ocr_text",
+  "text": "how old are you? add me on snap so we can talk somewhere private",
+  "age_group": "10_13",
+  "expected": {
+    "min_severity": "high",
+    "categories_any": ["grooming", "off_platform_contact"],
+    "alert": true
+  }
+}

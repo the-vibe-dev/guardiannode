@@ -1,0 +1,12 @@
+app: Roblox.exe
+regions:
+  chat_left:
+    x_pct: 0.01
+    y_pct: 0.10
+    w_pct: 0.45
+    h_pct: 0.55
+  chat_bottom:
+    x_pct: 0.01
+    y_pct: 0.70
+    w_pct: 0.45
+    h_pct: 0.25

@@ -1,0 +1,215 @@
+name: release-installers
+
+# Release artifacts are fail-closed: tagged builds carry RELEASE_BUILD=1 and
+# refuse to ship dev stubs. Real PyInstaller bundles are built on
+# windows-latest so no parent or child machine ever needs Python installed.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  INNO_INSTALLER_URL: "https://github.com/jrsoftware/issrc/releases/download/is-6_7_1/innosetup-6.7.1.exe"
+  INNO_INSTALLER_SHA256: "4d11e8050b6185e0d49bd9e8cc661a7a59f44959a621d31d11033124c4e8a7b0"
+  WINSW_URL: "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
+  WINSW_SHA256: "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+
+jobs:
+  build-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard/dist/
+
+  build-backend-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend + PyInstaller
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+      - name: Build backend bundle
+        working-directory: backend
+        run: pyinstaller --noconfirm guardiannode_backend.spec
+      - name: Smoke-test bundle exists
+        working-directory: backend
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/GuardianNodeBackend/GuardianNodeBackend.exe")) {
+            throw "backend bundle missing"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-bundle
+          path: backend/dist/GuardianNodeBackend/
+
+  build-agent-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install agent + PyInstaller
+        working-directory: agent-windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[windows]"
+          pip install pyinstaller
+      - name: Build agent bundle
+        working-directory: agent-windows
+        run: pyinstaller --clean --noconfirm guardiannode_agent.spec
+      - name: Verify agent bundle
+        working-directory: agent-windows
+        shell: pwsh
+        run: ./scripts/verify_windows_bundle.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-bundle
+          path: agent-windows/dist/GuardianNodeAgent/
+
+  build-installers:
+    runs-on: windows-latest
+    needs: [build-dashboard, build-backend-exe, build-agent-exe]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: installer/build/stage/dashboard
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-bundle
+          path: installer/build/stage/backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-bundle
+          path: installer/build/stage/agent
+
+      - name: Fail closed if bundles are not real executables
+        shell: pwsh
+        run: |
+          # RELEASE_BUILD equivalent for the Windows path: never compile an
+          # installer around missing/stub payloads.
+          if (-not (Test-Path "installer/build/stage/backend/GuardianNodeBackend.exe")) {
+            throw "Release build requires the PyInstaller backend bundle"
+          }
+          if (-not (Test-Path "installer/build/stage/agent/GuardianNodeAgent.exe")) {
+            throw "Release build requires the PyInstaller agent bundle"
+          }
+          if (Get-ChildItem "installer/build/stage" -Recurse -Filter "*.exe.bat") {
+            throw "Dev .bat stubs found in release staging - aborting"
+          }
+
+      - name: Stage WinSW (pinned SHA-256)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer/build/stage/winsw | Out-Null
+          Invoke-WebRequest -Uri $env:WINSW_URL -OutFile installer/build/stage/winsw/WinSW.exe
+          $actual = (Get-FileHash installer/build/stage/winsw/WinSW.exe -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:WINSW_SHA256) {
+            throw "WinSW SHA-256 mismatch: expected $env:WINSW_SHA256 got $actual"
+          }
+          Copy-Item installer/build/winsw_templates/Watchdog.xml installer/build/stage/winsw/
+          Copy-Item installer/build/winsw_templates/Helper.xml   installer/build/stage/winsw/
+          Copy-Item installer/build/winsw_templates/Backend.xml  installer/build/stage/winsw/
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:INNO_INSTALLER_URL -OutFile innosetup.exe
+          $actual = (Get-FileHash innosetup.exe -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:INNO_INSTALLER_SHA256) {
+            throw "Inno Setup SHA-256 mismatch: expected $env:INNO_INSTALLER_SHA256 got $actual"
+          }
+          Start-Process -FilePath .\innosetup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
+
+      - name: Compile installers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer/build/dist | Out-Null
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc installer\child-device-windows\GuardianNodeChildSetup.iss
+          if ($LASTEXITCODE -ne 0) { throw "child installer compile failed" }
+          & $iscc installer\server-windows\GuardianNodeServerSetup.iss
+          if ($LASTEXITCODE -ne 0) { throw "server installer compile failed" }
+
+      - name: Generate checksums + release manifest
+        shell: pwsh
+        working-directory: installer/build/dist
+        run: |
+          $lines = @()
+          foreach ($f in Get-ChildItem *.exe) {
+            $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            $lines += "$h  $($f.Name)"
+          }
+          $lines | Set-Content -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS
+          @{
+            tag = "${{ github.ref_name }}"
+            commit = "${{ github.sha }}"
+            built_at = (Get-Date).ToUniversalTime().ToString("o")
+            artifacts = (Get-ChildItem *.exe | ForEach-Object { $_.Name })
+          } | ConvertTo-Json | Set-Content -Encoding ascii release-manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: installer/build/dist/*
+
+      - name: Create GitHub Release (draft)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/build/dist/*.exe
+            installer/build/dist/SHA256SUMS
+            installer/build/dist/release-manifest.json
+          body_path: docs/RELEASE_NOTES_0.1.0-alpha.1.md
+          draft: true
+          prerelease: true
+
+  build-linux-docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: installer/server-linux/Dockerfile.backend
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }}

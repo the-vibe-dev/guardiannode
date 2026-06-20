@@ -1,0 +1,12 @@
+{
+  "name": "grooming pattern: secrecy plus image request",
+  "input_type": "ocr_text",
+  "text": "you're so mature for your age. send me a pic. dont tell your parents about us, it can be our little secret",
+  "age_group": "10_13",
+  "expected": {
+    "min_severity": "critical",
+    "categories_any": ["sexual_content", "secrecy_request"],
+    "alert": true,
+    "notify": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.io/schemas/evidence_blob.json",
+  "title": "EvidenceBlobMetadata",
+  "type": "object",
+  "required": ["blob_id", "kind", "encrypted_path", "size_bytes", "created_at"],
+  "properties": {
+    "blob_id": {"type": "string"},
+    "kind": {
+      "type": "string",
+      "enum": ["screenshot", "image", "clipboard_image", "file_excerpt"]
+    },
+    "mime_type": {"type": "string"},
+    "encrypted_path": {"type": "string"},
+    "size_bytes": {"type": "integer", "minimum": 0},
+    "sha256_plain": {"type": "string"},
+    "key_version": {"type": "integer"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "event_id": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
