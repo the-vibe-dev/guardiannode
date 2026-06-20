@@ -12,10 +12,10 @@ set -Eeuo pipefail
 
 # ---------- Config ----------
 GN_VERSION="${GN_VERSION:-v0.1.0-alpha.1}"
-GN_USER="guardiannode"
-GN_HOME="/opt/guardiannode"
-GN_DATA="/var/lib/guardiannode"
-GN_LOG="/var/log/guardiannode"
+GN_USER="${GN_USER:-guardiannode}"
+GN_HOME="${GN_HOME:-/opt/guardiannode}"
+GN_DATA="${GN_DATA:-/var/lib/guardiannode}"
+GN_LOG="${GN_LOG:-/var/log/guardiannode}"
 GN_BIND_HOST="${GN_BIND_HOST:-127.0.0.1}"
 GN_BIND_PORT="${GN_BIND_PORT:-8787}"
 GN_REPO_URL="${GN_REPO_URL:-https://github.com/the-vibe-dev/guardiannode}"
