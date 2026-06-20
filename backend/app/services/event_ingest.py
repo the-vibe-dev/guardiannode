@@ -10,6 +10,7 @@ from ulid import ULID
 
 from app.db.models import Device, Event, RiskResult
 from app.services import classifier, encryption, redaction
+from app.services.input_bounds import sanitize_metadata
 from app.services.profile_resolution import resolve_profile
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ async def ingest_event(
     except Exception:
         timestamp = datetime.now(UTC)
 
-    metadata = dict(payload.get("metadata") or {})
+    metadata = sanitize_metadata(payload.get("metadata") or {})
     metadata.setdefault("capture_scope", payload.get("capture_scope", "browser_dom"))
     for key in ("policy_id", "policy_version", "collector_version"):
         if payload.get(key) is not None:
@@ -53,6 +54,7 @@ async def ingest_event(
     if red_summary:
         metadata["redaction"] = red_summary
         metadata["redaction_summary"] = red_summary
+    metadata = sanitize_metadata(metadata)
 
     device = session.get(Device, device_id)
 

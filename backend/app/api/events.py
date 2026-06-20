@@ -2,18 +2,19 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from PIL import Image, UnidentifiedImageError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, Event, User
-from app.services import event_ingest, encryption, screenshot_async, screenshot_ingest
+from app.services import encryption, event_ingest, screenshot_async
 from app.services.device_state import is_device_paused
+from app.services.input_bounds import InputBoundsError, sanitize_metadata
 
 router = APIRouter(prefix="/events", tags=["events"])
 _MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
@@ -75,6 +76,14 @@ class IngestRequest(BaseModel):
     screenshot_blob_id: str | None = Field(default=None, max_length=64)
     image_blob_id: str | None = Field(default=None, max_length=64)
     metadata: dict[str, Any] = Field(default_factory=dict, max_length=100)
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_within_bounds(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return sanitize_metadata(value)
+        except InputBoundsError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class IngestResponse(BaseModel):
@@ -232,7 +241,7 @@ async def ingest_screenshot(
     mime_type = _validate_image_bytes(image_bytes)
 
     # Update device liveness now (don't wait for classification).
-    device.last_seen = datetime.now(timezone.utc)
+    device.last_seen = datetime.now(UTC)
     if device.status not in ("paused", "disabled"):
         device.status = "online"
     db.commit()
@@ -273,6 +282,7 @@ def get_event_screenshot(
 ):
     """Return the decrypted screenshot bytes for a flagged event (parent dashboard only)."""
     from fastapi.responses import Response
+
     from app.db.models import EvidenceBlob
     e = db.get(Event, event_id)
     if e is None or not e.screenshot_blob_id:
