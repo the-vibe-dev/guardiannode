@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import secrets
 import time
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -48,6 +49,15 @@ def _enforce_rate_limit(scope: str, request: Request) -> None:
         )
 
 
+def _mark_session_authenticated(request: Request, user: User) -> None:
+    now = time.time()
+    request.session["user_id"] = user.id
+    request.session["login_at"] = now
+    request.session["reauth_at"] = now
+    request.session["last_activity_at"] = now
+    user.last_login = datetime.fromtimestamp(now, UTC)
+
+
 @router.get("/csrf")
 def csrf_token(request: Request):
     token = request.session.get("csrf_token")
@@ -73,9 +83,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db_dep)
         db.commit()
         raise HTTPException(status_code=401, detail="Invalid credentials")
     rate_limit.reset("login", _client_ip(request))
-    request.session["user_id"] = user.id
-    request.session["login_at"] = time.time()
-    request.session["reauth_at"] = time.time()
+    _mark_session_authenticated(request, user)
     log_action(
         db, actor=str(user.id), action="auth.login.success",
         target=str(user.id),
@@ -119,6 +127,25 @@ def logout(request: Request, db: Session = Depends(get_db_dep)):
     if uid:
         log_action(db, actor=str(uid), action="auth.logout")
         db.commit()
+    return {"ok": True}
+
+
+@router.post("/logout-all")
+def logout_all(
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+):
+    user.session_revoked_at = datetime.fromtimestamp(time.time(), UTC)
+    log_action(
+        db,
+        actor=str(user.id),
+        action="auth.logout_all",
+        target=str(user.id),
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    request.session.clear()
     return {"ok": True}
 
 
@@ -200,8 +227,6 @@ def setup(req: SetupRequest, request: Request, db: Session = Depends(get_db_dep)
         consume_setup_token()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Already set up")
-    request.session["user_id"] = user.id
-    request.session["login_at"] = time.time()
-    request.session["reauth_at"] = time.time()
+        raise HTTPException(status_code=400, detail="Already set up") from None
+    _mark_session_authenticated(request, user)
     return {"ok": True, "user_id": user.id}

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     dev_mode: bool = False
     session_secret: str | None = None  # auto-generated on first run
+    session_idle_timeout_seconds: int = 60 * 60
+    session_absolute_timeout_seconds: int = 7 * 24 * 60 * 60
+    recent_auth_timeout_seconds: int = 15 * 60
     setup_token_ttl_seconds: int = 24 * 60 * 60
     https_only_cookies: bool = False
     mdns_enabled: bool = True

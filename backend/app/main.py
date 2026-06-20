@@ -193,6 +193,11 @@ def _patch_schema(engine) -> None:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN profile_id VARCHAR(64)"))
             log.info("schema patch: added devices.profile_id")
     if "users" in tables:
+        cols = {c["name"] for c in insp.get_columns("users")}
+        if "session_revoked_at" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN session_revoked_at DATETIME"))
+            log.info("schema patch: added users.session_revoked_at")
         existing_indexes = {ix["name"] for ix in insp.get_indexes("users")}
         if "ux_users_single_admin" not in existing_indexes:
             with engine.begin() as conn:
@@ -297,7 +302,7 @@ def create_app() -> FastAPI:
         secret_key=_ensure_session_secret(),
         same_site="strict",
         https_only=settings.https_only_cookies,
-        max_age=60 * 60 * 24 * 7,
+        max_age=settings.session_absolute_timeout_seconds,
     )
 
     if settings.cors_allow_origin:

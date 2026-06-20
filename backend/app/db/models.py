@@ -45,6 +45,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(32), default="admin")  # admin | parent | viewer
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Device(Base):
