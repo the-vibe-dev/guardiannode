@@ -70,7 +70,7 @@ Pairing credentials live separately in
 - `screenshot_capture.py` — `mss`-based fast capture
 - `ocr_engine.py` — Tesseract OCR wrapper; PaddleOCR is only a planned optional path
 - `redactor.py` — best-effort text filtering helpers where used
-- `event_queue.py` — local SQLite queue for offline resilience
+- in-memory retry queue — current alpha buffering; durable encrypted queue is planned
 - `backend_client.py` — HTTP client to backend
 - `tray_app.py` — pystray-based notification icon
 - `tray_pause.py` — pause flow with password + duration

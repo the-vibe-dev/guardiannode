@@ -190,6 +190,7 @@ async def ingest_screenshot(
     policy_id: str | None = None,
     policy_version: str | None = None,
     collector_version: str | None = None,
+    mime_type: str = "image/jpeg",
     timestamp: datetime | None = None,
     source_ip: str | None = None,
 ) -> dict[str, Any]:
@@ -225,6 +226,7 @@ async def ingest_screenshot(
             policy_id=policy_id,
             policy_version=policy_version,
             collector_version=collector_version,
+            mime_type=mime_type,
             timestamp=timestamp,
             source_ip=source_ip,
         )
@@ -251,6 +253,7 @@ async def _ingest_inner(
     policy_id: str | None,
     policy_version: str | None,
     collector_version: str | None,
+    mime_type: str,
     timestamp: datetime,
     source_ip: str | None,
 ) -> dict[str, Any]:
@@ -259,12 +262,13 @@ async def _ingest_inner(
     extracted_text = ""
     tesseract_used = False
 
-    # Resolve the child profile the same way text-event ingest does (payload →
-    # device assignment → default). Also yields the parent's custom watch
-    # phrases, loaded once and passed through whichever tier ends up running.
+    # Resolve the child profile the same way text-event ingest does. The
+    # backend assignment is authoritative; device payload profile/age fields are
+    # legacy hints only and may not select another child's policy.
+    device = session.get(Device, device_id)
     resolved = resolve_profile(
         session,
-        device_id=device_id,
+        device=device,
         payload_profile_id=profile_id,
         payload_age_group=age_group,
     )
@@ -394,7 +398,7 @@ async def _ingest_inner(
             EvidenceBlob(
                 blob_id=blob_id,
                 kind="screenshot",
-                mime_type="image/jpeg",
+                mime_type=mime_type if mime_type in {"image/jpeg", "image/png"} else "image/jpeg",
                 encrypted_path=str(blob_path),
                 size_bytes=len(image_bytes),
                 sha256_plain=sha256,
@@ -420,6 +424,7 @@ async def _ingest_inner(
         event_metadata={
             "sha256": sha256,
             "image_bytes": len(image_bytes),
+            "mime_type": mime_type if mime_type in {"image/jpeg", "image/png"} else "image/jpeg",
             "tier": tier,
             "capture_scope": capture_scope,
             "policy_id": policy_id,
@@ -438,7 +443,6 @@ async def _ingest_inner(
     session.add(event)
 
     # Update device heartbeat
-    device = session.get(Device, device_id)
     if device is not None:
         device.last_seen = datetime.now(timezone.utc)
         device.status = "online"

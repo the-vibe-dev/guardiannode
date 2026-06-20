@@ -1,6 +1,9 @@
 # Install GuardianNode with a separate server + child PC
 
-If you have two PCs — for example a gaming PC for your kid and a home-server PC for yourself, or an old laptop you can repurpose — this is the recommended setup. The kid's PC stays fast (no AI runs on it) and they can't easily tamper with the dashboard/evidence.
+This guide is for advanced alpha operators testing a separate parent-owned
+server and child PC. GuardianNode 0.1.0-alpha.1 does not recommend separated
+raw-LAN HTTP for ordinary family use; use a trusted VPN/TLS setup and keep the
+backend off the public internet.
 
 ## Before you start
 
@@ -15,11 +18,11 @@ You'll need:
 
 ### If your server is Windows
 
-1. Download `GuardianNodeServerSetup-0.1.0-alpha.1.exe` from [Releases](https://github.com/the-vibe-dev/guardiannode/releases).
+1. Build the server installer from source or use a maintainer-provided alpha test artifact.
 2. Run the installer.
 3. The installer detects hardware, installs/pulls the AI model, starts the backend on `127.0.0.1`, and opens the local setup page.
 4. Use the Start Menu **Show Setup Token** shortcut, enter that token in the setup page, then create the parent account and recovery code.
-5. To use a child PC on your LAN during this alpha, manually edit `%ProgramData%\GuardianNode\server.env` as an administrator:
+5. To use a child PC during this alpha, place the server behind a trusted VPN/TLS path first. If you are deliberately running a private lab LAN test, manually edit `%ProgramData%\GuardianNode\server.env` as an administrator:
    ```text
    GUARDIANNODE_BIND_HOST=0.0.0.0
    GUARDIANNODE_MDNS_ENABLED=false
@@ -78,8 +81,8 @@ Docker Compose keeps the host port bound to loopback by default. Change the
 backend port mapping to `8787:8787`, then run `docker compose up -d` again.
 
 Separated mode currently uses local-network HTTP unless you add TLS, Tailscale,
-WireGuard, or a trusted reverse proxy. Use it only on a trusted LAN/VPN during
-alpha testing and do not expose the backend directly to the internet.
+WireGuard, or a trusted reverse proxy. Treat raw LAN HTTP as a private lab test
+only, not a supported family deployment.
 
 ## Step 2 — Open the dashboard and prepare a pairing code
 
@@ -92,10 +95,10 @@ Keep this page open while you walk to the kid's PC.
 
 ## Step 3 — Install on the child's PC
 
-1. Download `GuardianNodeChildSetup-0.1.0-alpha.1.exe` to the kid's PC.
+1. Build the child installer from source or copy the maintainer-provided alpha test artifact to the kid's PC.
 2. Run it. (See [SmartScreen guide](when-windows-says-protected-your-pc.md) if Windows complains.)
 3. On wizard page 2, pick **"Connect to existing GuardianNode server"**.
-4. Enter the explicit server URL, for example `http://192.168.1.42:8787`.
+4. Enter the explicit trusted VPN/TLS server URL. Use a raw `http://192.168...` URL only in a private lab test.
 5. Enter the 6-digit pairing code from your dashboard.
 6. Continue the installer.
 
@@ -117,5 +120,5 @@ For each additional child PC, repeat Step 3 — just create a new pairing code f
 
 ## Got stuck?
 
-- The child PC installer requires the server URL explicitly in this alpha. Use the parent server's trusted LAN/VPN URL after first-run setup is complete.
+- The child PC installer requires the server URL explicitly in this alpha. Use the parent server's trusted VPN/TLS URL after first-run setup is complete.
 - See [Troubleshooting](troubleshooting.md) for more.

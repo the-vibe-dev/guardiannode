@@ -98,7 +98,7 @@ docker/              Docker assets for self-hosted server
 - **AES-GCM via Python `cryptography`** — well-audited, available on all platforms, no SQLCipher native build pain.
 - **Ollama HTTP API** — abstracts the runtime; we never link to model code directly. Lets us swap llama.cpp/vLLM/MLC underneath.
 - **Argon2id for passwords** — current best practice for password hashing.
-- **mDNS for server discovery** — non-technical parents never have to find an IP address. Uses `_guardiannode._tcp.local`.
+- **mDNS for server discovery** — discovery may show candidate endpoints, but it does not authenticate or automatically trust them. Child devices still need an explicit parent-approved server URL or a future pinned pairing flow.
 - **Inno Setup for Windows** — actively maintained, free, scriptable. WiX/MSI is more "enterprise" but parents don't run MSIs.
 - **WinSW for service wrapping** — better logging than NSSM, MIT licensed.
 - **Screenshot + server-side OCR** — one collection path (no per-browser extension to install or maintain); the vision/text classifier reads whatever is actually on screen.

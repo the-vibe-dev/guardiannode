@@ -1,17 +1,8 @@
 """Shared child-profile resolution for every ingest path.
 
-Screenshot ingest and generic text-event ingest must resolve the child profile
-the same way, or custom watch phrases and age-based policy behave
-inconsistently between the two. Resolution order:
-
-1. the payload's ``profile_id`` — but only if that profile actually exists
-   (an agent cannot point events at a profile the parent never created)
-2. the profile the parent assigned to the device in the dashboard
-3. no profile → callers fall back to the balanced ``10_13`` age default
-
-Returns the resolved profile id, the loaded ``ChildProfile`` (or None), the
-effective age group, and the parent's custom watch phrases — everything an
-ingest path needs to classify consistently.
+The authenticated device's dashboard assignment is authoritative. Device
+payloads may include legacy ``profile_id`` or age fields, but paired devices
+must not be able to choose another child's profile or policy.
 """
 from __future__ import annotations
 
@@ -21,6 +12,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.db.models import ChildProfile, Device
+from app.services.audit import log_action
 
 log = logging.getLogger(__name__)
 
@@ -38,34 +30,47 @@ class ResolvedProfile:
 def resolve_profile(
     session: Session,
     *,
-    device_id: str,
+    device: Device | None = None,
+    device_id: str | None = None,
     payload_profile_id: str | None = None,
     payload_age_group: str | None = None,
 ) -> ResolvedProfile:
-    """Resolve the effective child profile for an event from ``device_id``.
+    """Resolve the effective child profile for an authenticated device.
 
-    ``payload_age_group`` is only honored when no profile resolves at all
-    (legacy agents that send an age group but no profile).
+    ``payload_age_group`` is accepted only for API compatibility and is not
+    authoritative for paired devices.
     """
-    profile: ChildProfile | None = None
+    if device is None and device_id:
+        device = session.get(Device, device_id)
 
-    if payload_profile_id:
-        profile = session.get(ChildProfile, payload_profile_id)
+    actor = device.device_id if device is not None else (device_id or "unknown-device")
+
+    if payload_profile_id and (device is None or payload_profile_id != device.profile_id):
+        log.warning(
+            "event from device %s attempted profile override %r; using server assignment",
+            actor,
+            payload_profile_id,
+        )
+        log_action(
+            session,
+            actor=actor,
+            action="device.profile_mismatch",
+            target=payload_profile_id,
+            details={
+                "assigned_profile_id": device.profile_id if device is not None else None,
+                "payload_profile_id": payload_profile_id,
+            },
+        )
+
+    profile: ChildProfile | None = None
+    if device is not None and device.profile_id:
+        profile = session.get(ChildProfile, device.profile_id)
         if profile is None:
             log.warning(
-                "event from device %s referenced unknown profile %r; using device assignment",
-                device_id, payload_profile_id,
+                "device %s is assigned to missing profile %r; using defaults",
+                device.device_id,
+                device.profile_id,
             )
-
-    if profile is None:
-        device = session.get(Device, device_id)
-        if device is not None and device.profile_id:
-            profile = session.get(ChildProfile, device.profile_id)
-            if profile is None:
-                log.warning(
-                    "device %s is assigned to missing profile %r; using defaults",
-                    device_id, device.profile_id,
-                )
 
     if profile is not None:
         return ResolvedProfile(
@@ -75,5 +80,7 @@ def resolve_profile(
             custom_phrases=list(profile.custom_watch_phrases or []),
         )
 
-    age_group = payload_age_group if payload_age_group in ("under_10", "10_13", "14_17") else DEFAULT_AGE_GROUP
+    if payload_age_group and payload_age_group != DEFAULT_AGE_GROUP:
+        log.debug("ignoring device-supplied age group %r from %s", payload_age_group, actor)
+    age_group = DEFAULT_AGE_GROUP
     return ResolvedProfile(profile_id=None, profile=None, age_group=age_group, custom_phrases=[])

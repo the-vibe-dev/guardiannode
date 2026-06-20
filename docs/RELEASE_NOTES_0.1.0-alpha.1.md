@@ -7,6 +7,25 @@ during setup, or consume significant system resources. Do not rely on it as the
 only child-safety measure. It is not an emergency service and is not a
 substitute for parenting, communication, or professional support.
 
+## Supported in this alpha
+
+| Deployment shape | Status |
+|---|---|
+| Source-code developer preview | Supported for contributors, security reviewers, and technically experienced testers |
+| All-in-one backend bound to loopback | Supported as the safest alpha test path |
+| Separated mode over trusted VPN/TLS | Experimental advanced-operator path |
+| Private contributor/security review | Supported |
+
+## Not yet supported
+
+| Deployment shape or claim | Status |
+|---|---|
+| Recommended family deployment | Not supported |
+| Public Windows installer recommendation | Blocked until Windows release gates pass |
+| Raw LAN HTTP separated mode | Not supported |
+| Public internet exposure | Not supported |
+| Tamper-proof or forensic-evidence claims | Not supported |
+
 ## Included
 
 - Windows agent foundation

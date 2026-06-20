@@ -15,6 +15,7 @@ import base64
 import ipaddress
 import urllib.error
 import urllib.request
+import socket
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -40,6 +41,11 @@ _METADATA_HOSTS = {
     "metadata.google.internal",
     "metadata",
 }
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def _get_smtp_config(session: Session) -> dict[str, Any] | None:
@@ -95,6 +101,16 @@ def _validate_webhook_url(url: str, *, allow_private: bool = False) -> tuple[boo
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         return False, "webhook URL must start with http:// or https://"
+    if parsed.username or parsed.password:
+        return False, "webhook URL must not include userinfo"
+    if parsed.fragment:
+        return False, "webhook URL must not include a fragment"
+    try:
+        port = parsed.port
+    except ValueError:
+        return False, "webhook URL has an invalid port"
+    if port is not None and not (1 <= port <= 65535):
+        return False, "webhook URL has an invalid port"
     if not parsed.hostname:
         return False, "webhook URL must include a host"
     host = parsed.hostname.strip().lower().strip("[]")
@@ -105,6 +121,29 @@ def _validate_webhook_url(url: str, *, allow_private: bool = False) -> tuple[boo
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
+        try:
+            records = socket.getaddrinfo(host, port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        except OSError:
+            return False, "webhook URL host could not be resolved"
+        addresses = {record[4][0] for record in records}
+        if not addresses:
+            return False, "webhook URL host could not be resolved"
+        for address in addresses:
+            try:
+                resolved_ip = ipaddress.ip_address(address)
+            except ValueError:
+                return False, "webhook URL resolved to an invalid address"
+            if str(resolved_ip) in _METADATA_HOSTS:
+                return False, "webhook URL targets a cloud metadata service"
+            if (
+                resolved_ip.is_loopback
+                or resolved_ip.is_link_local
+                or resolved_ip.is_private
+                or resolved_ip.is_reserved
+                or resolved_ip.is_unspecified
+                or resolved_ip.is_multicast
+            ):
+                return (True, "ok") if allow_private else (False, "private/internal webhook URL requires explicit opt-in")
         return True, "ok"
     if str(ip) in _METADATA_HOSTS:
         return False, "webhook URL targets a cloud metadata service"
@@ -131,8 +170,10 @@ def _send_webhook(url: str, payload: dict[str, Any], *, allow_private: bool = Fa
             headers={"Content-Type": "application/json", "User-Agent": "GuardianNode"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 - parent-supplied URL
+        opener = urllib.request.build_opener(_NoRedirect, urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=20) as resp:  # noqa: S310 - parent-supplied URL
             status = getattr(resp, "status", 200)
+            resp.read(1024)
         if 200 <= int(status) < 300:
             return True, "ok"
         return False, f"webhook returned HTTP {status}"

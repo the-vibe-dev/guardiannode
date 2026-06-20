@@ -11,6 +11,7 @@ from ulid import ULID
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import ChildRequest, Device, User
 from app.services.audit import log_action
+from app.services.profile_resolution import resolve_profile
 
 router = APIRouter(prefix="/child-requests", tags=["child-requests"])
 
@@ -43,10 +44,11 @@ def create_child_request(
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
+    resolved = resolve_profile(db, device=device, payload_profile_id=req.profile_id)
     row = ChildRequest(
         request_id=str(ULID()),
         device_id=device.device_id,
-        profile_id=req.profile_id,
+        profile_id=resolved.profile_id,
         request_type=req.request_type,
         target=req.target,
         reason=req.reason,

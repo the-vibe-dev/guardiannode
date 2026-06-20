@@ -1,6 +1,8 @@
 """Authentication: login, logout, current user, password reset via recovery code."""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
@@ -62,6 +64,8 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db_dep)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     rate_limit.reset("login", _client_ip(request))
     request.session["user_id"] = user.id
+    request.session["login_at"] = time.time()
+    request.session["reauth_at"] = time.time()
     log_action(
         db, actor=str(user.id), action="auth.login.success",
         target=str(user.id),
@@ -69,6 +73,33 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db_dep)
     )
     db.commit()
     return LoginResponse(display_name=user.display_name, role=user.role)
+
+
+@router.post("/reauth")
+def reauth(req: LoginRequest, request: Request, db: Session = Depends(get_db_dep), user: User = Depends(current_user)):
+    _enforce_rate_limit("reauth", request)
+    if not verify_password(req.password, user.password_hash):
+        rate_limit.record_failure("reauth", _client_ip(request))
+        log_action(
+            db,
+            actor=str(user.id),
+            action="auth.reauth.fail",
+            target=str(user.id),
+            source_ip=request.client.host if request.client else None,
+        )
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    rate_limit.reset("reauth", _client_ip(request))
+    request.session["reauth_at"] = time.time()
+    log_action(
+        db,
+        actor=str(user.id),
+        action="auth.reauth.success",
+        target=str(user.id),
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/logout")
@@ -161,4 +192,6 @@ def setup(req: SetupRequest, request: Request, db: Session = Depends(get_db_dep)
         db.rollback()
         raise HTTPException(status_code=400, detail="Already set up")
     request.session["user_id"] = user.id
+    request.session["login_at"] = time.time()
+    request.session["reauth_at"] = time.time()
     return {"ok": True, "user_id": user.id}

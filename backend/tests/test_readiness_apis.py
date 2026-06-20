@@ -64,6 +64,46 @@ def test_settings_audit_and_storage_endpoints(monkeypatch, tmp_path):
     assert body["password_configured"] is True
 
     r = client.patch(
+        "/api/settings/notifications",
+        json={
+            "enabled": True,
+            "host": "smtp.test.invalid",
+            "port": 587,
+            "tls_mode": "starttls",
+            "username": "parent",
+            "password": "",
+            "from_address": "guardian@example.test",
+            "to_address": "new-parent@example.test",
+            "webhook_url": "",
+            "immediate_min_severity": "high",
+            "daily_digest_enabled": True,
+            "daily_digest_time": "08:00",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["password_configured"] is True
+
+    r = client.patch(
+        "/api/settings/notifications",
+        json={
+            "enabled": True,
+            "host": "smtp.test.invalid",
+            "port": 587,
+            "tls_mode": "starttls",
+            "username": "parent",
+            "clear_password": True,
+            "from_address": "guardian@example.test",
+            "to_address": "new-parent@example.test",
+            "webhook_url": "",
+            "immediate_min_severity": "high",
+            "daily_digest_enabled": True,
+            "daily_digest_time": "08:00",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["password_configured"] is False
+
+    r = client.patch(
         "/api/settings/retention",
         json={
             "critical": 120,
@@ -123,6 +163,7 @@ async def test_text_event_passes_profile_custom_watch_phrases(db_session, monkey
             agent_version="0.1.0-alpha.1",
             paired=True,
             status="online",
+            profile_id="child-1",
         )
     )
     db_session.add(

@@ -28,14 +28,14 @@ def _mk_profile(db, profile_id="prof1", age_group="14_17", phrases=None):
 
 # ---- helper unit behavior ---------------------------------------------------
 
-def test_payload_profile_wins_when_valid(db_session):
+def test_device_assignment_wins_over_valid_payload_profile(db_session):
     _mk_profile(db_session, "prof1", phrases=["springfield middle"])
     _mk_profile(db_session, "prof2", age_group="under_10")
     _mk_device(db_session, profile_id="prof2")
     r = resolve_profile(db_session, device_id="dev1", payload_profile_id="prof1")
-    assert r.profile_id == "prof1"
-    assert r.age_group == "14_17"
-    assert r.custom_phrases == ["springfield middle"]
+    assert r.profile_id == "prof2"
+    assert r.age_group == "under_10"
+    assert r.custom_phrases == []
 
 
 def test_invalid_payload_profile_falls_back_to_device_assignment(db_session):
@@ -69,9 +69,18 @@ def test_default_fallback_does_not_crash(db_session):
 def test_payload_age_group_honored_only_without_profile(db_session):
     _mk_device(db_session)
     r = resolve_profile(db_session, device_id="dev1", payload_age_group="14_17")
-    assert r.age_group == "14_17"
+    assert r.age_group == "10_13"
     r = resolve_profile(db_session, device_id="dev1", payload_age_group="bogus")
     assert r.age_group == "10_13"
+
+
+def test_unassigned_device_cannot_claim_existing_profile(db_session):
+    _mk_profile(db_session, "prof1", age_group="14_17", phrases=["springfield middle"])
+    _mk_device(db_session)
+    r = resolve_profile(db_session, device_id="dev1", payload_profile_id="prof1")
+    assert r.profile_id is None
+    assert r.age_group == "10_13"
+    assert r.custom_phrases == []
 
 
 # ---- end-to-end: custom watch phrase works on both ingest paths -------------

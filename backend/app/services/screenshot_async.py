@@ -194,6 +194,7 @@ async def _classify_token(token: str) -> None:
             policy_id=meta.get("policy_id"),
             policy_version=meta.get("policy_version"),
             collector_version=meta.get("collector_version"),
+            mime_type=meta.get("mime_type", "image/jpeg"),
             timestamp=timestamp,
             source_ip=meta.get("source_ip"),
         )

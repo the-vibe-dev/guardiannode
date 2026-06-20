@@ -45,6 +45,7 @@ class NotificationSettings(BaseModel):
     tls_mode: str = Field(default="starttls", pattern="^(starttls|ssl|none)$")
     username: str = Field(default="", max_length=255)
     password: str | None = None
+    clear_password: bool = False
     from_address: str = Field(default="", max_length=320)
     to_address: str = Field(default="", max_length=320)
     webhook_url: str = Field(default="", max_length=2048)
@@ -100,12 +101,15 @@ def update_notifications(
     user: User = Depends(current_user),
 ):
     existing = _get_json(db, "notification_settings", {})
-    data = req.model_dump(exclude={"password"})
-    if req.password is not None:
-        if req.password:
-            data["password_enc"] = base64.b64encode(
-                encryption.encrypt_text(req.password)
-            ).decode("ascii")
+    data = req.model_dump(exclude={"password", "clear_password"})
+    password_action = "preserved"
+    if req.clear_password:
+        password_action = "cleared"
+    elif req.password:
+        data["password_enc"] = base64.b64encode(
+            encryption.encrypt_text(req.password)
+        ).decode("ascii")
+        password_action = "replaced"
     elif existing.get("password_enc"):
         data["password_enc"] = existing["password_enc"]
     _set_json(db, "notification_settings", data)
@@ -113,7 +117,12 @@ def update_notifications(
         db,
         actor=str(user.id),
         action="settings.notifications.update",
-        details={"enabled": data["enabled"], "host": data["host"], "to_address": data["to_address"]},
+        details={
+            "enabled": data["enabled"],
+            "host": data["host"],
+            "to_address": data["to_address"],
+            "password_action": password_action,
+        },
         source_ip=request.client.host if request.client else None,
     )
     db.commit()

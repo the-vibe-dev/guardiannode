@@ -36,10 +36,11 @@ async def _read_upload_with_cap(image: UploadFile, limit: int = _MAX_SCREENSHOT_
     return b"".join(chunks)
 
 
-def _validate_image_bytes(image_bytes: bytes) -> None:
+def _validate_image_bytes(image_bytes: bytes) -> str:
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
-            if img.format not in {"JPEG", "PNG"}:
+            image_format = img.format
+            if image_format not in {"JPEG", "PNG"}:
                 raise HTTPException(400, "Screenshot must be JPEG or PNG")
             width, height = img.size
             if width <= 0 or height <= 0:
@@ -49,6 +50,7 @@ def _validate_image_bytes(image_bytes: bytes) -> None:
             if width * height > _MAX_SCREENSHOT_PIXELS:
                 raise HTTPException(400, "Screenshot pixel count is too large")
             img.verify()
+            return "image/jpeg" if image_format == "JPEG" else "image/png"
     except HTTPException:
         raise
     except (UnidentifiedImageError, OSError, ValueError):
@@ -227,7 +229,7 @@ async def ingest_screenshot(
         raise HTTPException(400, "Invalid age group")
     if capture_scope not in {"monitored_app", "visible_desktop", "browser_dom"}:
         raise HTTPException(400, "Invalid capture scope")
-    _validate_image_bytes(image_bytes)
+    mime_type = _validate_image_bytes(image_bytes)
 
     # Update device liveness now (don't wait for classification).
     device.last_seen = datetime.now(timezone.utc)
@@ -249,6 +251,7 @@ async def ingest_screenshot(
             "policy_version": policy_version,
             "collector_version": collector_version,
             "timestamp": timestamp,
+            "mime_type": mime_type,
             "source_ip": request.client.host if request.client else None,
         },
     )

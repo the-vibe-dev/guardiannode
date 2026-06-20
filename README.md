@@ -43,6 +43,11 @@ support, encrypted evidence storage, and a parent dashboard.
 > break during setup, or consume significant system resources. Do not rely on it
 > as the only child-safety measure. It is not an emergency service and is not a
 > substitute for parenting, communication, or professional support.
+>
+> **Supported in this alpha:** source-code developer preview and loopback
+> all-in-one testing by technically experienced users. Public Windows installer
+> recommendation, raw LAN deployments, and ordinary family deployment are not
+> yet supported.
 
 GuardianNode is for parents and guardians monitoring devices they own or
 administer for their own children. It is not stealthware, employee monitoring
@@ -53,19 +58,17 @@ visible through its tray/status UI and the backend is operated by the parent.
 
 ### All-in-one
 
-Run the Windows agent, backend, dashboard, and Ollama on one family PC. This is
-the simplest alpha test path and keeps traffic on loopback by default.
+Run the Windows agent, backend, dashboard, and Ollama on one family PC. In this
+alpha, this is the only recommended source-code test shape and the backend
+should stay bound to loopback.
 
 ### Separated
 
 Run the Windows child-device agent on the child's PC and run the backend,
-dashboard, and Ollama on a parent-owned Windows or Linux server on the same
-trusted LAN.
-
-Separated mode currently uses local-network HTTP unless you place GuardianNode
-behind TLS, Tailscale, WireGuard, or a trusted reverse proxy. Use single-machine
-mode or a trusted LAN/VPN for alpha testing. Built-in TLS/mTLS is planned. See
-[Secure LAN setup](docs/SECURE_LAN_SETUP.md).
+dashboard, and Ollama on a parent-owned Windows or Linux server. This is an
+advanced operator path only and must use a trusted VPN/TLS setup. Do not expose
+the backend directly on a raw LAN or the public internet. Built-in TLS/mTLS is
+planned. See [Secure LAN setup](docs/SECURE_LAN_SETUP.md).
 
 ## What It Monitors
 

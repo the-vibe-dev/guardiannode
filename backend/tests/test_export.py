@@ -63,17 +63,22 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
 
     r = client.post("/api/storage/export")
     assert r.status_code == 200
-    export_path = Path(r.json()["path"])
-    assert export_path.exists()
+    assert "path" not in r.json()
     export_id = r.json()["export_id"]
+    export_path = settings.data_dir / "exports" / f"{export_id}.gnexport"
+    assert export_path.exists()
     assert r.json()["download_url"] == f"/api/storage/exports/{export_id}/download"
 
     listed = client.get("/api/storage/exports")
     assert listed.status_code == 200
     assert listed.json()[0]["export_id"] == export_id
+    assert "path" not in listed.json()[0]
 
     downloaded = client.get(r.json()["download_url"])
     assert downloaded.status_code == 200
+    assert downloaded.headers["cache-control"] == "no-store, private"
+    assert downloaded.headers["pragma"] == "no-cache"
+    assert downloaded.headers["x-content-type-options"] == "nosniff"
     assert downloaded.content == export_path.read_bytes()
 
     # Decrypt the outer .gnexport and verify package contents.
@@ -87,6 +92,9 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["includes_evidence_blobs"] is True
         assert manifest["evidence_blob_count"] == 1
+        evidence_manifest = json.loads(zf.read("evidence_manifest.json"))
+        assert evidence_manifest[0]["blob_id"] == "blob1"
+        assert "encrypted_path" not in evidence_manifest[0]
         # The embedded blob is the exact ciphertext from disk and still decrypts.
         inner = zf.read("evidence/blob1.enc")
         assert encryption.decrypt_bytes(inner, aad=b"blob1") == b"fake-jpeg-bytes"
@@ -95,3 +103,8 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     assert deleted.status_code == 200
     assert not export_path.exists()
     assert client.get("/api/storage/exports").json() == []
+
+    audit = client.get("/api/audit").json()
+    export_rows = [row for row in audit if row["action"].startswith("storage.export")]
+    assert any(row["action"] == "storage.export.download" for row in export_rows)
+    assert all("path" not in (row.get("details") or {}) for row in export_rows)

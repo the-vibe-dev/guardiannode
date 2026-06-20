@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import threading
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,34 +16,93 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep
+from app import settings as settings_mod
+from app.api.deps import current_user, get_db_dep, require_recent_auth
 from app.db.models import Alert, AuditLog, EvidenceBlob, Event, RiskResult, User
 from app.services import encryption
 from app.services.audit import log_action
-from app.settings import settings
 
 router = APIRouter(prefix="/storage", tags=["storage"])
 
+_MAX_EXPORTS = 5
+_MAX_EXPORT_BYTES = 2 * 1024 * 1024 * 1024
+_MIN_FREE_BYTES = 1024 * 1024 * 1024
+_export_lock = threading.Lock()
+
 
 def _exports_dir() -> Path:
-    path = settings.data_dir / "exports"
+    path = settings_mod.settings.data_dir / "exports"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _cleanup_abandoned_exports() -> None:
+    root = _exports_dir()
+    for pattern in ("*.tmp", "*.partial", ".tmp/*.zip"):
+        for path in root.glob(pattern):
+            if path.is_file():
+                _quarantine_export_file(path)
+
+
+def _quarantine_export_file(path: Path) -> None:
+    quarantine = _exports_dir() / ".ignored-cleanup"
+    quarantine.mkdir(parents=True, exist_ok=True)
+    try:
+        path.replace(quarantine / path.name)
+    except OSError:
+        pass
 
 
 def _export_path(export_id: str) -> Path:
     if not export_id or not all(c.isalnum() for c in export_id):
         raise HTTPException(status_code=400, detail="Invalid export id")
-    path = _exports_dir() / f"{export_id}.gnexport"
-    if not path.is_file():
+    root = _exports_dir().resolve()
+    path = (root / f"{export_id}.gnexport").resolve(strict=False)
+    if path.parent != root:
+        raise HTTPException(status_code=400, detail="Invalid export id")
+    if path.is_symlink() or not path.is_file():
         raise HTTPException(status_code=404, detail="Export not found")
     return path
+
+
+def _final_export_path(export_id: str) -> Path:
+    root = _exports_dir().resolve()
+    path = (root / f"{export_id}.gnexport").resolve(strict=False)
+    if path.parent != root:
+        raise HTTPException(status_code=400, detail="Invalid export id")
+    return path
+
+
+def _fsync_path(path: Path) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _export_files() -> list[Path]:
+    root = _exports_dir()
+    return [p for p in root.glob("*.gnexport") if p.is_file() and not p.is_symlink()]
+
+
+def _ensure_export_capacity() -> None:
+    exports = _export_files()
+    if len(exports) >= _MAX_EXPORTS:
+        raise HTTPException(409, f"Export limit reached ({_MAX_EXPORTS}); delete an old export first")
+    total = sum(p.stat().st_size for p in exports)
+    if total >= _MAX_EXPORT_BYTES:
+        raise HTTPException(409, "Export storage quota reached; delete an old export first")
+    if shutil.disk_usage(_exports_dir()).free < _MIN_FREE_BYTES:
+        raise HTTPException(507, "Not enough free disk space for export")
 
 
 class ExportDTO(BaseModel):
     export_id: str
     filename: str
-    path: str
     size_bytes: int
     created_at: datetime
     download_url: str
@@ -68,9 +129,10 @@ def storage_overview(
 
 @router.get("/exports", response_model=list[ExportDTO])
 def list_exports(_: User = Depends(current_user)):
+    _cleanup_abandoned_exports()
     exports: list[ExportDTO] = []
-    for path in sorted(_exports_dir().glob("*.gnexport"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if not path.is_file():
+    for path in sorted(_export_files(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not path.is_file() or path.is_symlink():
             continue
         export_id = path.stem
         stat = path.stat()
@@ -78,7 +140,6 @@ def list_exports(_: User = Depends(current_user)):
             ExportDTO(
                 export_id=export_id,
                 filename=path.name,
-                path=str(path),
                 size_bytes=stat.st_size,
                 created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
                 download_url=f"/api/storage/exports/{export_id}/download",
@@ -88,13 +149,32 @@ def list_exports(_: User = Depends(current_user)):
 
 
 @router.get("/exports/{export_id}/download")
-def download_export(export_id: str, _: User = Depends(current_user)):
+def download_export(
+    export_id: str,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
+):
     path = _export_path(export_id)
-    return FileResponse(
+    log_action(
+        db,
+        actor=str(user.id),
+        action="storage.export.download",
+        target=export_id,
+        details={"size_bytes": path.stat().st_size},
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    response = FileResponse(
         path,
         media_type="application/octet-stream",
         filename=path.name,
     )
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @router.delete("/exports/{export_id}")
@@ -103,6 +183,7 @@ def delete_export(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     path = _export_path(export_id)
     size_bytes = path.stat().st_size
@@ -115,7 +196,7 @@ def delete_export(
         actor=str(user.id),
         action="storage.export.delete",
         target=export_id,
-        details={"path": str(path), "size_bytes": size_bytes},
+        details={"size_bytes": size_bytes},
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
@@ -140,6 +221,19 @@ def _row_dict(row) -> dict:
     return data
 
 
+def _evidence_manifest(row: EvidenceBlob) -> dict:
+    return {
+        "blob_id": row.blob_id,
+        "event_id": row.event_id,
+        "kind": row.kind,
+        "mime_type": row.mime_type,
+        "size_bytes": row.size_bytes,
+        "sha256_plain": row.sha256_plain,
+        "key_version": row.key_version,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
 def _write_jsonl(zf: zipfile.ZipFile, name: str, rows) -> None:
     with zf.open(name, "w") as out:
         for row in rows.yield_per(500):
@@ -159,11 +253,24 @@ def _write_json_array(zf: zipfile.ZipFile, name: str, rows) -> None:
         out.write(b"\n]\n")
 
 
+def _write_evidence_manifest(zf: zipfile.ZipFile, rows) -> None:
+    first = True
+    with zf.open("evidence_manifest.json", "w") as out:
+        out.write(b"[\n")
+        for row in rows.yield_per(500):
+            if not first:
+                out.write(b",\n")
+            out.write(json.dumps(_evidence_manifest(row), separators=(",", ":")).encode("utf-8"))
+            first = False
+        out.write(b"\n]\n")
+
+
 @router.post("/export")
 def export_storage(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     """Full local evidence export.
 
@@ -172,49 +279,60 @@ def export_storage(
     written to a temporary file, then encrypted in chunks into a `.gnexport`.
     Evidence stays local and decryptable only with this server's master key.
     """
-    export_id = str(ULID())
-    missing_files: list[str] = []
-    dest = _exports_dir() / f"{export_id}.gnexport"
-    tmp_dir = _exports_dir() / ".tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_zip = tmp_dir / f"{export_id}.zip"
-    included_blob_count = 0
+    if not _export_lock.acquire(blocking=False):
+        raise HTTPException(409, "Another export is already running")
     try:
-        with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            _write_jsonl(zf, "alerts.jsonl", db.query(Alert))
-            _write_jsonl(zf, "events.jsonl", db.query(Event))
-            _write_jsonl(zf, "risk_results.jsonl", db.query(RiskResult))
-            _write_jsonl(zf, "audit_logs.jsonl", db.query(AuditLog))
-            _write_json_array(zf, "evidence_manifest.json", db.query(EvidenceBlob))
-            for blob in db.query(EvidenceBlob).yield_per(100):
-                src = Path(blob.encrypted_path)
-                if not src.is_file():
-                    missing_files.append(blob.blob_id)
-                    continue
-                # Stored ciphertext is copied as-is; aad = blob_id, key = master key.
-                zf.write(src, arcname=f"evidence/{blob.blob_id}.enc")
-                included_blob_count += 1
-            manifest = {
-                "export_id": export_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "format": "guardiannode-full-export-v3",
-                "outer_encryption": "chunked-aes-256-gcm",
-                "includes_evidence_blobs": True,
-                "evidence_blob_count": included_blob_count,
-                "evidence_blobs_missing": missing_files,
-                "note": (
-                    "evidence/*.enc files are AES-256-GCM ciphertext exactly as stored; "
-                    "decryption requires this server's master key (keys/master.key) "
-                    "with the blob_id as associated data."
-                ),
-            }
-            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
-        encryption.encrypt_file_to_disk(tmp_zip, dest, aad=export_id.encode("ascii"))
-    finally:
+        _cleanup_abandoned_exports()
+        _ensure_export_capacity()
+        export_id = str(ULID())
+        missing_files: list[str] = []
+        dest = _final_export_path(export_id)
+        partial = dest.with_suffix(dest.suffix + ".partial")
+        tmp_dir = _exports_dir() / ".tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_zip = tmp_dir / f"{export_id}.zip"
+        included_blob_count = 0
         try:
-            tmp_zip.unlink(missing_ok=True)
-        except OSError:
-            pass
+            with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                _write_jsonl(zf, "alerts.jsonl", db.query(Alert))
+                _write_jsonl(zf, "events.jsonl", db.query(Event))
+                _write_jsonl(zf, "risk_results.jsonl", db.query(RiskResult))
+                _write_jsonl(zf, "audit_logs.jsonl", db.query(AuditLog))
+                _write_evidence_manifest(zf, db.query(EvidenceBlob))
+                for blob in db.query(EvidenceBlob).yield_per(100):
+                    src = Path(blob.encrypted_path).resolve(strict=False)
+                    if src.is_symlink() or not src.is_file():
+                        missing_files.append(blob.blob_id)
+                        continue
+                    # Stored ciphertext is copied as-is; aad = blob_id, key = master key.
+                    zf.write(src, arcname=f"evidence/{blob.blob_id}.enc")
+                    included_blob_count += 1
+                manifest = {
+                    "export_id": export_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "format": "guardiannode-full-export-v3",
+                    "outer_encryption": "chunked-aes-256-gcm",
+                    "includes_evidence_blobs": True,
+                    "evidence_blob_count": included_blob_count,
+                    "evidence_blobs_missing": missing_files,
+                    "note": (
+                        "evidence/*.enc files are AES-256-GCM ciphertext exactly as stored; "
+                        "decryption requires this server's master key (keys/master.key) "
+                        "with the blob_id as associated data."
+                    ),
+                }
+                zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+            _fsync_path(tmp_zip)
+            encryption.encrypt_file_to_disk(tmp_zip, partial, aad=export_id.encode("ascii"))
+            _fsync_path(partial)
+            os.replace(partial, dest)
+            _fsync_path(dest.parent)
+        finally:
+            for path in (tmp_zip, partial):
+                if path.exists():
+                    _quarantine_export_file(path)
+    finally:
+        _export_lock.release()
     if os.name != "nt":
         try:
             os.chmod(dest, 0o600)
@@ -225,14 +343,13 @@ def export_storage(
         actor=str(user.id),
         action="storage.export",
         target=export_id,
-        details={"path": str(dest), "size_bytes": dest.stat().st_size},
+        details={"size_bytes": dest.stat().st_size},
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
     return {
         "ok": True,
         "export_id": export_id,
-        "path": str(dest),
         "download_url": f"/api/storage/exports/{export_id}/download",
         "size_bytes": dest.stat().st_size,
     }
@@ -250,6 +367,7 @@ def wipe_storage(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     from app.services import purge
 

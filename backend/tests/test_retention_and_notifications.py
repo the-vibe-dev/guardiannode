@@ -119,6 +119,37 @@ def test_run_test_no_channels_configured():
     assert results == [{"channel": "none", "ok": False, "detail": "no channels configured"}]
 
 
+def test_webhook_validation_rejects_private_dns(monkeypatch):
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(None, None, None, "", ("192.168.1.10", 443))]
+
+    monkeypatch.setattr(notifications.socket, "getaddrinfo", fake_getaddrinfo)
+
+    ok, detail = notifications._validate_webhook_url("https://notify.example.test/hook")
+    assert ok is False
+    assert "private/internal" in detail
+
+
+def test_webhook_validation_rejects_userinfo_and_fragment():
+    ok, detail = notifications._validate_webhook_url("https://user:pass@example.test/hook")
+    assert ok is False
+    assert "userinfo" in detail
+
+    ok, detail = notifications._validate_webhook_url("https://example.test/hook#token")
+    assert ok is False
+    assert "fragment" in detail
+
+
+def test_webhook_validation_allows_public_dns(monkeypatch):
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(None, None, None, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(notifications.socket, "getaddrinfo", fake_getaddrinfo)
+
+    ok, detail = notifications._validate_webhook_url("https://notify.example.test/hook")
+    assert (ok, detail) == (True, "ok")
+
+
 def test_dispatch_records_dashboard_email_and_webhook(db_session, monkeypatch):
     s = db_session
     monkeypatch.setattr(notifications, "_send_email", lambda cfg, subj, body: (True, "ok"))

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -25,6 +26,17 @@ def current_user(request: Request, db: Session = Depends(get_db_dep)) -> User:
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+def require_recent_auth(request: Request, _: User = Depends(current_user)) -> None:
+    """Require a fresh parent authentication for high-impact browser actions."""
+    ts = request.session.get("reauth_at") or request.session.get("login_at")
+    try:
+        authenticated_at = float(ts)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="Recent authentication required")
+    if time.time() - authenticated_at > 15 * 60:
+        raise HTTPException(status_code=403, detail="Recent authentication required")
 
 
 def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Device:

@@ -23,7 +23,7 @@ The source builds on Linux (for dev/testing), but production deployment is Windo
 - `src/screenshot_capture.py` — mss-based capture
 - `src/ocr_engine.py` — pluggable OCR
 - `src/redactor.py` — best-effort text filtering helpers where used
-- `src/event_queue.py` — offline queue
+- in-memory retry queue — current alpha buffering; durable encrypted queue is planned
 - `src/backend_client.py` — HTTP client to backend
 - `src/tray_app.py` — tray icon + pause UX
 - `src/watchdog.py` — paired watchdog

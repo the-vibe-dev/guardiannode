@@ -1,6 +1,8 @@
 # Install GuardianNode on one PC
 
-If your family has only one PC — or if you want a simpler setup — install everything on the same machine your child uses. The parent dashboard will be locked behind your password.
+This guide describes the all-in-one alpha test shape: everything runs on the
+same machine and the backend stays on loopback. GuardianNode 0.1.0-alpha.1 is a
+source-code developer preview, not a recommended family installer release.
 
 ## Before you start
 
@@ -11,13 +13,15 @@ You'll need:
 - About 5–10 GB free disk space (depends on the AI model size)
 - Admin access on the PC
 
-## Step 1 — Download
+## Step 1 — Get a test build
 
-Go to the [GuardianNode releases page](https://github.com/the-vibe-dev/guardiannode/releases) and download the latest `GuardianNodeChildSetup-0.1.0-alpha.1.exe`.
+Build from source or use a maintainer-provided alpha test artifact. Do not treat
+unsigned Windows artifacts as recommended family installers until the Windows
+release validation matrix is complete.
 
 ## Step 2 — Run the installer
 
-Double-click `GuardianNodeChildSetup-0.1.0-alpha.1.exe`.
+Double-click the alpha test artifact you built or were given for validation.
 
 **If Windows says "Windows protected your PC":** That's expected for unsigned
 alpha builds. See [When Windows says "Protected your PC"](when-windows-says-protected-your-pc.md)

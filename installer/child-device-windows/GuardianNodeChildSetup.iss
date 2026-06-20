@@ -358,7 +358,7 @@ begin
   ServerConnectionPage := CreateInputQueryPage(ChildProfilePage.ID,
     'Connect to GuardianNode server',
     'Enter the pairing code shown on your parent dashboard (Devices > Add device).',
-    'Leave the server URL blank to search your home network automatically.');
+    'Enter the exact server URL from the parent dashboard or setup guide.');
   ServerConnectionPage.Add('Server URL (e.g. http://192.168.1.42:8787):', False);
   ServerConnectionPage.Add('6-digit pairing code:', False);
   ServerConnectionPage.Values[0] := ServerUrlParam;

@@ -28,7 +28,13 @@ JSON Schema files live in `shared/schemas/`. Pydantic equivalents in `shared/pyt
 }
 ```
 
-`source_type` enum: `ocr`, `browser`, `clipboard`, `file`, `accessibility`, `image`.
+`source_type` values are tracked by implementation status:
+
+| Status | Values | Notes |
+|---|---|---|
+| Implemented | `ocr`, `image` | Text events and screenshot/image events are accepted by the backend today. |
+| Experimental / integration-specific | `browser` | Supported by schema/API paths where a collector provides browser context. |
+| Reserved | `clipboard`, `file`, `accessibility` | Reserved for future collectors; the Windows alpha agent does not ship these collection paths. |
 
 ## RiskResult
 

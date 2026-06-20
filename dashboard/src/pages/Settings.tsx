@@ -78,6 +78,17 @@ export default function Settings() {
     }
   }
 
+  function notificationPayload(clearPassword = false) {
+    const { _provider, password, ...n } = notifications;
+    const payload: any = { ...n };
+    if (clearPassword) {
+      payload.clear_password = true;
+    } else if (password && password.trim()) {
+      payload.password = password;
+    }
+    return payload;
+  }
+
   if (!notifications || !retention || !storage) {
     return <div className="text-gray-500">Loading settings…</div>;
   }
@@ -162,12 +173,24 @@ export default function Settings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => run("save-notifications", () => { const { _provider, ...n } = notifications; return api.updateNotificationSettings(n); }, "Notification settings saved.")}
+            onClick={() => run("save-notifications", () => api.updateNotificationSettings(notificationPayload()), "Notification settings saved.")}
             disabled={busy !== null}
             className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
           >
             Save notifications
           </button>
+          {notifications.password_configured && (
+            <button
+              onClick={() => {
+                if (!window.confirm("Remove the saved SMTP password?")) return;
+                run("clear-password", () => api.updateNotificationSettings(notificationPayload(true)), "Saved SMTP password removed.");
+              }}
+              disabled={busy !== null}
+              className="bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 border border-red-200 px-3 py-2 rounded text-sm"
+            >
+              Remove saved password
+            </button>
+          )}
           <button
             onClick={() => run("test-notifications", api.testNotificationSettings, "Test notification attempted; see audit for result.")}
             disabled={busy !== null}
@@ -222,14 +245,17 @@ export default function Settings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => run("export", api.exportStorage, (result) => `Encrypted .gnexport created at ${result.path}.`)}
+            onClick={() => run("export", api.exportStorage, "Encrypted .gnexport created.")}
             disabled={busy !== null}
             className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
           >
             Export encrypted .gnexport
           </button>
           <button
-            onClick={() => run("wipe-screenshots", () => api.wipeStorage({ screenshots: true }), "Screenshots wiped.")}
+            onClick={() => {
+              if (!window.confirm("Wipe retained screenshots? This cannot be undone.")) return;
+              run("wipe-screenshots", () => api.wipeStorage({ screenshots: true }), "Screenshots wiped.");
+            }}
             disabled={busy !== null}
             className="bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 border border-red-200 px-3 py-2 rounded text-sm"
           >
@@ -263,7 +289,10 @@ export default function Settings() {
                           Download
                         </a>
                         <button
-                          onClick={() => run("delete-export", () => api.deleteExport(item.export_id), "Export deleted.")}
+                          onClick={() => {
+                            if (!window.confirm("Delete this export?")) return;
+                            run("delete-export", () => api.deleteExport(item.export_id), "Export deleted.");
+                          }}
                           disabled={busy !== null}
                           className="bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 border border-red-200 px-2 py-1 rounded text-xs"
                         >

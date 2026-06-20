@@ -31,6 +31,8 @@ export const api = {
     request<{ ok: boolean }>("/auth/setup", { method: "POST", body: JSON.stringify(body) }),
   login: (password: string) =>
     request<{ display_name: string; role: string }>("/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
+  reauth: (password: string) =>
+    request<{ ok: boolean }>("/auth/reauth", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   me: () => request<{ display_name: string; role: string }>("/auth/me"),
   recoveryReset: (recovery_code: string, new_password: string) =>

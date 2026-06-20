@@ -67,6 +67,7 @@ nav:
       - What this cannot stop: PARENT_GUIDES/what-this-cannot-stop.md
   - How It Works:
       - Architecture: ARCHITECTURE.md
+      - Feature matrix: FEATURE_MATRIX.md
       - Text classifier: CLASSIFIER.md
       - Image safety: IMAGE_SAFETY.md
       - OCR pipeline: OCR.md

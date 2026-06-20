@@ -1,6 +1,6 @@
 # Image Safety
 
-Detects nudity, gore, weapons, drugs, self-harm imagery, hate symbols, private info visible on screen, suspicious QR codes, phishing screenshots.
+Detects nudity, gore, weapons, drugs, self-harm imagery, hate symbols, private info visible on screen, phishing screenshots, and other visual risk signals reported by the configured model. QR-related categories are model/rules signals in this alpha; GuardianNode does not ship a dedicated QR decoder yet.
 
 ## Pipeline
 

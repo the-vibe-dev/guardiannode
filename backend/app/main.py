@@ -171,6 +171,7 @@ async def lifespan(app: FastAPI):
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _patch_schema(engine)
+    storage_api._cleanup_abandoned_exports()
     from app.db.models import User
     from app.db.session import get_sessionmaker
     s = get_sessionmaker()()

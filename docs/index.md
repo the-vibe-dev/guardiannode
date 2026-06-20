@@ -76,9 +76,14 @@ No GPU in the kid's PC? Use the [two-machine setup](PARENT_GUIDES/install-server
 
 ## Install
 
-**Everything on one Windows PC:**
+**Alpha scope:** GuardianNode 0.1.0-alpha.1 is a source-code developer preview.
+Loopback all-in-one testing is the safest supported shape. Public Windows
+installer recommendation and ordinary family deployment are blocked until the
+Windows release validation gates pass.
 
-1. Download `GuardianNodeChildSetup-0.1.0-alpha.1.exe` from the [latest release](https://github.com/the-vibe-dev/guardiannode/releases)
+**Everything on one Windows PC from source or a maintainer-built test artifact:**
+
+1. Build from source or use a maintainer-provided alpha test artifact.
 2. Pick **"Install everything on this PC"** — it detects your hardware and pulls the AI model (5–20 min)
 3. The dashboard opens; create your parent password and **write down the 12-word recovery code**
 

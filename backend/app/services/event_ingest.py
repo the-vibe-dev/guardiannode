@@ -55,11 +55,14 @@ async def ingest_event(
         metadata["redaction"] = red_summary
         metadata["redaction_summary"] = red_summary
 
-    # Resolve the child profile the same way screenshot ingest does (payload →
-    # device assignment → default), so watch phrases and age policy match.
+    device = session.get(Device, device_id)
+
+    # Resolve the child profile the same way screenshot ingest does. The
+    # backend assignment is authoritative; device payload profile/age fields are
+    # legacy hints only and may not select another child's policy.
     resolved = resolve_profile(
         session,
-        device_id=device_id,
+        device=device,
         payload_profile_id=payload.get("profile_id"),
         payload_age_group=payload.get("age_group") or payload.get("_age_group"),
     )
@@ -84,7 +87,6 @@ async def ingest_event(
     session.add(event)
 
     # Update device last_seen
-    device = session.get(Device, device_id)
     if device is not None:
         device.last_seen = datetime.now(timezone.utc)
         device.status = "online"
