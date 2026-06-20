@@ -6,16 +6,14 @@ Covers two items from the open-source readiness Test Plan:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import pytest
-
-from app.db.models import Alert, AuditLog, EvidenceBlob, Event, NotificationLog, RiskResult
+from app.db.models import Alert, AuditLog, Event, EvidenceBlob, NotificationLog
 from app.services import notifications, retention
 
 
 def _old(days: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 def test_run_cleanup_removes_expired_rows(db_session, tmp_path):
@@ -130,6 +128,20 @@ def test_webhook_validation_rejects_private_dns(monkeypatch):
     assert "private/internal" in detail
 
 
+def test_webhook_validation_rejects_mixed_public_private_dns(monkeypatch):
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [
+            (None, None, None, "", ("93.184.216.34", 443)),
+            (None, None, None, "", ("10.0.0.8", 443)),
+        ]
+
+    monkeypatch.setattr(notifications.socket, "getaddrinfo", fake_getaddrinfo)
+
+    ok, detail = notifications._validate_webhook_url("https://notify.example.test/hook")
+    assert ok is False
+    assert "private/internal" in detail
+
+
 def test_webhook_validation_rejects_userinfo_and_fragment():
     ok, detail = notifications._validate_webhook_url("https://user:pass@example.test/hook")
     assert ok is False
@@ -138,6 +150,12 @@ def test_webhook_validation_rejects_userinfo_and_fragment():
     ok, detail = notifications._validate_webhook_url("https://example.test/hook#token")
     assert ok is False
     assert "fragment" in detail
+
+
+def test_webhook_validation_rejects_metadata_host_with_trailing_dot():
+    ok, detail = notifications._validate_webhook_url("http://metadata.google.internal./latest", allow_private=True)
+    assert ok is False
+    assert "metadata" in detail
 
 
 def test_webhook_validation_allows_public_dns(monkeypatch):
@@ -150,13 +168,82 @@ def test_webhook_validation_allows_public_dns(monkeypatch):
     assert (ok, detail) == (True, "ok")
 
 
+def test_send_webhook_connects_to_validated_address_with_original_host(monkeypatch):
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(None, None, None, "", ("93.184.216.34", 80))]
+
+    class FakeResponse:
+        status = 204
+
+        def read(self, limit):
+            assert limit == 1024
+            return b""
+
+    class FakeConnection:
+        instances = []
+
+        def __init__(self, host, port, timeout):
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+            self.closed = False
+            FakeConnection.instances.append(self)
+
+        def request(self, method, path, body=None, headers=None):
+            self.method = method
+            self.path = path
+            self.body = body
+            self.headers = headers or {}
+
+        def getresponse(self):
+            return FakeResponse()
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(notifications.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(notifications.http_client, "HTTPConnection", FakeConnection)
+
+    ok, detail = notifications._send_webhook(
+        "http://notify.example.test:8080/hook?channel=alerts",
+        {"title": "GuardianNode"},
+    )
+
+    assert (ok, detail) == (True, "ok")
+    conn = FakeConnection.instances[0]
+    assert conn.host == "93.184.216.34"
+    assert conn.port == 8080
+    assert conn.method == "POST"
+    assert conn.path == "/hook?channel=alerts"
+    assert conn.headers["Host"] == "notify.example.test:8080"
+    assert conn.headers["Content-Type"] == "application/json"
+    assert conn.closed is True
+
+
+def test_send_webhook_does_not_follow_redirects(monkeypatch):
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(None, None, None, "", ("93.184.216.34", 80))]
+
+    def fake_post_webhook(*_args, **_kwargs):
+        return 302
+
+    monkeypatch.setattr(notifications.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(notifications, "_post_webhook", fake_post_webhook)
+
+    ok, detail = notifications._send_webhook("http://notify.example.test/hook", {"title": "GuardianNode"})
+    assert ok is False
+    assert "redirects are not followed" in detail
+
+
 def test_dispatch_records_dashboard_email_and_webhook(db_session, monkeypatch):
     s = db_session
     monkeypatch.setattr(notifications, "_send_email", lambda cfg, subj, body: (True, "ok"))
     monkeypatch.setattr(notifications, "_send_webhook", lambda url, payload, **_kwargs: (True, "ok"))
 
+    import base64
+    import json
+
     from app.db.models import Setting
-    import base64, json
     from app.services import encryption
 
     cfg = {
