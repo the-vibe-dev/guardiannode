@@ -16,11 +16,21 @@
 
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.13.5
     container_name: guardiannode_ollama
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     # Uncomment for NVIDIA GPU:
     # deploy:
     #   resources:
@@ -37,7 +47,14 @@ services:
     container_name: guardiannode_backend
     restart: unless-stopped
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - GUARDIANNODE_OLLAMA_URL=http://ollama:11434
       - GUARDIANNODE_BIND_HOST=0.0.0.0
@@ -47,6 +64,10 @@ services:
       - "127.0.0.1:8787:8787"
     volumes:
       - gn_data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    pids_limit: 512
+    mem_limit: 2g
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/health"]
       interval: 30s

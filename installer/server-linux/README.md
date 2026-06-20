@@ -38,7 +38,11 @@ docker compose up -d
 ```
 
 What it does:
-- Spins up `ollama/ollama` for the LLM
+- Spins up `ollama/ollama:0.13.5` for the LLM
+- Builds a backend image from explicit Node/Python base-image tags and runs it
+  as non-root UID/GID `10001:10001`
+- Runs the backend with `read_only: true`, dropped Linux capabilities,
+  `no-new-privileges`, a bounded `/tmp` tmpfs, a healthcheck, and resource hints
 - Spins up a `guardiannode_backend` container exposing port 8787 on loopback
 - Persists state in two Docker volumes: `ollama_models` and `gn_data`
 
@@ -51,8 +55,16 @@ networking on a Linux host after setup, use the host-network override:
 docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 ```
 
+The host-network override uses Docker Compose's `!reset` tag and requires
+Docker Compose v2.24 or newer. Host networking exposes the backend according to
+`GUARDIANNODE_BIND_HOST` and the host firewall, so use it only on a trusted
+LAN/VPN after first-run setup.
+
 Do not expose the backend directly to the public internet. Use a trusted LAN,
 Tailscale/WireGuard, or a reverse proxy with TLS and access controls.
+
+Alpha images are version-pinned by tag, not digest. Before a stable release,
+publish digest-pinned images plus SBOM and provenance attestations.
 
 For NVIDIA GPU support: install `nvidia-container-toolkit` on the host and uncomment the `deploy.resources` block in `docker-compose.yml`.
 

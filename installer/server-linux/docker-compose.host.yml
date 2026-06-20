@@ -4,6 +4,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 #
 # Do not expose the GuardianNode backend directly to the public internet.
+# Requires Docker Compose v2.24+ for the custom !reset tag used below.
 
 services:
   backend:

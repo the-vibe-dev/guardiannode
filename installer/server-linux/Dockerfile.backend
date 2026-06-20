@@ -2,7 +2,7 @@
 # Multi-stage: build dashboard with Node, install backend Python deps, run with uvicorn.
 
 # ---- Stage 1: build dashboard ----
-FROM node:22-alpine AS dashboard-build
+FROM node:22.21.1-alpine3.22 AS dashboard-build
 WORKDIR /build
 COPY dashboard/package*.json ./dashboard/
 RUN cd dashboard && npm ci --no-audit --no-fund
@@ -10,10 +10,12 @@ COPY dashboard/ ./dashboard/
 RUN cd dashboard && npm run build
 
 # ---- Stage 2: Python runtime ----
-FROM python:3.12-slim
+FROM python:3.12.12-slim-bookworm
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates sqlite3 && \
-    rm -rf /var/lib/apt/lists/*
+    find /var/lib/apt/lists -mindepth 1 -delete && \
+    groupadd --system --gid 10001 guardiannode && \
+    useradd --system --uid 10001 --gid guardiannode --home-dir /nonexistent --shell /usr/sbin/nologin guardiannode
 
 WORKDIR /app
 COPY backend/pyproject.toml backend/README.md ./backend/
@@ -27,6 +29,11 @@ COPY --from=dashboard-build /build/dashboard/dist /app/backend/app/static
 ENV GUARDIANNODE_DATA_DIR=/data
 ENV GUARDIANNODE_BIND_HOST=0.0.0.0
 ENV GUARDIANNODE_BIND_PORT=8787
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN mkdir -p /data && chown -R guardiannode:guardiannode /app /data
+USER 10001:10001
 
 VOLUME ["/data"]
 EXPOSE 8787
