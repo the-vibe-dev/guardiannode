@@ -58,11 +58,13 @@ Setup. The output is `GuardianNodeChildSetup-<version>.exe`.
 For separated installs, the installer can be scripted with:
 
 ```cmd
-GuardianNodeChildSetup-0.1.0-alpha.1.exe /VERYSILENT /MODE=separated /SERVERURL=http://192.168.1.42:8787 /PAIRCODE=506755
+GuardianNodeChildSetup-0.1.0-alpha.1.exe /VERYSILENT /MODE=child /SERVERURL=http://192.168.1.42:8787 /PAIRCODE=506755
 ```
 
-The pairing code must be generated from the parent dashboard first. Codes expire
-and are one-time use.
+Silent child installs require `/MODE=child`, an explicit `http://` or `https://`
+server URL, and a six-digit pairing code generated from the parent dashboard.
+Codes expire and are one-time use. Silent all-in-one installs use
+`/MODE=allinone` and must not include `/SERVERURL` or `/PAIRCODE`.
 
 ## Build installers from Linux
 

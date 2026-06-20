@@ -254,8 +254,17 @@ begin
   Exec(ExpandConstant(ExeName), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+function ValidateInstallInputs(var ErrorMessage: String): Boolean; forward;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ErrorMessage: String;
 begin
+  if not ValidateInstallInputs(ErrorMessage) then begin
+    Result := ErrorMessage;
+    Exit;
+  end;
+
   // Free locked binaries before the file-copy stage so upgrades don't roll back
   // with "file in use". Stop BOTH watchdogs first (they revive each other), then
   // the legacy agent service, the scheduled tasks, and finally the processes.
@@ -293,6 +302,212 @@ end;
 function InstallerParam(Name: String): String;
 begin
   Result := Trim(ExpandConstant('{param:' + Name + '|}'));
+end;
+
+function HasOnlyAsciiDigits(Value: String; ExpectedLength: Integer): Boolean;
+var
+  I: Integer;
+begin
+  Result := Length(Value) = ExpectedLength;
+  if not Result then
+    Exit;
+  for I := 1 to Length(Value) do begin
+    if (Ord(Value[I]) < Ord('0')) or (Ord(Value[I]) > Ord('9')) then begin
+      Result := False;
+      Exit;
+    end;
+  end;
+end;
+
+function ContainsAny(Value, BadChars: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to Length(BadChars) do begin
+    if Pos(Copy(BadChars, I, 1), Value) > 0 then begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function IsValidHostname(Host: String): Boolean;
+var
+  I: Integer;
+  Ch: Char;
+begin
+  Result := False;
+  if Host = '' then
+    Exit;
+  if (Host[1] = '-') or (Host[Length(Host)] = '-') or
+     (Host[1] = '.') or (Host[Length(Host)] = '.') then
+    Exit;
+  for I := 1 to Length(Host) do begin
+    Ch := Host[I];
+    if not (((Ch >= 'A') and (Ch <= 'Z')) or
+            ((Ch >= 'a') and (Ch <= 'z')) or
+            ((Ch >= '0') and (Ch <= '9')) or
+            (Ch = '.') or (Ch = '-')) then
+      Exit;
+  end;
+  Result := True;
+end;
+
+function IsValidIpv6Literal(Host: String): Boolean;
+var
+  I: Integer;
+  Ch: Char;
+begin
+  Result := False;
+  if (Host = '') or (Pos(':', Host) = 0) then
+    Exit;
+  for I := 1 to Length(Host) do begin
+    Ch := Host[I];
+    if not (((Ch >= 'A') and (Ch <= 'F')) or
+            ((Ch >= 'a') and (Ch <= 'f')) or
+            ((Ch >= '0') and (Ch <= '9')) or
+            (Ch = ':') or (Ch = '.')) then
+      Exit;
+  end;
+  Result := True;
+end;
+
+function IsValidPort(PortText: String): Boolean;
+var
+  Port: Integer;
+begin
+  Result := False;
+  if not HasOnlyAsciiDigits(PortText, Length(PortText)) then
+    Exit;
+  Port := StrToIntDef(PortText, 0);
+  Result := (Port >= 1) and (Port <= 65535);
+end;
+
+function IsValidServerUrl(Url: String): Boolean;
+var
+  Rest, Host, PortText: String;
+  SlashPos, BracketPos, ColonPos: Integer;
+begin
+  Result := False;
+  Url := Trim(Url);
+  if Url = '' then
+    Exit;
+  if ContainsAny(Url, ' "'#9#10#13) or (Pos('@', Url) > 0) or
+     (Pos('#', Url) > 0) or (Pos('?', Url) > 0) then
+    Exit;
+  if Copy(Lowercase(Url), 1, 7) = 'http://' then
+    Rest := Copy(Url, 8, Length(Url))
+  else if Copy(Lowercase(Url), 1, 8) = 'https://' then
+    Rest := Copy(Url, 9, Length(Url))
+  else
+    Exit;
+
+  SlashPos := Pos('/', Rest);
+  if SlashPos > 0 then begin
+    if SlashPos <> Length(Rest) then
+      Exit;
+    Rest := Copy(Rest, 1, SlashPos - 1);
+  end;
+  if Rest = '' then
+    Exit;
+
+  if Rest[1] = '[' then begin
+    BracketPos := Pos(']', Rest);
+    if BracketPos <= 2 then
+      Exit;
+    Host := Copy(Rest, 2, BracketPos - 2);
+    if not IsValidIpv6Literal(Host) then
+      Exit;
+    if BracketPos < Length(Rest) then begin
+      if Rest[BracketPos + 1] <> ':' then
+        Exit;
+      PortText := Copy(Rest, BracketPos + 2, Length(Rest));
+      if not IsValidPort(PortText) then
+        Exit;
+    end;
+  end else begin
+    ColonPos := Pos(':', Rest);
+    if ColonPos > 0 then begin
+      Host := Copy(Rest, 1, ColonPos - 1);
+      PortText := Copy(Rest, ColonPos + 1, Length(Rest));
+      if not IsValidPort(PortText) then
+        Exit;
+    end else begin
+      Host := Rest;
+    end;
+    if (Pos(':', Host) > 0) or (not IsValidHostname(Host)) then
+      Exit;
+  end;
+
+  Result := True;
+end;
+
+function JsonEscape(Value: String): String;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 1 to Length(Value) do begin
+    if Value[I] = '\' then
+      Result := Result + '\\'
+    else if Value[I] = '"' then
+      Result := Result + '\"'
+    else
+      Result := Result + Value[I];
+  end;
+end;
+
+function ValidateInstallInputs(var ErrorMessage: String): Boolean;
+var
+  Mode, ServerUrl, PairCode: String;
+begin
+  Result := False;
+  ErrorMessage := '';
+  Mode := Lowercase(InstallerParam('MODE'));
+  ServerUrl := Trim(ServerConnectionPage.Values[0]);
+  PairCode := Trim(ServerConnectionPage.Values[1]);
+
+  if Mode = '' then begin
+    if WizardSilent() then begin
+      ErrorMessage := 'Silent install requires /MODE=allinone or /MODE=child.';
+      Exit;
+    end;
+    if ModePage.SelectedValueIndex = 0 then
+      Mode := 'allinone'
+    else
+      Mode := 'child';
+  end;
+
+  if (Mode <> 'allinone') and (Mode <> 'child') then begin
+    if Mode = 'server' then
+      ErrorMessage := 'Use GuardianNodeServerSetup for /MODE=server installs.'
+    else
+      ErrorMessage := 'Invalid /MODE. Use /MODE=allinone or /MODE=child.';
+    Exit;
+  end;
+
+  if Mode = 'child' then begin
+    if ServerUrl = '' then begin
+      ErrorMessage := 'Child mode requires /SERVERURL with the trusted LAN/VPN GuardianNode server URL.';
+      Exit;
+    end;
+    if not IsValidServerUrl(ServerUrl) then begin
+      ErrorMessage := 'Server URL must be http:// or https:// with a valid host, optional port, no credentials, and no fragment/query.';
+      Exit;
+    end;
+    if not HasOnlyAsciiDigits(PairCode, 6) then begin
+      ErrorMessage := 'Pairing code must be exactly six ASCII digits.';
+      Exit;
+    end;
+  end else begin
+    if (ServerUrl <> '') or (PairCode <> '') then begin
+      ErrorMessage := '/SERVERURL and /PAIRCODE are only valid with /MODE=child.';
+      Exit;
+    end;
+  end;
+
+  Result := True;
 end;
 
 function GetDashboardUrl(Param: String): String;
@@ -341,8 +556,7 @@ begin
   ModePage.Add('Install everything on this PC  (recommended for single-PC families)');
   ModePage.Add('This is the child''s PC — connect to an existing GuardianNode server');
   ModePage.SelectedValueIndex := 0;
-  if (ModeParam = 'separated') or (ModeParam = 'child') or
-     (ServerUrlParam <> '') or (PairCodeParam <> '') then
+  if (ModeParam = 'child') or (ServerUrlParam <> '') or (PairCodeParam <> '') then
     ModePage.SelectedValueIndex := 1;
 
   // -- Child profile --
@@ -386,28 +600,14 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  url: String;
+  ErrorMessage: String;
 begin
   Result := True;
-  // Skip validation entirely in silent / very-silent install (CI, PoC, scripted).
-  // Config will be written from environment defaults; the parent can complete
-  // pairing + account setup via the dashboard's first-run wizard.
   if WizardSilent() then Exit;
 
   if CurPageID = ServerConnectionPage.ID then begin
-    url := Trim(ServerConnectionPage.Values[0]);
-    if url = '' then begin
-      MsgBox('Separated mode requires the GuardianNode server URL. Complete server setup first, then enter its trusted LAN/VPN URL here.', mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    if Pos('http', url) <> 1 then begin
-      MsgBox('Server URL must start with http:// or https://.', mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    if Length(Trim(ServerConnectionPage.Values[1])) <> 6 then begin
-      MsgBox('Pairing code must be 6 digits. Find it on the parent dashboard under Devices > Add device.', mbError, MB_OK);
+    if not ValidateInstallInputs(ErrorMessage) then begin
+      MsgBox(ErrorMessage, mbError, MB_OK);
       Result := False;
       Exit;
     end;
@@ -459,8 +659,8 @@ begin
     if IsAllInOne then
       PairFile[0] := '{"backend_url": "http://127.0.0.1:8787", "local_bootstrap": true}'
     else
-      PairFile[0] := '{"backend_url": "' + ServerUrl + '", "code": "' +
-        Trim(ServerConnectionPage.Values[1]) + '"}';
+      PairFile[0] := '{"backend_url": "' + JsonEscape(ServerUrl) + '", "code": "' +
+        JsonEscape(Trim(ServerConnectionPage.Values[1])) + '"}';
     SaveStringsToFile(PairPath, PairFile, False);
   end;
 end;
