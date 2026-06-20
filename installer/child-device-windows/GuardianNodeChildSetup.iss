@@ -31,7 +31,6 @@ MinVersion=10.0
 WizardStyle=modern
 DisableWelcomePage=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-; Replace standard uninstall entry with our password-gated wrapper
 UninstallFilesDir={app}
 
 [Languages]
@@ -46,9 +45,6 @@ Source: "..\build\stage\backend\*"; DestDir: "{app}\backend"; Flags: recursesubd
 
 ; ---- Dashboard built static files ----
 Source: "..\build\stage\dashboard\*"; DestDir: "{app}\backend\app\static"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist
-
-; ---- Custom uninstaller wrapper ----
-Source: "..\build\stage\agent\GuardianNodeUninstall.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ---- Documentation ----
 Source: "..\..\PRIVACY.md";  DestDir: "{app}"; Flags: ignoreversion
@@ -102,7 +98,6 @@ Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 ; killed. A Startup shortcut can be toggled off from Task Manager's Startup tab.
 Name: "{commonprograms}\{#MyAppName}\GuardianNode Tray"; Filename: "{app}\agent\GuardianNodeTray.exe"; IconFilename: "{app}\icon.ico"
 Name: "{commonprograms}\{#MyAppName}\Open Dashboard"; Filename: "{code:GetDashboardUrl}"; IconFilename: "{app}\icon.ico"
-Name: "{commonprograms}\{#MyAppName}\Uninstall GuardianNode"; Filename: "{app}\GuardianNodeUninstall.exe"; Parameters: """{uninstallexe}"""; IconFilename: "{app}\icon.ico"
 
 [Run]
 ; ---- Restrict install dir ACL (before anything starts) ----
@@ -148,7 +143,7 @@ Filename: "{app}\agent\GuardianNodeTray.exe"; Flags: nowait runasoriginaluser
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\pin_to_taskbar.ps1"" -Target ""{commonprograms}\{#MyAppName}\GuardianNode Tray.lnk"""; Flags: runhidden waituntilterminated runasoriginaluser skipifsilent; StatusMsg: "Pinning GuardianNode to the taskbar..."
 
 ; ---- Launch dashboard at the end (first-run web setup creates the parent account + recovery code) ----
-; Child-only installs with auto-discovery have no known dashboard URL — there is
+; Child-only installs without an explicit server URL have no known dashboard URL — there is
 ; no local backend, so opening http://127.0.0.1:8787 would be wrong. In that case
 ; the checkbox is skipped and the finish page tells the parent to manage the
 ; device from the parent computer (see UpdateReadyMemo/CurPageChanged below).
@@ -364,7 +359,7 @@ begin
     'Connect to GuardianNode server',
     'Enter the pairing code shown on your parent dashboard (Devices > Add device).',
     'Leave the server URL blank to search your home network automatically.');
-  ServerConnectionPage.Add('Server URL (e.g. http://192.168.1.42:8787, or blank to auto-discover):', False);
+  ServerConnectionPage.Add('Server URL (e.g. http://192.168.1.42:8787):', False);
   ServerConnectionPage.Add('6-digit pairing code:', False);
   ServerConnectionPage.Values[0] := ServerUrlParam;
   ServerConnectionPage.Values[1] := PairCodeParam;
@@ -400,7 +395,7 @@ begin
   if CurPageID = ServerConnectionPage.ID then begin
     url := Trim(ServerConnectionPage.Values[0]);
     if (url <> '') and (Pos('http', url) <> 1) then begin
-      MsgBox('Server URL must start with http:// (or leave it blank to auto-discover).', mbError, MB_OK);
+      MsgBox('Server URL must start with http://.', mbError, MB_OK);
       Result := False;
       Exit;
     end;

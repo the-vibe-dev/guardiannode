@@ -47,6 +47,7 @@ Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 
 [Icons]
 Name: "{commonprograms}\GuardianNode Server\Open Dashboard"; Filename: "http://127.0.0.1:8787/setup"
+Name: "{commonprograms}\GuardianNode Server\Show Setup Token"; Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""$p=Join-Path $env:ProgramData 'GuardianNode\keys\setup_token.json'; if(Test-Path $p){(Get-Content $p | ConvertFrom-Json).token | Write-Host; Read-Host 'Press Enter to close'} else {Write-Host 'Setup token file not found'; Read-Host 'Press Enter to close'}"""
 Name: "{commonprograms}\GuardianNode Server\Stop service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"
 Name: "{commonprograms}\GuardianNode Server\Start service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"
 
@@ -57,7 +58,6 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 ; Install backend service
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""GuardianNode Backend (LAN)"" dir=in action=allow protocol=TCP localport=8787 profile=private"; Flags: runhidden waituntilterminated; StatusMsg: "Allowing GuardianNode backend on private LAN..."
 
 ; Open setup wizard
 Filename: "http://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsilent; Description: "Open Setup Wizard"
@@ -65,11 +65,9 @@ Filename: "http://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsile
 [UninstallRun]
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""GuardianNode Backend (LAN)"" protocol=TCP localport=8787"; Flags: runhidden waituntilterminated
 
 [Code]
 var
-  NetworkModePage: TInputOptionWizardPage;
   HardwareSummaryPage: TOutputMsgWizardPage;
   DetectedTier: String;
   DetectedTextModel: String;
@@ -101,7 +99,7 @@ begin
     if Pos('vram_gb=', Output) > 0 then
       VramGB := StrToIntDef(Trim(Copy(Output, Pos('vram_gb=', Output)+8, 99)), 0);
 
-    if VramGB >= 10 then begin
+    if VramGB >= 16 then begin
       DetectedTier := 'full';
       DetectedTextModel := 'llama3.2:3b';
       DetectedVisionModel := 'qwen3-vl:8b-instruct';
@@ -130,16 +128,7 @@ procedure InitializeWizard;
 begin
   ProbeHardware;
 
-  NetworkModePage := CreateInputOptionPage(wpWelcome,
-    'Network mode',
-    'Who can reach this GuardianNode server?',
-    'Pick the option that fits your home network.',
-    True, False);
-  NetworkModePage.Add('This PC only (loopback)');
-  NetworkModePage.Add('Other devices on my home network (LAN)');
-  NetworkModePage.SelectedValueIndex := 1;
-
-  HardwareSummaryPage := CreateOutputMsgPage(NetworkModePage.ID,
+  HardwareSummaryPage := CreateOutputMsgPage(wpWelcome,
     'Hardware check',
     'Detected tier: ' + DetectedTier,
     DetectedReasoning + #13#10#13#10 +
@@ -156,13 +145,10 @@ begin
   if CurStep = ssPostInstall then begin
     CfgPath := ExpandConstant('{commonappdata}\GuardianNode\server.env');
     SetArrayLength(CfgFile, 8);
-    if NetworkModePage.SelectedValueIndex = 0 then
-      CfgFile[0] := 'GUARDIANNODE_BIND_HOST=127.0.0.1'
-    else
-      CfgFile[0] := 'GUARDIANNODE_BIND_HOST=0.0.0.0';
+    CfgFile[0] := 'GUARDIANNODE_BIND_HOST=127.0.0.1';
     CfgFile[1] := 'GUARDIANNODE_BIND_PORT=8787';
     CfgFile[2] := 'GUARDIANNODE_DATA_DIR=' + ExpandConstant('{commonappdata}\GuardianNode');
-    CfgFile[3] := 'GUARDIANNODE_MDNS_ENABLED=true';
+    CfgFile[3] := 'GUARDIANNODE_MDNS_ENABLED=false';
     CfgFile[4] := 'GUARDIANNODE_CLASSIFIER_TIER=' + DetectedTier;
     CfgFile[5] := 'GUARDIANNODE_TEXT_MODEL=' + DetectedTextModel;
     CfgFile[6] := 'GUARDIANNODE_VISION_MODEL=' + DetectedVisionModel;

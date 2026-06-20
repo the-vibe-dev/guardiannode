@@ -31,7 +31,7 @@ parent dashboard.
 </div>
 <div class="gn-card" markdown>
 <h3>👨‍👩‍👧 Family First</h3>
-<p>Built for parents, not IT departments. Pairing is a 6-digit code, the server is found automatically on your network, and alerts explain what happened and what to do next.</p>
+<p>Built for parents, not IT departments. Pairing uses a 6-digit code and an explicit server URL, and alerts explain what happened and what to do next.</p>
 </div>
 <div class="gn-card" markdown>
 <h3>🤝 Trustworthy</h3>
@@ -68,7 +68,7 @@ The installer checks your hardware and picks the strongest tier it can run:
 
 | Tier | Hardware | What it catches |
 |---|---|---|
-| **Full** | NVIDIA GPU with 10+ GB VRAM | Everything, with the most nuance on ambiguous chat |
+| **Full** | NVIDIA GPU with 16+ GB VRAM | Everything, with the most nuance on ambiguous chat |
 | **Vision** *(default)* | NVIDIA GPU with 6–12 GB VRAM | Explicit imagery + grooming/self-harm/scam text + your custom watch phrases |
 | **Text-only** | Any PC with 8 GB RAM, no GPU | Text risks only — visual-only content (nudity/gore without text) is **not** detected |
 
@@ -89,6 +89,10 @@ curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/inst
 ```
 
 Then on the child's PC, get a pairing code from the dashboard (**Devices → Add device**) and run the installer with **"Connect to existing server"**.
+
+Fresh servers bind to `127.0.0.1` and require the one-time setup token printed by
+the installer or stored in the server token file. Complete first-run setup on
+the server before enabling LAN access.
 
 Step-by-step with screenshots: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
 

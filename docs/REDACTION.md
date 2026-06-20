@@ -7,8 +7,10 @@ patterns such as card-like numbers, SSNs, password markers, API-key-like tokens,
 This is best-effort hygiene, not a privacy certainty.
 
 Parents and administrators should assume captured evidence can contain sensitive
-on-screen information. Evidence is stored locally and encrypted for parent/admin
-review.
+on-screen information. Screenshots and extracted text blobs are stored locally
+and encrypted for parent/admin review, but operational metadata such as app
+names, URLs, timestamps, risk summaries, categories, and audit details may
+remain plaintext in SQLite or pending metadata files.
 
 ## Where It May Run
 

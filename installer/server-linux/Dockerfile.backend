@@ -25,10 +25,10 @@ RUN pip install --no-cache-dir -e ./backend
 COPY --from=dashboard-build /build/dashboard/dist /app/backend/app/static
 
 ENV GUARDIANNODE_DATA_DIR=/data
-ENV GUARDIANNODE_BIND_HOST=0.0.0.0
+ENV GUARDIANNODE_BIND_HOST=127.0.0.1
 ENV GUARDIANNODE_BIND_PORT=8787
 
 VOLUME ["/data"]
 EXPOSE 8787
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "/app/backend", "--host", "0.0.0.0", "--port", "8787"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "/app/backend", "--host", "127.0.0.1", "--port", "8787"]

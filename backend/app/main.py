@@ -36,6 +36,7 @@ from app.api import (
 from app.db.models import Base
 from app.db.session import get_engine
 from app.services import mdns_advertiser
+from app.services.setup_token import ensure_setup_token
 from app.settings import settings
 from app.workers import cleanup_worker, offline_monitor
 
@@ -128,6 +129,20 @@ async def lifespan(app: FastAPI):
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _patch_schema(engine)
+    from app.db.models import User
+    from app.db.session import get_sessionmaker
+    s = get_sessionmaker()()
+    try:
+        admin_exists = s.query(User).filter(User.role == "admin").first() is not None
+    finally:
+        s.close()
+    if not admin_exists:
+        token = ensure_setup_token()
+        log.warning(
+            "first-run setup token required; read it from %s (current token starts with %s...)",
+            settings.keys_dir / "setup_token.json",
+            token[:6],
+        )
     if settings.mdns_enabled:
         try:
             mdns_advertiser.start()
@@ -160,13 +175,16 @@ def create_app() -> FastAPI:
         version=__version__,
         description="Local-first parental safety monitor",
         lifespan=lifespan,
+        docs_url="/docs" if settings.dev_mode else None,
+        redoc_url="/redoc" if settings.dev_mode else None,
+        openapi_url="/openapi.json" if settings.dev_mode else None,
     )
 
     app.add_middleware(
         SessionMiddleware,
         secret_key=_ensure_session_secret(),
         same_site="strict",
-        https_only=False,  # local LAN — TLS optional
+        https_only=settings.https_only_cookies,
         max_age=60 * 60 * 24 * 7,
     )
 

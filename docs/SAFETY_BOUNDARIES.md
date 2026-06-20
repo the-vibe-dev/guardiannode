@@ -51,7 +51,10 @@ We do not scan for CSAM hashes (e.g. PhotoDNA). That work belongs in dedicated r
 2. Contact local law enforcement immediately (911 in the US for imminent harm; otherwise your local FBI field office or NCMEC CyberTipline: 1-800-843-5678).
 3. Follow law enforcement's instructions. They will tell you what evidence to preserve and how.
 
-GuardianNode's exporter creates a signed evidence package format that some prosecutors accept; check with the receiving agency first.
+Export creates a locally encrypted archive for parent backup and review. It is
+not a forensic evidence package, is not digitally signed, and acceptance by law
+enforcement or courts is not guaranteed. Preserve original devices and follow
+the receiving agency's instructions.
 
 ### NOT a replacement for professional support
 
@@ -61,10 +64,10 @@ If the agent flags imminent self-harm or suicide risk, the **first** thing to do
 
 | Defense | What it does | What it doesn't |
 |---|---|---|
-| Password-gated uninstall | Stops casual teen uninstalls | Stops admin-rights teen with Safe Mode |
+| Administrator-controlled uninstall | Relies on Windows administrator/UAC permissions | An admin can remove or disable it |
 | Restricted service ACL | Non-admin can't `sc stop` the service | Admin can |
 | Watchdog process pair | One restarts the other if killed | Kernel-mode killer would defeat both |
-| Encrypted evidence | File-system exfil is opaque | Master key + recovery code = decrypt |
+| Encrypted evidence | Screenshot/text blobs are opaque without the server key | Metadata remains in SQLite; evidence decryption requires the server's master key file. The recovery code resets dashboard access only and does not reconstruct the evidence key. |
 
 The full threat model is in [THREAT_MODEL.md](THREAT_MODEL.md).
 

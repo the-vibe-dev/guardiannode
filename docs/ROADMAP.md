@@ -11,8 +11,8 @@
 - ✅ Dashboard (React + Vite + Tailwind) — login, dashboard, devices, risk feed, alert detail, settings
 - ✅ Linux server installer: `install.sh` + systemd + Docker Compose
 - ✅ Windows server installer (Inno Setup)
-- ✅ Windows child-device installer (Inno Setup) with anti-tamper + custom uninstaller
-- ✅ mDNS auto-discovery for separated mode
+- ✅ Windows child-device installer (Inno Setup) with watchdog/service ACL hardening
+- ⚠️ Authenticated server discovery/pinning for separated mode
 - ✅ Wine-based cross-build for Windows installers on Linux
 - ✅ GitHub release workflow
 

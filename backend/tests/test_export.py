@@ -29,9 +29,16 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
 def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    from app.services.setup_token import ensure_setup_token
+    setup_token = ensure_setup_token()
     r = client.post(
         "/api/auth/setup",
-        json={"display_name": "P", "password": "correct-horse-battery", "recovery_code": "a b c d"},
+        json={
+            "display_name": "P",
+            "password": "correct-horse-battery",
+            "recovery_code": "a b c d",
+            "setup_token": setup_token,
+        },
     )
     assert r.status_code == 200
 

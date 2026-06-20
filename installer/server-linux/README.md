@@ -10,15 +10,17 @@ curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/main/inst
 
 What it does:
 1. Detects distro (apt/dnf/pacman/zypper)
-2. Installs python3, sqlite, avahi (for mDNS)
+2. Installs python3, sqlite, avahi packages, and Tesseract
 3. Creates a `guardiannode` system user
 4. Clones repo into `/opt/guardiannode/src/`
 5. Builds a Python venv at `/opt/guardiannode/venv/`
 6. Installs Ollama via its upstream installer
 7. Registers `guardiannode-backend.service` as systemd
-8. Starts the service and prints the dashboard URL
+8. Starts the service and prints the local dashboard URL plus one-time setup token
 
-Open the printed URL in a browser to complete first-run setup (admin account + recovery code + AI model pull).
+Open the printed loopback URL in a browser on the server to complete first-run
+setup (admin account + recovery code + AI model pull). Fresh installs do not
+bind to the LAN until an authenticated parent enables LAN access.
 
 ## B) Docker Compose (recommended for home-server enthusiasts)
 
@@ -30,12 +32,13 @@ docker compose up -d
 
 What it does:
 - Spins up `ollama/ollama` for the LLM
-- Spins up a `guardiannode_backend` container exposing port 8787
+- Spins up a `guardiannode_backend` container exposing port 8787 on loopback
 - Persists state in two Docker volumes: `ollama_models` and `gn_data`
 
 The default Compose file uses normal bridge networking and publishes
-`8787:8787`. If you need mDNS auto-discovery from the Windows child installer on
-a Linux host, use the host-network override:
+`127.0.0.1:8787:8787`. mDNS discovery is advisory only in this alpha; child
+devices should be configured with an explicit server URL. If you need host
+networking on a Linux host after setup, use the host-network override:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
@@ -60,7 +63,7 @@ docker exec guardiannode_ollama ollama pull llama3.2:3b
 docker exec guardiannode_ollama ollama pull llava-phi3
 ```
 
-Or use the web setup wizard at `http://<server-ip>:8787` which has a model picker.
+Or use the web setup wizard at `http://127.0.0.1:8787` which has a model picker.
 
 ## Uninstall
 

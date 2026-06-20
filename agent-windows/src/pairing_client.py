@@ -170,21 +170,15 @@ def bootstrap_pairing(
         if not servers:
             log.warning("no backend URL in pending pairing and no server discovered via mDNS")
             return None
-        if len(servers) > 1:
-            # Never silently pick a server: on a messy (or hostile) LAN a fake
-            # service could advertise itself. Pairing requires an unambiguous
-            # target — the parent must set the backend URL explicitly.
-            log.error(
-                "multiple GuardianNode servers discovered via mDNS; refusing to choose "
-                "automatically. Set the backend URL explicitly in the installer. Found: %s",
-                ", ".join(f"{s.name} @ {s.host}:{s.port}" for s in servers),
-            )
-            return None
-        backend_url = f"http://{servers[0].host}:{servers[0].port}"
-        log.info(
-            "discovered exactly one GuardianNode server via mDNS: %s @ %s",
-            servers[0].name, backend_url,
+        # mDNS only discovers a service; it does not authenticate that the
+        # service is the parent's GuardianNode backend. Require the parent to
+        # enter the URL explicitly until enrollment can pin a server identity.
+        log.error(
+            "GuardianNode server discovered via mDNS, but automatic trust is disabled. "
+            "Set the backend URL explicitly in the installer. Found: %s",
+            ", ".join(f"{s.name} @ {s.host}:{s.port}" for s in servers),
         )
+        return None
 
     for attempt in range(1, attempts + 1):
         try:

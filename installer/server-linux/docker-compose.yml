@@ -42,11 +42,12 @@ services:
       - ollama
     environment:
       - GUARDIANNODE_OLLAMA_URL=http://ollama:11434
-      - GUARDIANNODE_BIND_HOST=0.0.0.0
+      - GUARDIANNODE_BIND_HOST=127.0.0.1
       - GUARDIANNODE_BIND_PORT=8787
+      - GUARDIANNODE_MDNS_ENABLED=false
       - GUARDIANNODE_MDNS_ENABLED=true
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     volumes:
       - gn_data:/data
 

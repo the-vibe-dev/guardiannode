@@ -22,8 +22,12 @@ export const api = {
   health: () => request<{ status: string; version: string }>("/health"),
   pipelineHealth: () => request<any>("/health/pipeline"),
   setupStatus: () => request<{ completed: boolean; admin_exists: boolean }>("/setup/status"),
-  generateRecovery: () => request<{ words: string[]; code: string; word_count: number }>("/setup/recovery", { method: "POST" }),
-  setup: (body: { display_name: string; password: string; recovery_code: string }) =>
+  generateRecovery: (setup_token: string) =>
+    request<{ words: string[]; code: string; word_count: number }>("/setup/recovery", {
+      method: "POST",
+      body: JSON.stringify({ setup_token }),
+    }),
+  setup: (body: { display_name: string; password: string; recovery_code: string; setup_token: string }) =>
     request<{ ok: boolean }>("/auth/setup", { method: "POST", body: JSON.stringify(body) }),
   login: (password: string) =>
     request<{ display_name: string; role: string }>("/auth/login", { method: "POST", body: JSON.stringify({ password }) }),

@@ -8,11 +8,12 @@ Type=simple
 User=guardiannode
 Group=guardiannode
 Environment="GUARDIANNODE_DATA_DIR=/var/lib/guardiannode"
-Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"
+Environment="GUARDIANNODE_BIND_HOST=127.0.0.1"
 Environment="GUARDIANNODE_BIND_PORT=8787"
+Environment="GUARDIANNODE_MDNS_ENABLED=false"
 Environment="GUARDIANNODE_LOG_LEVEL=INFO"
 WorkingDirectory=/opt/guardiannode/src/backend
-ExecStart=/opt/guardiannode/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8787
+ExecStart=/opt/guardiannode/venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8787
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

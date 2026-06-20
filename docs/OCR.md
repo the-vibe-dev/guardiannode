@@ -70,5 +70,7 @@ Each OCR result includes the engine's confidence. Below `OCR_MIN_CONFIDENCE` (de
 
 OCR text may contain sensitive visible content. Some paths apply best-effort
 text filtering, but parents should not treat redaction as certain.
-Screenshots and sensitive event fields are stored locally and encrypted when
-retained for parent/admin review.
+Screenshots and extracted text blobs are stored locally and encrypted when
+retained for parent/admin review. Operational metadata such as device/profile
+IDs, app names, window titles, URLs, timestamps, risk summaries, categories, and
+audit details may remain plaintext in SQLite or pending metadata files.

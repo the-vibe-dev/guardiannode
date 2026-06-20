@@ -28,8 +28,8 @@ When the timer runs out, monitoring resumes on its own and the icon goes back to
 ## What happens during a pause
 
 - No screenshots are captured or sent from the agent.
-- The dashboard shows the pause is active and counts down.
-- **Every pause is recorded in the audit log** with the start time, duration, and end time — so if multiple parents share GuardianNode, you can see who paused when.
+- Local tray pauses are enforced on the child PC. In this alpha they are not
+  synced to the dashboard audit log.
 
 ## What the kid sees
 
@@ -41,7 +41,7 @@ No. The pause requires the parent password (or the recovery code as a fallback).
 
 ## Pausing from the dashboard (remote pause)
 
-If you're using a separated setup (kid PC + parent server) and you're on your parent PC, you can pause the child's device from the dashboard:
+If you're using a separated setup (kid PC + parent server) and you're on your parent PC, you can pause the child's device from the dashboard. Dashboard pauses are stored server-side and shown in device status:
 
 1. Sign into the dashboard.
 2. Click **Devices**.
@@ -51,4 +51,4 @@ This is convenient if you're physically away from the kid's PC.
 
 ## Pause vs. uninstall
 
-If you want to permanently stop monitoring (e.g. you're transferring the PC, or your kid has aged out), uninstall instead of using a recurring pause. The uninstaller asks for your parent password and cleanly removes everything. See [Troubleshooting](troubleshooting.md) for uninstall instructions.
+If you want to permanently stop monitoring (e.g. you're transferring the PC, or your kid has aged out), uninstall instead of using a recurring pause. The alpha relies on Windows administrator/UAC permissions for uninstall. See [Troubleshooting](troubleshooting.md) for uninstall instructions.

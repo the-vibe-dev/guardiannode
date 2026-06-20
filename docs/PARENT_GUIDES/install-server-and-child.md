@@ -89,5 +89,5 @@ For each additional child PC, repeat Step 3 — just create a new pairing code f
 
 ## Got stuck?
 
-- Server not showing up in the kid PC installer's auto-discovery list? Your router may block mDNS between Wi-Fi/wired or between guest network and main network. Use the "Type the address manually" fallback.
+- The child PC installer requires the server URL explicitly in this alpha. Use the parent server's trusted LAN/VPN URL after first-run setup is complete.
 - See [Troubleshooting](troubleshooting.md) for more.

@@ -14,26 +14,41 @@ from app.services import event_ingest, encryption, screenshot_async, screenshot_
 from app.services.device_state import is_device_paused
 
 router = APIRouter(prefix="/events", tags=["events"])
+_MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+
+
+async def _read_upload_with_cap(image: UploadFile, limit: int = _MAX_SCREENSHOT_BYTES) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await image.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, "Image too large (max 8 MB)")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class IngestRequest(BaseModel):
-    event_id: str | None = None
-    profile_id: str | None = None
-    source_type: str
-    app_name: str | None = None
-    window_title: str | None = None
-    url: str | None = None
-    timestamp: str | None = None
-    redacted_text: str | None = None
-    evidence_type: str = "visible_text"
-    age_group: str | None = None
-    capture_scope: str = "browser_dom"
-    policy_id: str | None = None
-    policy_version: str | None = None
-    collector_version: str | None = None
-    screenshot_blob_id: str | None = None
-    image_blob_id: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    event_id: str | None = Field(default=None, max_length=64)
+    profile_id: str | None = Field(default=None, max_length=64)
+    source_type: str = Field(max_length=32)
+    app_name: str | None = Field(default=None, max_length=256)
+    window_title: str | None = Field(default=None, max_length=1024)
+    url: str | None = Field(default=None, max_length=4096)
+    timestamp: str | None = Field(default=None, max_length=64)
+    redacted_text: str | None = Field(default=None, max_length=200_000)
+    evidence_type: str = Field(default="visible_text", max_length=32)
+    age_group: str | None = Field(default=None, max_length=16)
+    capture_scope: str = Field(default="browser_dom", max_length=64)
+    policy_id: str | None = Field(default=None, max_length=64)
+    policy_version: str | None = Field(default=None, max_length=64)
+    collector_version: str | None = Field(default=None, max_length=64)
+    screenshot_blob_id: str | None = Field(default=None, max_length=64)
+    image_blob_id: str | None = Field(default=None, max_length=64)
+    metadata: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class IngestResponse(BaseModel):
@@ -174,11 +189,16 @@ async def ingest_screenshot(
         # Honor pause server-side: drop quietly, don't store.
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
 
-    image_bytes = await image.read()
+    if screenshot_async.pending_count() >= screenshot_async.max_pending():
+        raise HTTPException(
+            503,
+            "Screenshot classifier backlog is full",
+            headers={"Retry-After": "30"},
+        )
+
+    image_bytes = await _read_upload_with_cap(image)
     if not image_bytes:
         raise HTTPException(400, "Empty image")
-    if len(image_bytes) > 8 * 1024 * 1024:
-        raise HTTPException(413, "Image too large (max 8 MB)")
 
     # Update device liveness now (don't wait for classification).
     device.last_seen = datetime.now(timezone.utc)
@@ -203,7 +223,13 @@ async def ingest_screenshot(
             "source_ip": request.client.host if request.client else None,
         },
     )
-    await screenshot_async.enqueue(token)
+    if not screenshot_async.enqueue_nowait(token):
+        screenshot_async.discard(token)
+        raise HTTPException(
+            503,
+            "Screenshot classifier backlog is full",
+            headers={"Retry-After": "30"},
+        )
     return ScreenshotIngestResponse(event_id=token, status="queued", queued=True)
 
 

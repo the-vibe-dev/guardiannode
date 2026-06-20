@@ -1,133 +1,86 @@
 # Installer Architecture
 
-## Three installers, one repo
+## Installers
 
 | Installer | Target | Tech | Output |
 |---|---|---|---|
-| **Child Device (Windows)** | Kid's Windows 10/11 PC | Inno Setup 6 + PyInstaller bundle | `GuardianNodeChildSetup-0.1.0-alpha.1.exe` |
-| **Server (Windows)** | Parent's Windows server PC | Inno Setup 6 + PyInstaller bundle | `GuardianNodeServerSetup-0.1.0-alpha.1.exe` |
-| **Server (Linux)** | Parent's Linux server PC | Shell script + systemd / Docker | `install.sh` + Docker Compose |
+| Child Device (Windows) | Kid's Windows 10/11 PC, or all-in-one parent/child PC | Inno Setup 6 + PyInstaller bundle | `GuardianNodeChildSetup-0.1.0-alpha.1.exe` |
+| Server (Windows) | Parent's Windows server PC | Inno Setup 6 + PyInstaller backend bundle | `GuardianNodeServerSetup-0.1.0-alpha.1.exe` |
+| Server (Linux) | Parent's Linux server PC | Shell script + systemd / Docker | `install.sh` + Docker Compose |
 
-## Build pipeline
+## Build Pipeline
 
-Cross-build from Linux using Wine + Inno Setup CLI. See [`installer/build/build_all.sh`](https://github.com/the-vibe-dev/guardiannode/blob/main/installer/build/build_all.sh).
+`installer/build/build_all.sh` stages PyInstaller bundles, copies the built Vite
+dashboard, verifies pinned WinSW/Inno downloads, and compiles the Inno scripts.
+Release mode fails closed unless real prebuilt bundles are supplied.
 
-```
-Linux dev machine
-   │
-   ├── PyInstaller bundles agent / backend Python → dist/
-   ├── Vite builds dashboard → dashboard/dist/
-   ├── Inno Setup compiler (iscc.exe under Wine) consumes .iss scripts
-   └── Outputs three .exe files into installer/build/dist/
-```
+## Child Device Installer
 
-## Child Device installer flow
+The shipped child installer is implemented in
+`installer/child-device-windows/GuardianNodeChildSetup.iss`.
 
-```
-Page 1: Welcome + privacy summary
-Page 2: Choose mode (All-in-one / Connect to existing server)
-Page 3: Child profile (display name + age group)
-Page 4: Server connection + pairing code — only if separated
-Page 5: Hardware detection + model preset — only if all-in-one
-Page 6: Install + progress
-Page 7: Dashboard link
-```
+Flow:
 
-Pascal scripts in `installer/child-device-windows/wizard_pages.iss` implement the custom pages on top of Inno Setup's wizard framework.
+1. Choose all-in-one mode or connect to an existing server.
+2. Select the child age group.
+3. In separated mode, enter the explicit server URL and pairing code from the parent dashboard.
+4. In all-in-one mode, run a hardware probe and choose the model tier.
+5. Install the agent, tray, watchdog services, optional backend, and scheduled logon tasks.
+6. Open the dashboard only when the installer knows the dashboard URL.
 
-At install time, the child installer writes `agent.yaml`, completes or stages
-pairing credentials, installs service/watchdog backstops, adds Start Menu
-entries, registers all-user logon tasks for `GuardianNodeAgent.exe` and
-`GuardianNodeTray.exe`, pins the tray shortcut when Windows allows it, and starts
-the interactive agent/tray as the original installing user.
+The agent and tray run in the signed-in Windows user session because service
+session 0 cannot capture the desktop. Watchdog services are resilience helpers.
 
-Desktop capture runs from the user session, not from service session 0. The
-service is a resilience component; the agent that screenshots the visible
-desktop must run after each Windows account signs in.
+The alpha does not ship a tested password-gated uninstaller wrapper. Uninstall
+protection relies on normal Windows administrator/UAC permissions plus service
+ACLs; do not describe uninstall as password-gated until a clean-machine Windows
+test proves that end-to-end path.
 
-## Anti-tamper components
+## Windows Server Installer
 
-| Component | File | Action at install time |
-|---|---|---|
-| Service ACL hardening | `anti_tamper.iss` | `sc sdset` denies SERVICE_STOP to non-admin |
-| Watchdog service | `anti_tamper.iss` | Registers second service that polls agent and restarts on death |
-| Custom uninstaller | `custom_uninstaller.iss` | Replaces Programs & Features hook with password-gated wrapper |
-| Filesystem ACL | `anti_tamper.iss` | `icacls` restricts install dir writes to SYSTEM/Administrators |
+The shipped server installer is implemented in
+`installer/server-windows/GuardianNodeServerSetup.iss`.
 
-## Server installer flow (Windows)
+Flow:
 
-```
-Page 1: Welcome
-Page 2: Hardware detect → model preset
-Page 3: Admin account (password + recovery code)
-Page 4: Encryption key generation (shown once)
-Page 5: Network mode (loopback / LAN)
-Page 6: Ollama install (silent OllamaSetup.exe) + model pull
-Page 7: Backend service install (WinSW)
-Page 8: Done — dashboard URL + QR code
-```
+1. Probe hardware and choose the model tier.
+2. Install Ollama and pull the chosen model(s).
+3. Install and start the WinSW backend service.
+4. Open the local web setup wizard at `http://127.0.0.1:8787/setup`.
 
-## Server installer flow (Linux)
+Fresh installs bind to loopback and do not open a Windows Firewall LAN rule.
+First-run setup requires the one-time setup token stored in
+`%ProgramData%\GuardianNode\keys\setup_token.json`; the Start Menu includes a
+helper shortcut to display it. LAN access should be enabled only after an
+authenticated parent completes setup.
 
-`install.sh` is a one-shot bash script:
-1. Distro detection (apt / dnf / pacman / zypper)
-2. Install system dependencies (python3, python3-venv, sqlite3)
-3. Install Ollama via its upstream installer
-4. Create `guardiannode` system user
-5. Install Python venv + backend to `/opt/guardiannode/`
-6. Register `guardiannode-backend.service` systemd unit
-7. Start service, then print the URL to the web-based first-run wizard
+## Linux Server Installer
 
-Docker Compose is the alternative path; it's identical in outcome but doesn't require root on the host.
+`installer/server-linux/install.sh`:
 
-## mDNS / Zeroconf in the installers
+1. Detects the distro and installs Python, SQLite, Tesseract, Git, curl, and Avahi packages.
+2. Creates a `guardiannode` system user and `/var/lib/guardiannode`.
+3. Creates a root/service-user-only one-time setup token.
+4. Installs the backend into `/opt/guardiannode/venv`.
+5. Probes hardware, pulls Ollama models unless disabled, and writes systemd.
+6. Starts `guardiannode-backend.service` and prints the local URL plus setup token.
 
-- **Server installers** start a `_guardiannode._tcp.local` advertiser as part of the backend service. The TXT record contains the API version and the pairing-endpoint path.
-- **Child Device installer** runs an mDNS *browser* on wizard page 5 if the parent chose separated mode. Discovered servers are shown in a list with their hostname; the parent picks one.
-- **Fallback** if the network blocks mDNS (some segmented Wi-Fi setups do): the wizard offers a "Type the address manually" link that opens a panel for URL + pairing-code entry.
+Fresh Linux installs bind to `127.0.0.1` and set `GUARDIANNODE_MDNS_ENABLED=false`.
+Do not expose the service on a LAN until after first-run setup is complete.
 
-This is the "search the network" UX the parent expects without typing IP addresses.
+Docker Compose follows the same safety posture: the published port is bound to
+`127.0.0.1` by default.
 
-## Wine + Inno Setup build
+## Discovery
 
-Inno Setup is a Windows tool but its CLI compiler `iscc.exe` runs reliably under Wine. The build script:
+mDNS is advisory only in this alpha. A child device must be configured with an
+explicit parent server URL because mDNS advertisements do not authenticate the
+server. Future enrollment should pin a server public key or certificate
+fingerprint together with a one-time enrollment secret.
 
-1. Downloads Inno Setup 6 installer (cached in `installer/build/innosetup-6.x.x.exe`).
-2. Silently installs it into a project-local Wine prefix (`installer/build/.wine/`).
-3. Runs `wine iscc.exe child.iss` and `wine iscc.exe server.iss`.
-4. Copies output `.exe` files into `installer/build/dist/`.
+## Service Naming
 
-The Wine path is for **local developer iteration only**. Release artifacts are
-built by `.github/workflows/release-installers.yml` on `windows-latest`:
-PyInstaller bundles for the backend (`GuardianNodeBackend.exe`) and agent
-(`GuardianNodeAgent/Tray/Watchdog.exe`) are built natively, then Inno Setup
-compiles the installers around them, generates `SHA256SUMS` plus a release
-manifest, and attaches everything to a draft GitHub release.
-
-### Fail-closed build modes
-
-`installer/build/build_all.sh` refuses to silently ship development stubs:
-
-| Mode | Behavior |
-|---|---|
-| `RELEASE_BUILD=1` | Fails the build unless real PyInstaller bundles exist at `installer/build/prebuilt/{agent,backend}`. Release installers must never require Python on a parent or child machine. |
-| `ALLOW_DEV_STUBS=1` | Stages Python source + `.bat` shims (target machine needs Python). Local dev only — never distribute. |
-| neither | Aborts with instructions. |
-
-Third-party build tools (Inno Setup, WinSW) are verified against pinned
-SHA-256 hashes before use, in both the script and the CI workflow.
-
-### Service naming (transparency)
-
-Every installed service is GuardianNode-branded: `GuardianNodeBackend`,
-`GuardianNodeWatchdog`, and `GuardianNodeWatchdog2` (the secondary watchdog of
-the mutual-resurrection pair). Earlier builds named the secondary watchdog
-`EndpointHealthAgent`; that deceptive generic name has been removed (installer
-upgrades delete the legacy service). Tamper resistance comes from the service
-ACL — stopping requires admin rights — not from hiding what the service is.
-
-## Signing roadmap
-
-v1 ships unsigned. The plan to address SmartScreen friction is in [`installer/shared/SIGNING_PLAN.md`](https://github.com/the-vibe-dev/guardiannode/blob/main/installer/shared/SIGNING_PLAN.md).
-
-Steps for parents until v1.1: [`docs/PARENT_GUIDES/when-windows-says-protected-your-pc.md`](PARENT_GUIDES/when-windows-says-protected-your-pc.md).
+Installed services use GuardianNode-branded names:
+`GuardianNodeBackend`, `GuardianNodeWatchdog`, and `GuardianNodeWatchdog2`.
+Transparent naming is intentional; tamper resistance comes from Windows
+permissions, not hiding process names.

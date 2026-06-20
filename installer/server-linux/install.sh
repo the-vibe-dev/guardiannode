@@ -16,7 +16,7 @@ GN_USER="guardiannode"
 GN_HOME="/opt/guardiannode"
 GN_DATA="/var/lib/guardiannode"
 GN_LOG="/var/log/guardiannode"
-GN_BIND_HOST="${GN_BIND_HOST:-0.0.0.0}"
+GN_BIND_HOST="${GN_BIND_HOST:-127.0.0.1}"
 GN_BIND_PORT="${GN_BIND_PORT:-8787}"
 GN_REPO_URL="${GN_REPO_URL:-https://github.com/the-vibe-dev/guardiannode}"
 GN_SRC_ZIP="${GN_SRC_ZIP:-}"     # if set, install from local zip instead of git
@@ -84,6 +84,30 @@ create_user() {
   mkdir -p "$GN_DATA" "$GN_LOG" "$GN_HOME"
   chown -R "$GN_USER:$GN_USER" "$GN_DATA" "$GN_LOG" "$GN_HOME"
   chmod 700 "$GN_DATA"
+}
+
+create_setup_token() {
+  blue "Creating one-time setup token..."
+  local token_path="$GN_DATA/keys/setup_token.json"
+  mkdir -p "$GN_DATA/keys"
+  local token
+  token="$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)"
+  python3 - "$token_path" "$token" <<'PY'
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+path, token = sys.argv[1], sys.argv[2]
+expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+with open(path, "w", encoding="utf-8") as f:
+    json.dump({"token": token, "expires_at": expires_at.isoformat()}, f)
+PY
+  chown "$GN_USER:$GN_USER" "$token_path"
+  chmod 600 "$token_path"
+  GN_SETUP_TOKEN="$token"
 }
 
 fetch_source() {
@@ -167,6 +191,7 @@ Group=$GN_USER
 Environment="GUARDIANNODE_DATA_DIR=$GN_DATA"
 Environment="GUARDIANNODE_BIND_HOST=$GN_BIND_HOST"
 Environment="GUARDIANNODE_BIND_PORT=$GN_BIND_PORT"
+Environment="GUARDIANNODE_MDNS_ENABLED=false"
 Environment="GUARDIANNODE_LOG_LEVEL=INFO"
 Environment="GUARDIANNODE_CLASSIFIER_TIER=$GN_TIER"
 Environment="GUARDIANNODE_TEXT_MODEL=${GN_TEXT_MODEL:-llama3.2:3b}"
@@ -220,20 +245,20 @@ print_done() {
   echo
   echo "Open the parent dashboard at:"
   echo
-  echo "    http://${ip}:${GN_BIND_PORT}"
-  echo
-  echo "On the same machine you can also use:"
   echo "    http://127.0.0.1:${GN_BIND_PORT}"
   echo
-  echo "First-run setup wizard appears automatically when no admin exists."
+  echo "One-time setup token:"
+  echo
+  echo "    ${GN_SETUP_TOKEN:-read $GN_DATA/keys/setup_token.json}"
+  echo
+  echo "First-run setup is loopback-only. Finish setup on this server first,"
+  echo "then enable LAN access from an authenticated admin session."
   echo
   echo "Service:    systemctl status guardiannode-backend"
   echo "Logs:       journalctl -u guardiannode-backend"
   echo "Data dir:   $GN_DATA"
   echo
-  echo "mDNS:       service will announce itself as _guardiannode._tcp"
-  echo "            on this network. The Windows child installer will"
-  echo "            auto-discover this server."
+  echo "mDNS:       disabled for fresh setup until LAN access is enabled."
   echo
 }
 
@@ -242,6 +267,7 @@ main() {
   detect_distro
   install_system_packages
   create_user
+  create_setup_token
   fetch_source
   install_backend
   probe_hardware_and_pick_tier

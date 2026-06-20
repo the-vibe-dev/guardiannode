@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     dev_mode: bool = False
     session_secret: str | None = None  # auto-generated on first run
+    setup_token_ttl_seconds: int = 24 * 60 * 60
+    https_only_cookies: bool = False
     mdns_enabled: bool = True
     cors_allow_origin: str | None = None  # for dashboard dev server
     text_model: str = "llama3.2:3b"
@@ -61,7 +63,7 @@ class Settings(BaseSettings):
     classifier_timeout_seconds: int = 30
     rules_version: str = "0.1.0-alpha.1"
     # Classifier tier: governs which paths run per screenshot.
-    #  "full"        — vision LLM (qwen2.5vl) + text LLM (llama3.2:3b) hot together; needs 10+ GB VRAM
+    #  "full"        — vision LLM + text LLM hot together; needs 16+ GB VRAM
     #  "vision_only" — vision LLM only; needs 6+ GB VRAM
     #  "text_only"   — Tesseract OCR + small text LLM (llama3.2:1b) on CPU; no GPU required
     classifier_tier: str = "vision_only"

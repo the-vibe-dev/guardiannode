@@ -15,12 +15,13 @@ from app.services.parent_auth import (
     verify_password,
     verify_recovery_code,
 )
+from app.services.setup_token import consume_setup_token, verify_setup_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class LoginResponse(BaseModel):
@@ -84,8 +85,8 @@ def me(user: User = Depends(current_user)):
 
 
 class RecoveryResetRequest(BaseModel):
-    recovery_code: str
-    new_password: str = Field(min_length=10)
+    recovery_code: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=10, max_length=256)
 
 
 @router.post("/recovery-reset")
@@ -115,8 +116,9 @@ def recovery_reset(req: RecoveryResetRequest, request: Request, db: Session = De
 
 class SetupRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=10)
-    recovery_code: str  # client should call /api/auth/setup/recovery first
+    password: str = Field(min_length=10, max_length=256)
+    recovery_code: str = Field(min_length=1, max_length=512)
+    setup_token: str = Field(min_length=1, max_length=256)
 
 
 @router.post("/setup")
@@ -127,6 +129,8 @@ def setup(req: SetupRequest, request: Request, db: Session = Depends(get_db_dep)
     and is now confirming both. We accept the recovery code text and hash it
     server-side so the parent has truly written it down.
     """
+    if not verify_setup_token(req.setup_token):
+        raise HTTPException(status_code=401, detail="Invalid or expired setup token")
     existing = db.query(User).filter(User.role == "admin").first()
     if existing is not None:
         raise HTTPException(status_code=400, detail="Already set up")
@@ -144,5 +148,6 @@ def setup(req: SetupRequest, request: Request, db: Session = Depends(get_db_dep)
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
+    consume_setup_token()
     request.session["user_id"] = user.id
     return {"ok": True, "user_id": user.id}

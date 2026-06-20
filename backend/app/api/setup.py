@@ -1,13 +1,14 @@
 """First-run setup endpoints (status + recovery code generation)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_dep
 from app.db.models import User
 from app.services.parent_auth import generate_recovery_code
+from app.services.setup_token import verify_setup_token
 
 router = APIRouter(prefix="/setup", tags=["setup"])
 
@@ -29,13 +30,19 @@ class RecoveryCodeResponse(BaseModel):
     word_count: int
 
 
+class RecoveryCodeRequest(BaseModel):
+    setup_token: str
+
+
 @router.post("/recovery", response_model=RecoveryCodeResponse)
-def get_recovery_code():
+def get_recovery_code(req: RecoveryCodeRequest):
     """Generate a fresh recovery code candidate for the parent to write down.
 
     The parent must POST the same code text back to /auth/setup to finalize
     setup. This endpoint never stores anything — it's the parent's responsibility
     to record the code.
     """
+    if not verify_setup_token(req.setup_token):
+        raise HTTPException(status_code=401, detail="Invalid or expired setup token")
     rc = generate_recovery_code(12)
     return RecoveryCodeResponse(words=rc.words, code=rc.as_string(), word_count=len(rc.words))

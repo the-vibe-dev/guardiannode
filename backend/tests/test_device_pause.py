@@ -209,12 +209,15 @@ def test_device_list_clears_stale_paused_badge(monkeypatch, tmp_path):
     _set_paused_until(device_id, datetime.now(timezone.utc) - timedelta(minutes=2))
 
     # Log in as parent (first-run setup) to list devices.
+    from app.services.setup_token import ensure_setup_token
+    setup_token = ensure_setup_token()
     r = client.post(
         "/api/auth/setup",
         json={
             "display_name": "Parent",
             "password": "correct-horse-battery",
             "recovery_code": "alpha bravo gamma delta",
+            "setup_token": setup_token,
         },
     )
     assert r.status_code == 200, r.text

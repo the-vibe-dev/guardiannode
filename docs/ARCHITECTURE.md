@@ -61,7 +61,7 @@ In all-in-one mode the entire stack runs on one PC, bound to `127.0.0.1`.
 5. **LLM classification (text/vision).** OCR text, screenshots, and context go to
    local/user-configured Ollama models where enabled.
 6. **Multimodal merge.** Rule score + text LLM + vision LLM → final risk level + score.
-7. **Encryption + storage.** Sensitive fields + screenshot blobs are AES-GCM encrypted before SQLite/disk write.
+7. **Encryption + storage.** Screenshot and extracted-text blobs are AES-GCM encrypted before storage. Operational metadata such as app/window/URL context, device/profile IDs, risk summaries, categories, and audit details may remain plaintext in SQLite or pending metadata files.
 8. **Alert.** If severity ≥ threshold, create an Alert row and dispatch via configured channels.
 9. **Audit log.** Every evidence view, decrypt, export, and pause action gets an audit row.
 

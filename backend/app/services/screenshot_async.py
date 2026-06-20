@@ -55,6 +55,10 @@ def pending_count() -> int:
         return 0
 
 
+def max_pending() -> int:
+    return _MAX_PENDING
+
+
 def store_pending(image_bytes: bytes, meta: dict[str, Any]) -> str:
     """Persist a frame (encrypted) + its metadata, return its token. Fast."""
     token = str(ULID())
@@ -65,8 +69,12 @@ def store_pending(image_bytes: bytes, meta: dict[str, Any]) -> str:
     return token
 
 
-async def enqueue(token: str) -> None:
-    await get_queue().put(token)
+def enqueue_nowait(token: str) -> bool:
+    try:
+        get_queue().put_nowait(token)
+        return True
+    except asyncio.QueueFull:
+        return False
 
 
 def _load_meta(token: str) -> dict[str, Any] | None:
@@ -82,6 +90,10 @@ def _discard(token: str) -> None:
             (_pending_dir() / f"{token}{suffix}").unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def discard(token: str) -> None:
+    _discard(token)
 
 
 async def _classify_token(token: str) -> None:
@@ -144,7 +156,14 @@ async def loop() -> None:
     if q.qsize():
         log.info("re-enqueued %d pending frame(s) from disk", q.qsize())
     while True:
-        token = await q.get()
+        try:
+            token = await asyncio.wait_for(q.get(), timeout=30.0)
+        except asyncio.TimeoutError:
+            for jf in sorted(_pending_dir().glob("*.json")):
+                if q.full():
+                    break
+                q.put_nowait(jf.stem)
+            continue
         try:
             await _classify_token(token)
         except asyncio.CancelledError:

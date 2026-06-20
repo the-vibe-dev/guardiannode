@@ -17,7 +17,7 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 | Variable | Default | Notes |
 |---|---|---|
 | `GUARDIANNODE_DATA_DIR` | `~/.guardiannode` | Where DB + evidence + keys live |
-| `GUARDIANNODE_BIND_HOST` | `127.0.0.1` | Set to `0.0.0.0` for LAN |
+| `GUARDIANNODE_BIND_HOST` | `127.0.0.1` | Keep loopback for first-run setup; expose LAN only after setup is complete |
 | `GUARDIANNODE_BIND_PORT` | `8787` | |
 | `GUARDIANNODE_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama |
 | `GUARDIANNODE_DB_URL` | `sqlite:///{data_dir}/guardiannode.db` | Postgres optional |
@@ -28,8 +28,8 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 
 1. Backend creates `~/.guardiannode/keys/master.key` (random 32 bytes, AES-GCM).
 2. Backend creates `~/.guardiannode/guardiannode.db` (SQLite).
-3. mDNS advertiser starts on local network.
-4. Setup wizard at `/setup` prompts for admin account.
+3. Backend creates a one-time setup token in `keys/setup_token.json`.
+4. Setup wizard at `/setup` prompts for the setup token and admin account.
 
 ## Production install (Windows)
 

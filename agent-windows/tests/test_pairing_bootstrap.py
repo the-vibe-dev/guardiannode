@@ -89,18 +89,17 @@ def test_bootstrap_keeps_pending_on_transient_failure(tmp_path, monkeypatch):
     assert pending.exists(), "transient failures retry on next agent start"
 
 
-def test_bootstrap_refuses_ambiguous_mdns_discovery(tmp_path, monkeypatch):
-    """Multiple discovered servers must never be silently chosen between."""
+def test_bootstrap_refuses_mdns_discovery_without_explicit_url(tmp_path, monkeypatch):
+    """mDNS discovery is advisory only; it must not choose a backend."""
     pending = tmp_path / "pending_pairing.json"
     pending.write_text(json.dumps({"code": "123456"}))  # no backend_url → discovery
 
     monkeypatch.setattr(pairing_client, "discover_servers", lambda timeout=3.0: [
-        pairing_client.DiscoveredServer(name="real._guardiannode._tcp.local.", host="10.0.0.2", port=8787),
-        pairing_client.DiscoveredServer(name="fake._guardiannode._tcp.local.", host="10.0.0.66", port=8787),
+        pairing_client.DiscoveredServer(name="srv._guardiannode._tcp.local.", host="10.0.0.2", port=8787),
     ])
 
     def fake_pair(*args, **kwargs):  # must not be reached
-        raise AssertionError("pairing attempted despite ambiguous discovery")
+        raise AssertionError("pairing attempted despite unauthenticated mDNS discovery")
 
     monkeypatch.setattr(pairing_client, "pair_with_server", fake_pair)
     result = pairing_client.bootstrap_pairing(
@@ -108,23 +107,3 @@ def test_bootstrap_refuses_ambiguous_mdns_discovery(tmp_path, monkeypatch):
     )
     assert result is None
     assert pending.exists(), "pending pairing should remain for explicit retry"
-
-
-def test_bootstrap_uses_single_discovered_server(tmp_path, monkeypatch):
-    pending = tmp_path / "pending_pairing.json"
-    pending.write_text(json.dumps({"code": "123456"}))
-
-    monkeypatch.setattr(pairing_client, "discover_servers", lambda timeout=3.0: [
-        pairing_client.DiscoveredServer(name="srv._guardiannode._tcp.local.", host="10.0.0.2", port=8787),
-    ])
-
-    def fake_pair(backend_url, code, hostname, platform="windows", agent_version="0.1.0-alpha.1", local_bootstrap=False):
-        assert backend_url == "http://10.0.0.2:8787"
-        return "dev9", "tok9"
-
-    monkeypatch.setattr(pairing_client, "pair_with_server", fake_pair)
-    result = pairing_client.bootstrap_pairing(
-        "kid-pc", "0.1.0-alpha.1", pending_path=pending, device_path=tmp_path / "device.json",
-    )
-    assert result["device_id"] == "dev9"
-    assert result["backend_url"] == "http://10.0.0.2:8787"

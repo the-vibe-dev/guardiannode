@@ -23,12 +23,19 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.services.setup_token import ensure_setup_token
 
     Base.metadata.create_all(bind=get_engine())
     client = TestClient(create_app())
+    setup_token = ensure_setup_token()
     r = client.post(
         "/api/auth/setup",
-        json={"display_name": "Parent", "password": "correct horse battery", "recovery_code": "one two three"},
+        json={
+            "display_name": "Parent",
+            "password": "correct horse battery",
+            "recovery_code": "one two three",
+            "setup_token": setup_token,
+        },
     )
     assert r.status_code == 200
     client.post("/api/auth/logout")

@@ -21,7 +21,7 @@ What that still does NOT defeat is a determined teenager who:
 An administrator can ultimately stop any software on their own machine — no
 parental tool can change that. So if your kid is in that category, you have two
 options:
-1. **Make their Windows account a Standard user** (not Administrator). GuardianNode still works on a standard account; the password-gated uninstaller cannot be circumvented without your admin password.
+1. **Make their Windows account a Standard user** (not Administrator). GuardianNode relies on normal Windows administrator/UAC permissions for uninstall protection in this alpha.
 2. **Wait for the v2 kernel-driver tier** which protects in Safe Mode. (No ETA yet — gated on code-signing cert.)
 
 ## Encrypted messaging apps with their own crypto

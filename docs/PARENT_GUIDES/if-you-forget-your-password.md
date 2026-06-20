@@ -12,14 +12,6 @@ encryption key.
 4. Set a new password.
 5. Sign in with the new password.
 
-## During an uninstall
-
-The uninstaller also accepts the recovery code if you've forgotten the password:
-
-1. Run the uninstaller from Programs & Features.
-2. When prompted for the password, click **"Use recovery code instead"**.
-3. Enter the 12 words.
-
 ## If you lost BOTH the password AND the recovery code
 
 This is a deliberate dead-end for dashboard access. GuardianNode is local-first

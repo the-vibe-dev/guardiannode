@@ -65,11 +65,6 @@ def _device_id() -> str | None:
     return creds.get("device_id")
 
 
-def _device_token() -> str | None:
-    creds = load_credentials() or {}
-    return creds.get("device_token")
-
-
 def _verify_password_or_recovery(s: str) -> bool:
     # Local hash file (all-in-one installs that provisioned parent.json).
     if verify_password(s) or verify_recovery_code(s):
@@ -204,17 +199,12 @@ def pause_flow() -> None:
     if not duration:
         return
     device_id = _device_id()
-    token = _device_token()
     if not device_id:
         log.warning("device not paired; cannot pause")
         return
     try:
-        # Local pause is enforced by the backend rejecting events anyway,
-        # but we tell the backend so the dashboard shows the pause.
-        # We use the user session cookie or a dedicated agent pause endpoint.
-        # For v1 we POST to a hypothetical /api/devices/{id}/pause-via-device.
-        # In the current backend, device pause is admin-only; a local flag file
-        # is the v1 path that the capture loop checks.
+        # Local tray pause is enforced by the capture loop. Dashboard-visible
+        # pause is available through the authenticated parent dashboard.
         _set_local_pause(duration)
         log.info("paused locally for %d seconds", duration)
     except Exception as e:

@@ -56,7 +56,7 @@ The tray app runs in the user session, not as a service. If it crashed:
 Red means the agent can't reach the backend. Hover over the icon for the specific error.
 
 ### "Kill agent" / Task Manager → it comes back
-That's the watchdog working as designed. The agent and watchdog restart each other. To stop them legitimately, uninstall GuardianNode (which asks for your password) or pause monitoring.
+That's the watchdog working as designed. The agent and watchdog restart each other. To stop them legitimately, pause monitoring or uninstall GuardianNode from an administrator account.
 
 ### Antivirus flagged the agent
 Some antivirus products flag PyInstaller-bundled apps as suspicious because the technique is sometimes used by malware. Add GuardianNode to your AV exception list:
@@ -67,8 +67,8 @@ Until we have a code-signing cert, this is unfortunately a recurring issue.
 
 ## Uninstall
 
-### "I want to uninstall but I forgot the password"
-Use the recovery code at the password prompt. See [If you forget your password](if-you-forget-your-password.md).
+### "I want to uninstall"
+Use Windows Settings or Programs & Features from an administrator account. The alpha does not ship a tested password-gated uninstaller wrapper.
 
 ### Uninstall hangs or fails partway
 1. Reboot the PC.

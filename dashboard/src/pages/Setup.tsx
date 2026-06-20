@@ -8,6 +8,7 @@ interface Props {
 export default function Setup({ onComplete }: Props) {
   const [step, setStep] = useState<"welcome" | "password" | "recovery" | "confirm" | "done">("welcome");
   const [displayName, setDisplayName] = useState("Parent");
+  const [setupToken, setSetupToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [recovery, setRecovery] = useState<{ words: string[]; code: string } | null>(null);
@@ -24,14 +25,20 @@ export default function Setup({ onComplete }: Props) {
       else if (step === "password") {
         if (password.length < 10) { setError("Password must be at least 10 characters."); return; }
         if (password !== confirm) { setError("Passwords don't match."); return; }
-        const rec = await api.generateRecovery();
+        if (!setupToken.trim()) { setError("Enter the one-time setup token from the installer or server token file."); return; }
+        const rec = await api.generateRecovery(setupToken.trim());
         setRecovery(rec);
         setStep("recovery");
       } else if (step === "recovery") {
         if (!acknowledged) { setError("Please confirm you've recorded the recovery code."); return; }
         setStep("confirm");
       } else if (step === "confirm") {
-        await api.setup({ display_name: displayName, password, recovery_code: recovery!.code });
+        await api.setup({
+          display_name: displayName,
+          password,
+          recovery_code: recovery!.code,
+          setup_token: setupToken.trim(),
+        });
         setStep("done");
         setTimeout(onComplete, 1500);
       }
@@ -64,6 +71,10 @@ export default function Setup({ onComplete }: Props) {
             <label className="block">
               <span className="text-sm text-gray-600">Your display name (e.g. "Mom"):</span>
               <input className="border rounded w-full px-3 py-2 mt-1" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm text-gray-600">One-time setup token:</span>
+              <input className="border rounded w-full px-3 py-2 mt-1 font-mono text-sm" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} />
             </label>
           </div>
         )}

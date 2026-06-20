@@ -56,7 +56,9 @@ encrypted ZIP containing:
 The export is **local and parent-controlled**. Decrypting it (and the inner
 `evidence/*.enc` files) requires this server's master key
 (`<data>/keys/master.key`); each blob uses its `blob_id` as AES-GCM associated
-data. There is no cloud upload and no recipient-key scheme.
+data. There is no cloud upload and no recipient-key scheme. The dashboard
+currently creates the export on the server filesystem and returns that local
+path; remote browsers do not receive a streamed download.
 
 ## Audit
 
