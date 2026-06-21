@@ -43,6 +43,7 @@ def test_watchdog_launches_missing_processes_in_exact_active_sessions(monkeypatc
     )
     task_runs: list[str] = []
     monkeypatch.setattr(watchdog.os, "name", "nt")
+    monkeypatch.setattr(watchdog, "_maintenance_mode_active", lambda: False)
     monkeypatch.setattr(watchdog, "_resolve_watched_exe", lambda image: Path(f"C:/GN/{image}"))
     monkeypatch.setattr(watchdog, "_task_run_windows", task_runs.append)
 
@@ -63,6 +64,7 @@ def test_watchdog_falls_back_to_task_when_exact_session_launch_fails(monkeypatch
     )
     task_runs: list[str] = []
     monkeypatch.setattr(watchdog.os, "name", "nt")
+    monkeypatch.setattr(watchdog, "_maintenance_mode_active", lambda: False)
     monkeypatch.setattr(watchdog, "_resolve_watched_exe", lambda image: Path(f"C:/GN/{image}"))
     monkeypatch.setattr(watchdog, "_task_run_windows", task_runs.append)
 
@@ -80,6 +82,7 @@ def test_watchdog_falls_back_when_one_missing_session_launch_fails(monkeypatch):
     )
     task_runs: list[str] = []
     monkeypatch.setattr(watchdog.os, "name", "nt")
+    monkeypatch.setattr(watchdog, "_maintenance_mode_active", lambda: False)
     monkeypatch.setattr(watchdog, "_resolve_watched_exe", lambda image: Path(f"C:/GN/{image}"))
     monkeypatch.setattr(watchdog, "_task_run_windows", task_runs.append)
 
@@ -99,9 +102,30 @@ def test_watchdog_skips_user_processes_when_no_active_session(monkeypatch):
     )
     task_runs: list[str] = []
     monkeypatch.setattr(watchdog.os, "name", "nt")
+    monkeypatch.setattr(watchdog, "_maintenance_mode_active", lambda: False)
     monkeypatch.setattr(watchdog, "_task_run_windows", task_runs.append)
 
     watchdog.watchdog_once(api=fake)
 
     assert fake.launches == []
     assert task_runs == []
+
+
+def test_watchdog_pauses_repairs_during_installer_maintenance(monkeypatch):
+    fake = FakeSessionApi(
+        active_sessions={1},
+        process_sessions={"GuardianNodeAgent.exe": set(), "GuardianNodeTray.exe": set()},
+    )
+    task_runs: list[str] = []
+    service_starts: list[str] = []
+    monkeypatch.setattr(watchdog.os, "name", "nt")
+    monkeypatch.setattr(watchdog, "_maintenance_mode_active", lambda: True)
+    monkeypatch.setattr(watchdog, "_task_run_windows", task_runs.append)
+    monkeypatch.setattr(watchdog, "_service_running_windows", lambda name: False)
+    monkeypatch.setattr(watchdog, "_service_start_windows", service_starts.append)
+
+    watchdog.watchdog_once(peer_service="GuardianNodeWatchdog2", api=fake)
+
+    assert fake.launches == []
+    assert task_runs == []
+    assert service_starts == []

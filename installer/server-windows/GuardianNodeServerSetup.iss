@@ -53,6 +53,9 @@ Name: "{commonprograms}\GuardianNode Server\Stop service"; Filename: "{app}\Guar
 Name: "{commonprograms}\GuardianNode Server\Start service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"
 
 [Run]
+; Write server.env before any service or model helper starts.
+Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; StatusMsg: "Writing GuardianNode server configuration..."; BeforeInstall: WriteRuntimeConfigBeforeStart
+
 ; Restrict server data to the backend service account and administrators before startup.
 Filename: "icacls.exe"; Parameters: """{commonappdata}\GuardianNode"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F"; Flags: runhidden waituntilterminated
 
@@ -61,7 +64,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 
 ; Install backend service
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."
-Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
+Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; AfterInstall: RequireBackendHealth
 
 ; Open setup wizard
 Filename: "http://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsilent; Description: "Open Setup Wizard"
@@ -87,10 +90,10 @@ var
   Lines: TArrayOfString;
   Output: String;
 begin
-  DetectedTier := 'vision_only';
+  DetectedTier := 'text_only';
   DetectedTextModel := '';
-  DetectedVisionModel := 'qwen3-vl:8b-instruct';
-  DetectedReasoning := 'Default tier; adjust later in dashboard.';
+  DetectedVisionModel := '';
+  DetectedReasoning := 'Hardware probe did not complete. Conservative default: rules/OCR only until the parent explicitly changes models.';
 
   TmpPath := ExpandConstant('{tmp}\hw_probe.txt');
   Exec('powershell.exe',
@@ -110,7 +113,7 @@ begin
       DetectedTextModel := 'llama3.2:3b';
       DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU — vision LLM + text LLM run together.';
-    end else if VramGB >= 6 then begin
+    end else if VramGB >= 10 then begin
       DetectedTier := 'vision_only';
       DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU — vision LLM only.';
@@ -143,18 +146,32 @@ begin
     'Ollama and the right models will be installed automatically. This can take 5-20 minutes depending on download speed.');
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure WriteRuntimeConfig;
 var
   DataDir: String;
 begin
-  if CurStep = ssPostInstall then begin
-    DataDir := ExpandConstant('{commonappdata}\GuardianNode');
-    WriteGuardianNodeServerEnv(
-      DataDir,
-      DetectedTier,
-      DetectedTextModel,
-      DetectedVisionModel,
-      'http://127.0.0.1:11434'
-    );
-  end;
+  DataDir := ExpandConstant('{commonappdata}\GuardianNode');
+  WriteGuardianNodeServerEnv(
+    DataDir,
+    DetectedTier,
+    DetectedTextModel,
+    DetectedVisionModel,
+    'http://127.0.0.1:11434'
+  );
+end;
+
+procedure WriteRuntimeConfigBeforeStart;
+begin
+  WriteRuntimeConfig;
+end;
+
+procedure RequireBackendHealth;
+var
+  ResultCode: Integer;
+begin
+  Exec('powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health''; if ($r.StatusCode -ge 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    RaiseException('GuardianNode backend did not become healthy after service start.');
 end;

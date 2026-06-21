@@ -6,6 +6,7 @@
 #define MyAppPublisher "GuardianNode Contributors"
 #define MyAppURL "https://github.com/the-vibe-dev/guardiannode"
 #define MyAppExeName "GuardianNodeAgent.exe"
+#define GuardianNodeServiceSddl "D:(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"
 
 [Setup]
 AppId={{6FB7AAA2-4F7E-4E1F-AA00-3F6C45B9B501}
@@ -30,7 +31,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 WizardStyle=modern
 DisableWelcomePage=no
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\agent\{#MyAppExeName}
 UninstallFilesDir={app}
 
 [Languages]
@@ -41,10 +42,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "..\build\stage\agent\*"; DestDir: "{app}\agent"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 ; ---- Bundled backend (if all-in-one mode) ----
-Source: "..\build\stage\backend\*"; DestDir: "{app}\backend"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist
+Source: "..\build\stage\backend\*"; DestDir: "{app}\backend"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
 
 ; ---- Dashboard built static files ----
-Source: "..\build\stage\dashboard\*"; DestDir: "{app}\backend\app\static"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist
+Source: "..\build\stage\dashboard\*"; DestDir: "{app}\backend\app\static"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
 
 ; ---- Documentation ----
 Source: "..\..\PRIVACY.md";  DestDir: "{app}"; Flags: ignoreversion
@@ -77,9 +78,6 @@ Source: "assets\icon.png"; DestDir: "{app}\agent"; Flags: ignoreversion
 ; ---- Ollama / model bootstrap helper (used in all-in-one mode) ----
 Source: "..\shared\configure_ollama_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
-; ---- Taskbar pin helper ----
-Source: "pin_to_taskbar.ps1"; DestDir: "{app}"; Flags: ignoreversion
-
 [InstallDelete]
 ; Stale launchers from pre-scheduled-task installs (the mutex would collapse
 ; them anyway, but don't leave dead shortcuts around).
@@ -91,6 +89,7 @@ Name: "{commonappdata}\GuardianNode"; Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\logs";  Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\keys";  Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
+Name: "{commonappdata}\GuardianNode\Secure"; Permissions: system-modify
 
 [Icons]
 ; Neither the agent nor the tray uses a Startup-folder shortcut — both run via
@@ -100,6 +99,9 @@ Name: "{commonprograms}\{#MyAppName}\GuardianNode Tray"; Filename: "{app}\agent\
 Name: "{commonprograms}\{#MyAppName}\Open Dashboard"; Filename: "{code:GetDashboardUrl}"; IconFilename: "{app}\icon.ico"
 
 [Run]
+; ---- Write runtime configuration before any service/task is allowed to start ----
+Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; StatusMsg: "Writing GuardianNode configuration..."; BeforeInstall: WriteRuntimeConfigBeforeStart
+
 ; ---- Restrict install dir ACL (before anything starts) ----
 Filename: "icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F /grant:r Users:(OI)(CI)RX"; Flags: runhidden waituntilterminated
 
@@ -108,7 +110,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 
 ; ---- All-in-one mode: install + start the backend service first so the agent can pair against it ----
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Backend service..."; Check: IsAllInOne
-Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; Check: IsAllInOne
+Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; Check: IsAllInOne; AfterInstall: RequireBackendHealth
 
 ; ---- Clean up the agent service from older installs (the agent is a scheduled
 ; task now — a session-0 service cannot capture the desktop and caused duplicate
@@ -126,21 +128,20 @@ Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: r
 Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
-; ---- Restrict the service ACLs: deny stop/delete to non-admin ----
-Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
-Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog2 D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated
+; ---- Restrict the service ACLs: allow-only DACL, no explicit deny ACEs ----
+Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog2 {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
 
 ; ---- Remove the legacy obscurely-named secondary watchdog from older installs ----
 Filename: "sc.exe"; Parameters: "stop EndpointHealthAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "delete EndpointHealthAgent"; Flags: runhidden waituntilterminated
-Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend D:(D;;DCLCWPDTSD;;;IU)(D;;DCLCWPDTSD;;;SU)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"; Flags: runhidden waituntilterminated; Check: IsAllInOne
+Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated; Check: IsAllInOne
 
 ; ---- Start the tray now for the installing user (per-session mutex prevents duplicates) ----
 Filename: "{app}\agent\GuardianNodeTray.exe"; Flags: nowait runasoriginaluser
 
-; ---- Pin Tray to the parent user's taskbar. Pin the Start Menu shortcut (it
-; carries the brand icon), not the bare exe. ----
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\pin_to_taskbar.ps1"" -Target ""{commonprograms}\{#MyAppName}\GuardianNode Tray.lnk"""; Flags: runhidden waituntilterminated runasoriginaluser skipifsilent; StatusMsg: "Pinning GuardianNode to the taskbar..."
+; ---- Leave maintenance mode only after services/tasks are installed and started ----
+Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; BeforeInstall: ClearMaintenanceMarker
 
 ; ---- Launch dashboard at the end (first-run web setup creates the parent account + recovery code) ----
 ; Child-only installs without an explicit server URL have no known dashboard URL — there is
@@ -150,6 +151,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; Description: "Open Parent Dashboard to finish setup"; Check: ShouldOpenDashboard
 
 [UninstallRun]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""New-Item -ItemType Directory -Force -Path '$env:ProgramData\GuardianNode\Secure' | Out-Null; New-Item -ItemType File -Force -Path '$env:ProgramData\GuardianNode\Secure\maintenance.flag' | Out-Null"""; Flags: runhidden waituntilterminated
 ; Both watchdogs first, or they would revive each other / the tasks mid-uninstall.
 Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
@@ -192,10 +194,10 @@ var
   Output: String;
   RamGB, VramGB: Integer;
 begin
-  DetectedTier := 'vision_only';
+  DetectedTier := 'text_only';
   DetectedTextModel := '';
-  DetectedVisionModel := 'qwen3-vl:8b-instruct';
-  DetectedReasoning := 'Default tier; adjust later in dashboard.';
+  DetectedVisionModel := '';
+  DetectedReasoning := 'Hardware probe did not complete. Conservative default: rules/OCR only until the parent explicitly changes models.';
 
   TmpPath := ExpandConstant('{tmp}\hw_probe.txt');
   // PowerShell inline: emit "ram_gb=X vram_gb=Y" with VRAM 0 if no nvidia-smi.
@@ -224,7 +226,7 @@ begin
       DetectedTextModel := 'llama3.2:3b';
       DetectedVisionModel := 'qwen3-vl:8b-instruct';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — vision LLM plus a separate text LLM run together for a second opinion on extracted text.';
-    end else if VramGB >= 6 then begin
+    end else if VramGB >= 10 then begin
       DetectedTier := 'vision_only';
       DetectedTextModel := '';
       DetectedVisionModel := 'qwen3-vl:8b-instruct';
@@ -254,6 +256,37 @@ begin
   Exec(ExpandConstant(ExeName), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+function MaintenanceMarkerPath: String;
+begin
+  Result := ExpandConstant('{commonappdata}\GuardianNode\Secure\maintenance.flag');
+end;
+
+procedure CreateMaintenanceMarker;
+var
+  Lines: TArrayOfString;
+begin
+  ForceDirectories(ExpandConstant('{commonappdata}\GuardianNode\Secure'));
+  SetArrayLength(Lines, 1);
+  Lines[0] := 'GuardianNode installer maintenance in progress.';
+  SaveStringsAtomic(MaintenanceMarkerPath, Lines);
+end;
+
+procedure ClearMaintenanceMarker;
+begin
+  DeleteFile(MaintenanceMarkerPath);
+end;
+
+procedure RequireBackendHealth;
+var
+  ResultCode: Integer;
+begin
+  Exec('powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health''; if ($r.StatusCode -ge 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    RaiseException('GuardianNode backend did not become healthy after service start.');
+end;
+
 function ValidateInstallInputs(var ErrorMessage: String): Boolean; forward;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -264,6 +297,8 @@ begin
     Result := ErrorMessage;
     Exit;
   end;
+
+  CreateMaintenanceMarker;
 
   // Free locked binaries before the file-copy stage so upgrades don't roll back
   // with "file in use". Stop BOTH watchdogs first (they revive each other), then
@@ -614,53 +649,56 @@ begin
   end;
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure WriteRuntimeConfig;
 var
   CfgPath, PairPath, ServerDataDir, ServerUrl: String;
   CfgFile, PairFile: TArrayOfString;
 begin
-  if CurStep = ssPostInstall then begin
-    ServerUrl := Trim(ServerConnectionPage.Values[0]);
-    ServerDataDir := ExpandConstant('{commonappdata}\GuardianNode');
+  ServerUrl := Trim(ServerConnectionPage.Values[0]);
+  ServerDataDir := ExpandConstant('{commonappdata}\GuardianNode');
 
-    if IsAllInOne then
-      WriteGuardianNodeServerEnv(
-        ServerDataDir,
-        DetectedTier,
-        DetectedTextModel,
-        DetectedVisionModel,
-        'http://127.0.0.1:11434'
-      );
+  if IsAllInOne then
+    WriteGuardianNodeServerEnv(
+      ServerDataDir,
+      DetectedTier,
+      DetectedTextModel,
+      DetectedVisionModel,
+      'http://127.0.0.1:11434'
+    );
 
-    // Write the agent config based on wizard inputs
-    CfgPath := AddBackslash(ServerDataDir) + 'agent.yaml';
-    SetArrayLength(CfgFile, 9);
-    if IsAllInOne or (ServerUrl = '') then
-      CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
-    else
-      CfgFile[0] := 'backend_url: ' + ServerUrl;
-    CfgFile[1] := 'age_group: ' + AgeGroupValue;
-    CfgFile[2] := 'ocr_engine: tesseract';
-    CfgFile[3] := 'ocr_cadence_seconds: 5';
-    CfgFile[4] := 'ocr_min_confidence: 0.5';
-    CfgFile[5] := 'phash_threshold: 2';
-    CfgFile[6] := 'log_level: INFO';
-    CfgFile[7] := 'dry_run: false';
-    CfgFile[8] := 'full_screen_capture_enabled: true';
-    SaveStringsToFile(CfgPath, CfgFile, False);
+  // Write the agent config based on wizard inputs
+  CfgPath := AddBackslash(ServerDataDir) + 'agent.yaml';
+  SetArrayLength(CfgFile, 9);
+  if IsAllInOne or (ServerUrl = '') then
+    CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
+  else
+    CfgFile[0] := 'backend_url: ' + ServerUrl;
+  CfgFile[1] := 'age_group: ' + AgeGroupValue;
+  CfgFile[2] := 'ocr_engine: tesseract';
+  CfgFile[3] := 'ocr_cadence_seconds: 5';
+  CfgFile[4] := 'ocr_min_confidence: 0.5';
+  CfgFile[5] := 'phash_threshold: 2';
+  CfgFile[6] := 'log_level: INFO';
+  CfgFile[7] := 'dry_run: false';
+  CfgFile[8] := 'full_screen_capture_enabled: true';
+  SaveStringsAtomic(CfgPath, CfgFile);
 
-    // Drop the pending pairing handshake for the agent to complete on first
-    // start. All-in-one uses a loopback-only device bootstrap token generated
-    // by the backend in keys\device_bootstrap_token.json; separated mode uses
-    // the parent-issued 6-digit code. The agent deletes this file once pairing
-    // succeeds.
-    PairPath := ExpandConstant('{commonappdata}\GuardianNode\pending_pairing.json');
-    SetArrayLength(PairFile, 1);
-    if IsAllInOne then
-      PairFile[0] := '{"backend_url": "http://127.0.0.1:8787", "local_bootstrap": true}'
-    else
-      PairFile[0] := '{"backend_url": "' + JsonEscape(ServerUrl) + '", "code": "' +
-        JsonEscape(Trim(ServerConnectionPage.Values[1])) + '"}';
-    SaveStringsToFile(PairPath, PairFile, False);
-  end;
+  // Drop the pending pairing handshake for the agent to complete on first
+  // start. All-in-one uses a loopback-only device bootstrap token generated
+  // by the backend in keys\device_bootstrap_token.json; separated mode uses
+  // the parent-issued 6-digit code. The agent deletes this file once pairing
+  // succeeds.
+  PairPath := ExpandConstant('{commonappdata}\GuardianNode\pending_pairing.json');
+  SetArrayLength(PairFile, 1);
+  if IsAllInOne then
+    PairFile[0] := '{"backend_url": "http://127.0.0.1:8787", "local_bootstrap": true}'
+  else
+    PairFile[0] := '{"backend_url": "' + JsonEscape(ServerUrl) + '", "code": "' +
+      JsonEscape(Trim(ServerConnectionPage.Values[1])) + '"}';
+  SaveStringsAtomic(PairPath, PairFile);
+end;
+
+procedure WriteRuntimeConfigBeforeStart;
+begin
+  WriteRuntimeConfig;
 end;

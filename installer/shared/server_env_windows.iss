@@ -1,5 +1,17 @@
 ; Shared GuardianNode backend environment writer for Windows installers.
 
+procedure SaveStringsAtomic(const Path: String; const Lines: TArrayOfString);
+var
+  TmpPath: String;
+begin
+  TmpPath := Path + '.tmp';
+  DeleteFile(TmpPath);
+  SaveStringsToFile(TmpPath, Lines, False);
+  DeleteFile(Path);
+  if not RenameFile(TmpPath, Path) then
+    RaiseException('Could not finalize ' + Path);
+end;
+
 procedure WriteGuardianNodeServerEnv(
   const DataDir: String;
   const Tier: String;
@@ -30,5 +42,5 @@ begin
   EnvFile[14] := 'GUARDIANNODE_ALLOWED_HOSTS=127.0.0.1,localhost';
   EnvFile[15] := 'GUARDIANNODE_HTTPS_ONLY_COOKIES=false';
   EnvFile[16] := 'GUARDIANNODE_RETENTION_CLEANUP_ENABLED=true';
-  SaveStringsToFile(EnvPath, EnvFile, False);
+  SaveStringsAtomic(EnvPath, EnvFile);
 end;

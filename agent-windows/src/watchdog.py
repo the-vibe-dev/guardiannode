@@ -34,6 +34,17 @@ WATCHED = [
     ("GuardianNodeAgent.exe", "GuardianNodeAgent"),
     ("GuardianNodeTray.exe", "GuardianNodeTray"),
 ]
+MAINTENANCE_MARKER = Path(
+    os.environ.get(
+        "GUARDIANNODE_MAINTENANCE_FLAG",
+        str(
+            Path(os.environ.get("PROGRAMDATA", "C:/ProgramData"))
+            / "GuardianNode"
+            / "Secure"
+            / "maintenance.flag"
+        ),
+    )
+)
 
 WTS_ACTIVE = 0
 TH32CS_SNAPPROCESS = 0x00000002
@@ -367,7 +378,15 @@ def _service_running_systemd(unit: str) -> bool:
         return False
 
 
+def _maintenance_mode_active() -> bool:
+    return MAINTENANCE_MARKER.exists()
+
+
 def watchdog_once(peer_service: str | None = None, api: SessionApi | None = None) -> None:
+    if _maintenance_mode_active():
+        log.info("installer maintenance marker present; watchdog repair actions paused")
+        return
+
     if os.name == "nt":
         resolved_api = api or _session_api_windows()
         active_sessions = _active_user_session_ids_windows(resolved_api)
