@@ -6,12 +6,13 @@ import json
 import zipfile
 from datetime import UTC
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.services import pipeline_metrics, rate_limit
 
 
-def _client(monkeypatch, tmp_path) -> TestClient:
+def _client(monkeypatch, tmp_path, *, raise_server_exceptions: bool = True) -> TestClient:
     monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
     from app import settings as settings_mod
 
@@ -24,12 +25,16 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     from app.main import create_app
 
     Base.metadata.create_all(bind=get_engine())
-    return TestClient(create_app(), client=("127.0.0.1", 50000))
+    return TestClient(
+        create_app(),
+        client=("127.0.0.1", 50000),
+        raise_server_exceptions=raise_server_exceptions,
+    )
 
 
-def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
+def _login(client: TestClient) -> None:
     from app.services.setup_token import ensure_setup_token
+
     setup_token = ensure_setup_token()
     r = client.post(
         "/api/auth/setup",
@@ -42,6 +47,18 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     )
     assert r.status_code == 200
     client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrf_token"]})
+
+
+def _export_plaintext_zips(root) -> list:
+    exports_dir = root / "exports"
+    if not exports_dir.exists():
+        return []
+    return list(exports_dir.rglob("*.zip"))
+
+
+def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
 
     # Seed one event + evidence blob with a real encrypted file on disk.
     from datetime import datetime
@@ -121,3 +138,53 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     export_rows = [row for row in audit if row["action"].startswith("storage.export")]
     assert any(row["action"] == "storage.export.download" for row in export_rows)
     assert all("path" not in (row.get("details") or {}) for row in export_rows)
+
+
+@pytest.mark.parametrize("failure_point", ["write", "encrypt"])
+def test_failed_export_deletes_plaintext_zip(monkeypatch, tmp_path, failure_point):
+    client = _client(monkeypatch, tmp_path, raise_server_exceptions=False)
+    _login(client)
+
+    from app import settings as settings_mod
+    from app.api import storage
+    from app.services import encryption
+
+    if failure_point == "write":
+        def fail_write_jsonl(*args, **kwargs):
+            raise RuntimeError("simulated write failure")
+
+        monkeypatch.setattr(storage, "_write_jsonl", fail_write_jsonl)
+    else:
+        def fail_encrypt(*args, **kwargs):
+            raise RuntimeError("simulated encryption failure")
+
+        monkeypatch.setattr(encryption, "encrypt_file_to_disk", fail_encrypt)
+
+    response = client.post("/api/storage/export")
+    assert response.status_code == 500
+    exports_dir = settings_mod.settings.data_dir / "exports"
+    assert _export_plaintext_zips(settings_mod.settings.data_dir) == []
+    assert not list(exports_dir.glob("*.partial"))
+    assert not (exports_dir / ".ignored-cleanup").exists()
+
+
+def test_startup_export_cleanup_deletes_stale_plaintext_artifacts(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+
+    from app import settings as settings_mod
+    from app.api import storage
+
+    exports_dir = settings_mod.settings.data_dir / "exports"
+    tmp_dir = exports_dir / ".tmp"
+    tmp_dir.mkdir(parents=True)
+    (tmp_dir / "abandoned.zip").write_bytes(b"plaintext zip")
+    (exports_dir / "abandoned.tmp").write_bytes(b"tmp")
+    (exports_dir / "abandoned.partial").write_bytes(b"partial")
+
+    storage._cleanup_abandoned_exports()
+
+    assert _export_plaintext_zips(settings_mod.settings.data_dir) == []
+    assert not (exports_dir / "abandoned.tmp").exists()
+    assert not (exports_dir / "abandoned.partial").exists()
+    assert not (exports_dir / ".ignored-cleanup").exists()

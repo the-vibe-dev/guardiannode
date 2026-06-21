@@ -96,3 +96,63 @@ def test_linux_installer_rejects_archive_missing_backend(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "Source archive is missing required path: backend/pyproject.toml" in result.stderr
+
+
+def test_linux_installer_probe_failure_defaults_conservatively(tmp_path: Path) -> None:
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        sudo() {{ return 1; }}
+        probe_hardware_and_pick_tier
+        test "$GN_TIER" = "text_only"
+        test "${{GN_TEXT_MODEL-unset}}" = ""
+        test "${{GN_VISION_MODEL-unset}}" = ""
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_systemd_preserves_blank_model_values(tmp_path: Path) -> None:
+    unit_path = tmp_path / "guardiannode-backend.service"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        systemctl() {{ :; }}
+        GN_TIER="text_only"
+        GN_TEXT_MODEL=""
+        GN_VISION_MODEL=""
+        GN_SYSTEMD_UNIT_PATH="{unit_path}"
+        write_systemd_unit
+        grep -F 'Environment="GUARDIANNODE_CLASSIFIER_TIER=text_only"' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_TEXT_MODEL="' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_VISION_MODEL="' "{unit_path}"
+        ! grep -F 'llama3.2:3b' "{unit_path}"
+        ! grep -F 'qwen3-vl:8b-instruct' "{unit_path}"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_probe_values_render_verbatim(tmp_path: Path) -> None:
+    unit_path = tmp_path / "guardiannode-backend.service"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        systemctl() {{ :; }}
+        GN_TIER="full"
+        GN_TEXT_MODEL="llama3.2:1b"
+        GN_VISION_MODEL="qwen3-vl:8b-instruct"
+        GN_SYSTEMD_UNIT_PATH="{unit_path}"
+        write_systemd_unit
+        grep -F 'Environment="GUARDIANNODE_CLASSIFIER_TIER=full"' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_TEXT_MODEL=llama3.2:1b"' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_VISION_MODEL=qwen3-vl:8b-instruct"' "{unit_path}"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout

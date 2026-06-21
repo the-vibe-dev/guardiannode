@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 
 import httpx
-import pytest
 
 from src import pairing_client
 

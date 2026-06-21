@@ -8,7 +8,7 @@ Status definitions:
 
 | Feature | Status | Platform | Source module | Test reference |
 |---|---|---|---|---|
-| Parent dashboard | Implemented | Backend/web | `dashboard/src/App.tsx` | `dashboard/src/App.test.tsx` |
+| Parent dashboard | Implemented | Backend/web | `dashboard/src/App.tsx` | `dashboard/src/components/Layout.test.tsx` |
 | Backend API and dashboard bundle | Implemented | Linux/Windows | `backend/app/main.py` | `backend/tests/test_readiness_apis.py` |
 | Device pairing by six-digit code | Implemented | Backend/agent | `backend/app/services/pairing.py` | `backend/tests/test_device_auth.py` |
 | Local all-in-one bootstrap pairing | Experimental | Backend/Windows installer | `backend/app/api/devices.py` | `backend/tests/test_pairing_local_bootstrap.py` |

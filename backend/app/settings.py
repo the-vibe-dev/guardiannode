@@ -1,10 +1,16 @@
 """Settings for the GuardianNode backend."""
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
+)
 
 
 def _default_data_dir() -> Path:
@@ -124,18 +130,39 @@ class Settings(BaseSettings):
 
     def effective_allowed_hosts(self) -> list[str]:
         configured = [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
-        if configured == ["*"]:
+        if "*" in configured:
             if self.dev_mode:
-                return ["*"]
-            configured = []
+                if configured == ["*"]:
+                    return ["*"]
+                raise ValueError("GUARDIANNODE_ALLOWED_HOSTS cannot combine '*' with explicit hosts")
+            raise ValueError("GUARDIANNODE_ALLOWED_HOSTS='*' is only allowed when GUARDIANNODE_DEV_MODE=true")
         hosts = configured or ["127.0.0.1", "localhost", "::1", "testserver"]
+        for host in hosts:
+            _validate_allowed_host(host)
         if self.bind_host not in {"0.0.0.0", "::", ""}:
+            _validate_allowed_host(self.bind_host)
             hosts.append(self.bind_host)
         return list(dict.fromkeys(hosts))
 
     def ensure_dirs(self) -> None:
         for d in (self.data_dir, self.keys_dir, self.evidence_dir, self.logs_dir):
             d.mkdir(parents=True, exist_ok=True)
+
+
+def _validate_allowed_host(host: str) -> None:
+    if not host:
+        raise ValueError(f"Invalid allowed host: {host!r}")
+    parsed_host = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        ipaddress.ip_address(parsed_host)
+        return
+    except ValueError:
+        pass
+    if any(ch in host for ch in "/:@"):
+        raise ValueError(f"Invalid allowed host: {host!r}")
+    if _HOSTNAME_RE.fullmatch(host):
+        return
+    raise ValueError(f"Invalid allowed host: {host!r}")
 
 
 settings = Settings()

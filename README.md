@@ -83,7 +83,9 @@ GuardianNode can process:
 - Visible screen/app activity from configured Windows sessions
 - OCR text from screenshots
 - Vision model analysis of screenshots/images
-- Browser/app activity where collectors support it
+- Visible browser and application content captured on screen, plus application
+  and window context. This alpha does not include a browser DOM extension or
+  direct third-party message collector.
 - Risk categories such as grooming, off-platform contact attempts, bullying,
   self-harm language, explicit/sexual content, gore/violence, scams/phishing,
   suspicious links, and private-info sharing
@@ -101,7 +103,7 @@ or other sensitive material visible on the child device.
 - Does not replace platform parental controls
 - Does not replace emergency intervention
 
-GuardianNode may apply basic text filtering/redaction in some collectors, but
+GuardianNode may apply basic text filtering/redaction in some ingest paths, but
 parents should assume captured evidence can contain sensitive on-screen
 information. Evidence is stored locally and encrypted for parent/admin review.
 

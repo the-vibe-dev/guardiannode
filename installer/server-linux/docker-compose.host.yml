@@ -4,6 +4,8 @@
 #   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 #
 # Do not expose the GuardianNode backend directly to the public internet.
+# Set GUARDIANNODE_ALLOWED_HOSTS to the exact LAN IP/hostname child agents use,
+# for example: 192.168.1.42,guardian-server,127.0.0.1,localhost
 # Requires Docker Compose v2.24+ for the custom !reset tag used below.
 
 services:
@@ -12,6 +14,7 @@ services:
     environment:
       - GUARDIANNODE_OLLAMA_URL=http://127.0.0.1:11434
       - GUARDIANNODE_BIND_HOST=0.0.0.0
+      - GUARDIANNODE_ALLOWED_HOSTS=${GUARDIANNODE_ALLOWED_HOSTS:?Set explicit LAN allowed hosts before using host-network mode}
       - GUARDIANNODE_MDNS_ENABLED=true
     ports: !reset []
 

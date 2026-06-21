@@ -37,21 +37,24 @@ def _exports_dir() -> Path:
     return path
 
 
+def _ensure_private_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
+
+
 def _cleanup_abandoned_exports() -> None:
     root = _exports_dir()
     for pattern in ("*.tmp", "*.partial", ".tmp/*.zip"):
         for path in root.glob(pattern):
             if path.is_file():
-                _quarantine_export_file(path)
-
-
-def _quarantine_export_file(path: Path) -> None:
-    quarantine = _exports_dir() / ".ignored-cleanup"
-    quarantine.mkdir(parents=True, exist_ok=True)
-    try:
-        path.replace(quarantine / path.name)
-    except OSError:
-        pass
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
 
 def _export_path(export_id: str) -> Path:
@@ -296,7 +299,7 @@ def export_storage(
         dest = _final_export_path(export_id)
         partial = dest.with_suffix(dest.suffix + ".partial")
         tmp_dir = _exports_dir() / ".tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_private_dir(tmp_dir)
         tmp_zip = tmp_dir / f"{export_id}.zip"
         included_blob_count = 0
         try:
@@ -336,9 +339,10 @@ def export_storage(
             os.replace(partial, dest)
             _fsync_path(dest.parent)
         finally:
-            for path in (tmp_zip, partial):
-                if path.exists():
-                    _quarantine_export_file(path)
+            try:
+                tmp_zip.unlink(missing_ok=True)
+            finally:
+                partial.unlink(missing_ok=True)
     finally:
         _export_lock.release()
     if os.name != "nt":

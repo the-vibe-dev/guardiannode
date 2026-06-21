@@ -11,7 +11,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import threading
 import tkinter as tk
 from pathlib import Path
 from typing import Callable

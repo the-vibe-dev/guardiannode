@@ -19,6 +19,25 @@ Fresh native installs bind to `127.0.0.1` until first-run setup is complete. The
 alpha does not yet include dashboard network controls; enabling LAN access is a
 manual administrator step described in the server + child install guide.
 
+When you deliberately enable LAN access, set both the bind address and the exact
+trusted hostnames/IPs. Do not use `*` outside development mode.
+
+```text
+GUARDIANNODE_BIND_HOST=0.0.0.0
+GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
+```
+
+Replace `192.168.1.42` and `guardian-server` with the actual LAN address and
+hostname that child agents will use. The backend rejects unlisted Host headers.
+
+Plain HTTP lab mode does not encrypt dashboard credentials, cookies, device
+tokens, screenshots, or metadata in transit. For any deployment beyond a
+temporary trusted lab, put the backend behind HTTPS or a trusted VPN and set:
+
+```text
+GUARDIANNODE_HTTPS_ONLY_COOKIES=true
+```
+
 ## Remote Access
 
 Recommended options:

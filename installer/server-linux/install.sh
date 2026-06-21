@@ -34,6 +34,10 @@ green() { printf "\033[32m%s\033[0m\n" "$*"; }
 blue()  { printf "\033[34m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
 
+var_is_set() {
+  eval '[ "${'"$1"'+x}" = "x" ]'
+}
+
 require_root() {
   if [ "$(id -u)" -ne 0 ]; then
     red "This installer must run as root. Use: sudo $0"
@@ -272,15 +276,27 @@ probe_hardware_and_pick_tier() {
   probe_out="$(sudo -u "$GN_USER" "$GN_HOME/venv/bin/python" \
     "$GN_HOME/src/agent-windows/src/hardware_probe.py" 2>/dev/null || true)"
   if [ -z "$probe_out" ]; then
-    yellow "Hardware probe failed; defaulting to vision_only tier."
-    GN_TIER="${GN_TIER:-vision_only}"
-    GN_TEXT_MODEL="${GN_TEXT_MODEL:-}"
-    GN_VISION_MODEL="${GN_VISION_MODEL:-qwen3-vl:8b-instruct}"
+    yellow "Hardware probe failed; defaulting conservatively to text_only without model pulls."
+    if ! var_is_set GN_TIER; then
+      GN_TIER="text_only"
+    fi
+    if ! var_is_set GN_TEXT_MODEL; then
+      GN_TEXT_MODEL=""
+    fi
+    if ! var_is_set GN_VISION_MODEL; then
+      GN_VISION_MODEL=""
+    fi
     return
   fi
-  GN_TIER="${GN_TIER:-$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["classifier_tier"])')}"
-  GN_TEXT_MODEL="${GN_TEXT_MODEL:-$(echo "$probe_out"   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("text_model") or "")')}"
-  GN_VISION_MODEL="${GN_VISION_MODEL:-$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("vision_model") or "")')}"
+  if ! var_is_set GN_TIER; then
+    GN_TIER="$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["classifier_tier"])')"
+  fi
+  if ! var_is_set GN_TEXT_MODEL; then
+    GN_TEXT_MODEL="$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("text_model") or "")')"
+  fi
+  if ! var_is_set GN_VISION_MODEL; then
+    GN_VISION_MODEL="$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("vision_model") or "")')"
+  fi
   local reasoning
   reasoning="$(echo "$probe_out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["reasoning"])')"
   green "Tier: $GN_TIER"
@@ -309,7 +325,9 @@ install_ollama() {
 
 write_systemd_unit() {
   blue "Writing systemd unit..."
-  cat > /etc/systemd/system/guardiannode-backend.service <<EOF
+  local unit_path="${GN_SYSTEMD_UNIT_PATH:-/etc/systemd/system/guardiannode-backend.service}"
+  mkdir -p "$(dirname "$unit_path")"
+  cat > "$unit_path" <<EOF
 [Unit]
 Description=GuardianNode Backend
 After=network-online.target ollama.service
@@ -325,8 +343,8 @@ Environment="GUARDIANNODE_BIND_PORT=$GN_BIND_PORT"
 Environment="GUARDIANNODE_MDNS_ENABLED=false"
 Environment="GUARDIANNODE_LOG_LEVEL=INFO"
 Environment="GUARDIANNODE_CLASSIFIER_TIER=$GN_TIER"
-Environment="GUARDIANNODE_TEXT_MODEL=${GN_TEXT_MODEL:-llama3.2:3b}"
-Environment="GUARDIANNODE_VISION_MODEL=${GN_VISION_MODEL:-qwen3-vl:8b-instruct}"
+Environment="GUARDIANNODE_TEXT_MODEL=${GN_TEXT_MODEL-}"
+Environment="GUARDIANNODE_VISION_MODEL=${GN_VISION_MODEL-}"
 Environment="GUARDIANNODE_OLLAMA_URL=${GN_OLLAMA_URL:-http://127.0.0.1:11434}"
 Environment="GUARDIANNODE_CLASSIFIER_TIMEOUT_SECONDS=120"
 Environment="GUARDIANNODE_VISION_NUM_CTX=8192"
@@ -383,8 +401,9 @@ print_done() {
   echo "    ${GN_SETUP_TOKEN:-read $GN_DATA/keys/setup_token.json}"
   echo
   echo "First-run setup is loopback-only. Finish setup on this server first,"
-  echo "then manually set GUARDIANNODE_BIND_HOST=0.0.0.0 and add a firewall"
-  echo "rule only for a trusted LAN/VPN if you need separated child devices."
+  echo "then manually set GUARDIANNODE_BIND_HOST=0.0.0.0 plus an explicit"
+  echo "GUARDIANNODE_ALLOWED_HOSTS list for the LAN IP/hostname child agents"
+  echo "will use. Add a firewall rule only for a trusted LAN/VPN."
   echo
   echo "Service:    systemctl status guardiannode-backend"
   echo "Logs:       journalctl -u guardiannode-backend"

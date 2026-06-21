@@ -25,8 +25,11 @@ You'll need:
 5. To use a child PC during this alpha, place the server behind a trusted VPN/TLS path first. If you are deliberately running a private lab LAN test, manually edit `%ProgramData%\GuardianNode\server.env` as an administrator:
    ```text
    GUARDIANNODE_BIND_HOST=0.0.0.0
+   GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
    GUARDIANNODE_MDNS_ENABLED=false
    ```
+   Replace `192.168.1.42` and `guardian-server` with the actual server LAN IP
+   or hostname that the child PC will use.
 6. Restart the backend service and add a private-network firewall rule:
    ```powershell
    Restart-Service GuardianNodeBackend
@@ -67,8 +70,11 @@ Add:
 ```ini
 [Service]
 Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"
+Environment="GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost"
 Environment="GUARDIANNODE_MDNS_ENABLED=false"
 ```
+
+Replace the example IP/hostname with your server's actual LAN address/name.
 
 Then run:
 

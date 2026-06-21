@@ -12,13 +12,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
+from app import settings as settings_mod
 from app.api import (
     alerts as alerts_api,
 )
@@ -121,6 +121,34 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
         if request.headers.get("authorization", "").lower().startswith("bearer "):
             return False
         return bool(request.session.get("user_id"))
+
+
+def _host_without_port(host_header: str) -> str:
+    host_header = host_header.strip()
+    if host_header.startswith("["):
+        end = host_header.find("]")
+        if end != -1:
+            return host_header[1:end]
+    if host_header.count(":") == 1:
+        host, port = host_header.rsplit(":", 1)
+        if port.isdigit():
+            return host
+    return host_header
+
+
+class HostHeaderMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, allowed_hosts: list[str]):
+        super().__init__(app)
+        self.allowed_hosts = {
+            host[1:-1] if host.startswith("[") and host.endswith("]") else host
+            for host in allowed_hosts
+        }
+
+    async def dispatch(self, request: Request, call_next):
+        host = _host_without_port(request.headers.get("host", ""))
+        if host not in self.allowed_hosts:
+            return PlainTextResponse("Invalid host header", status_code=400)
+        return await call_next(request)
 
 
 def _ensure_session_secret() -> str:
@@ -281,6 +309,8 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    global settings
+    settings = settings_mod.settings
     app = FastAPI(
         title="GuardianNode",
         version=__version__,
@@ -295,7 +325,7 @@ def create_app() -> FastAPI:
 
     allowed_hosts = settings.effective_allowed_hosts()
     if allowed_hosts and allowed_hosts != ["*"]:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+        app.add_middleware(HostHeaderMiddleware, allowed_hosts=allowed_hosts)
 
     app.add_middleware(
         SessionMiddleware,

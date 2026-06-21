@@ -25,9 +25,18 @@ What it does:
 Open the printed loopback URL in a browser on the server to complete first-run
 setup (admin account + recovery code). Fresh installs do not bind to the LAN.
 For this alpha, enabling a separated-server deployment is a manual admin task:
-set `GUARDIANNODE_BIND_HOST=0.0.0.0` in the systemd environment override,
-restart `guardiannode-backend`, and add an explicit firewall rule only for your
-trusted LAN or VPN.
+set both `GUARDIANNODE_BIND_HOST=0.0.0.0` and an explicit
+`GUARDIANNODE_ALLOWED_HOSTS` list in the systemd environment override, restart
+`guardiannode-backend`, and add an explicit firewall rule only for your trusted
+LAN or VPN.
+
+```text
+GUARDIANNODE_BIND_HOST=0.0.0.0
+GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
+```
+
+Replace the example IP/hostname with the exact LAN address/name child agents
+will use.
 
 ## B) Docker Compose (recommended for home-server enthusiasts)
 
@@ -55,10 +64,10 @@ networking on a Linux host after setup, use the host-network override:
 docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 ```
 
-The host-network override uses Docker Compose's `!reset` tag and requires
-Docker Compose v2.24 or newer. Host networking exposes the backend according to
-`GUARDIANNODE_BIND_HOST` and the host firewall, so use it only on a trusted
-LAN/VPN after first-run setup.
+The host-network override requires `GUARDIANNODE_ALLOWED_HOSTS` in your shell,
+uses Docker Compose's `!reset` tag, and requires Docker Compose v2.24 or newer.
+Host networking exposes the backend according to `GUARDIANNODE_BIND_HOST` and
+the host firewall, so use it only on a trusted LAN/VPN after first-run setup.
 
 Do not expose the backend directly to the public internet. Use a trusted LAN,
 Tailscale/WireGuard, or a reverse proxy with TLS and access controls.

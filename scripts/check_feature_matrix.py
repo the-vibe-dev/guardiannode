@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that implemented/experimental feature-matrix source paths exist."""
+"""Verify implemented/experimental feature-matrix source and test paths."""
 from __future__ import annotations
 
 import sys
@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "docs" / "FEATURE_MATRIX.md"
 CHECKED_STATUSES = {"Implemented", "Experimental"}
+SENTINELS = {"Manual Windows validation", "Not implemented", "Not applicable"}
 
 
 def _table_rows(text: str) -> list[list[str]]:
@@ -28,14 +29,18 @@ def main() -> int:
         if len(row) < 5:
             failures.append(f"Malformed row: {row!r}")
             continue
-        feature, status, _platform, source_module, _test = row[:5]
+        feature, status, _platform, source_module, test_reference = row[:5]
         if status not in CHECKED_STATUSES:
             continue
-        source = source_module.strip("`")
-        if source in {"Manual Windows validation", "Not implemented"}:
-            continue
-        if not (ROOT / source).exists():
-            failures.append(f"{feature}: missing source module {source}")
+        for column, value in (("source module", source_module), ("test reference", test_reference)):
+            ref = value.strip("`")
+            if ref in SENTINELS:
+                continue
+            if ref.lower().startswith("planned "):
+                failures.append(f"{feature}: invalid {column} sentinel {ref!r}")
+                continue
+            if not (ROOT / ref).exists():
+                failures.append(f"{feature}: missing {column} {ref}")
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
