@@ -59,6 +59,9 @@ def test_master_key_status_records_raw_key_metadata():
 
 
 def test_existing_raw_key_loads_and_gets_metadata():
+    for path in (encryption._dpapi_key_path(), encryption._metadata_path()):
+        if path.exists():
+            path.unlink()
     key_path = encryption._key_path()
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_bytes(b"k" * 32)

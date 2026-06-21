@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import sys
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,7 +44,7 @@ def integrity_check(path: Path | None = None) -> IntegrityResult:
     db_path = path or configured_sqlite_path()
     if not db_path.is_file():
         raise DatabaseMaintenanceError(f"SQLite database not found: {db_path}")
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
         rows = [str(row[0]) for row in conn.execute("PRAGMA integrity_check").fetchall()]
     return IntegrityResult(ok=rows == ["ok"], messages=rows)
 
@@ -103,10 +104,11 @@ def backup_database(destination: Path, *, source: Path | None = None, overwrite:
         raise DatabaseMaintenanceError(f"Backup already exists: {destination}")
     tmp_path = destination.with_name(f".{destination.name}.{uuid4().hex}.partial")
     try:
-        with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as src:
-            with sqlite3.connect(tmp_path) as dst:
+        with closing(sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)) as src:
+            with closing(sqlite3.connect(tmp_path)) as dst:
                 src.backup(dst)
                 dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                dst.commit()
         result = integrity_check(tmp_path)
         if not result.ok:
             raise DatabaseMaintenanceError(
@@ -141,9 +143,10 @@ def restore_database(backup: Path, *, destination: Path | None = None) -> Path:
     tmp_path = destination_path.with_name(f".{destination_path.name}.{uuid4().hex}.restore")
     replaced_path: Path | None = None
     try:
-        with sqlite3.connect(f"file:{backup}?mode=ro", uri=True) as src:
-            with sqlite3.connect(tmp_path) as dst:
+        with closing(sqlite3.connect(f"file:{backup}?mode=ro", uri=True)) as src:
+            with closing(sqlite3.connect(tmp_path)) as dst:
                 src.backup(dst)
+                dst.commit()
         result = integrity_check(tmp_path)
         if not result.ok:
             raise DatabaseMaintenanceError(
