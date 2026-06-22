@@ -55,6 +55,15 @@ def test_child_only_install_does_not_stage_backend_or_dashboard_payload() -> Non
     assert r"UninstallDisplayIcon={app}\agent\{#MyAppExeName}" in text
 
 
+def test_child_installer_does_not_collect_non_authoritative_age_group() -> None:
+    text = CHILD_INSTALLER.read_text(encoding="utf-8")
+
+    assert "ChildProfilePage" not in text
+    assert "AgeGroupValue" not in text
+    assert "age_group:" not in text
+    assert "How old is the child" not in text
+
+
 def test_child_installer_uses_allow_only_service_dacl_and_no_taskbar_pin() -> None:
     text = CHILD_INSTALLER.read_text(encoding="utf-8")
 

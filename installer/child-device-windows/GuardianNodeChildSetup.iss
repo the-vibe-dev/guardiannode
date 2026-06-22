@@ -185,7 +185,6 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags
 
 var
   ModePage: TInputOptionWizardPage;
-  ChildProfilePage: TInputOptionWizardPage;
   ServerConnectionPage: TInputQueryWizardPage;
   HardwareSummaryPage: TOutputMsgWizardPage;
   // Hardware-probe result, filled in during ProbeHardware()
@@ -571,17 +570,6 @@ begin
   Result := IsAllInOne or (Trim(ServerConnectionPage.Values[0]) <> '');
 end;
 
-function AgeGroupValue: String;
-begin
-  case ChildProfilePage.SelectedValueIndex of
-    0: Result := 'under_10';
-    1: Result := '10_13';
-    2: Result := '14_17';
-  else
-    Result := '10_13';
-  end;
-end;
-
 procedure InitializeWizard;
 var
   ModeParam, ServerUrlParam, PairCodeParam: String;
@@ -603,19 +591,8 @@ begin
   if (ModeParam = 'child') or (ServerUrlParam <> '') or (PairCodeParam <> '') then
     ModePage.SelectedValueIndex := 1;
 
-  // -- Child profile --
-  ChildProfilePage := CreateInputOptionPage(ModePage.ID,
-    'Child profile',
-    'How old is the child using this PC?',
-    'GuardianNode adjusts detection sensitivity by age group. You''ll create your parent account and password in the dashboard right after installation.',
-    True, False);
-  ChildProfilePage.Add('Under 10');
-  ChildProfilePage.Add('10 – 13');
-  ChildProfilePage.Add('14 – 17');
-  ChildProfilePage.SelectedValueIndex := 1;
-
   // -- Server connection (only used in separated mode) --
-  ServerConnectionPage := CreateInputQueryPage(ChildProfilePage.ID,
+  ServerConnectionPage := CreateInputQueryPage(ModePage.ID,
     'Connect to GuardianNode server',
     'Enter the pairing code shown on your parent dashboard (Devices > Add device).',
     'Enter the exact server URL from the parent dashboard or setup guide.');
@@ -677,19 +654,18 @@ begin
 
   // Write the agent config based on wizard inputs
   CfgPath := AddBackslash(ServerDataDir) + 'agent.yaml';
-  SetArrayLength(CfgFile, 9);
+  SetArrayLength(CfgFile, 8);
   if IsAllInOne or (ServerUrl = '') then
     CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
   else
     CfgFile[0] := 'backend_url: ' + ServerUrl;
-  CfgFile[1] := 'age_group: ' + AgeGroupValue;
-  CfgFile[2] := 'ocr_engine: tesseract';
-  CfgFile[3] := 'ocr_cadence_seconds: 5';
-  CfgFile[4] := 'ocr_min_confidence: 0.5';
-  CfgFile[5] := 'phash_threshold: 2';
-  CfgFile[6] := 'log_level: INFO';
-  CfgFile[7] := 'dry_run: false';
-  CfgFile[8] := 'full_screen_capture_enabled: true';
+  CfgFile[1] := 'ocr_engine: tesseract';
+  CfgFile[2] := 'ocr_cadence_seconds: 5';
+  CfgFile[3] := 'ocr_min_confidence: 0.5';
+  CfgFile[4] := 'phash_threshold: 2';
+  CfgFile[5] := 'log_level: INFO';
+  CfgFile[6] := 'dry_run: false';
+  CfgFile[7] := 'full_screen_capture_enabled: true';
   SaveStringsAtomic(CfgPath, CfgFile);
 
   // Drop the pending pairing handshake for the agent to complete on first
