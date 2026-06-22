@@ -32,16 +32,23 @@ Security boundaries:
 - Parent dashboard access requires admin authentication.
 - Child devices authenticate to ingest APIs with device credentials after
   pairing.
-- Evidence is encrypted at rest with AES-GCM using a local backend master key.
+- Retained screenshot blobs and collected event text are encrypted at rest with
+  AES-256-GCM using the backend master key.
 - The backend data directory, key directory, and host OS remain trusted.
 
 Important limitations:
 
 - Separated mode currently uses local-network HTTP unless the operator adds TLS,
   a VPN such as Tailscale/WireGuard, or a trusted reverse proxy.
-- The local `master.key` file can decrypt stored evidence. If an attacker gets
-  full filesystem access to the backend data and key directories, at-rest
-  encryption will not protect that evidence.
+- GuardianNode does not encrypt the whole SQLite database in this alpha. App
+  names, window titles, URLs, timestamps, device/profile IDs, child profile
+  fields, risk summaries, snippets, alert notes, audit details, and source IPs
+  remain plaintext metadata in the database or protected backend data directory.
+- On new Windows installs the backend master key is wrapped with Windows DPAPI
+  LocalMachine as `keys/master.key.dpapi`. Linux, macOS, and source deployments
+  outside Windows currently use `keys/master.key` with restrictive filesystem
+  permissions. Upgraded Windows installs may retain a legacy raw key after
+  generating a DPAPI-wrapped copy.
 - The recovery code resets dashboard access only. It does not derive,
   reconstruct, wrap, or back up the evidence encryption key.
 - A determined local Windows administrator can eventually disable or remove any
@@ -50,9 +57,30 @@ Important limitations:
 
 ## Evidence Encryption And Recovery
 
-The backend creates a local `master.key` file on first use. Encrypted screenshots
-and sensitive event fields are protected by that key. Back up the backend data
-directory, including the key directory, if you need long-term evidence recovery.
+GuardianNode encrypts retained screenshot blobs and collected event text with
+AES-256-GCM. On new Windows installations, the 32-byte backend master key is
+wrapped with Windows DPAPI in LocalMachine scope and stored as
+`keys/master.key.dpapi`. On Linux, macOS, and source deployments outside
+Windows, the current alpha stores `keys/master.key` with restrictive filesystem
+permissions. Upgraded Windows installations may retain a legacy raw key after
+generating a DPAPI-wrapped copy; verify a portable backup before removing the
+legacy file. DPAPI LocalMachine protects against casual file copying but is not
+a boundary against a sufficiently privileged process on that machine.
+
+Create and store a portable key backup separately from the database and evidence
+directory:
+
+```bash
+cd backend
+python -m app.services.encryption export-key-backup /safe/path/guardiannode-master-key-backup.json
+```
+
+Restore it when moving or recovering the backend:
+
+```bash
+cd backend
+python -m app.services.encryption import-key-backup /safe/path/guardiannode-master-key-backup.json
+```
 
 The 12-word recovery code is for parent dashboard account recovery. Losing both
 the parent password and recovery code can lock you out of the dashboard. Losing
@@ -96,8 +124,9 @@ The maintainers do not support and do not want contributions that enable:
 - For separated mode, use a trusted LAN or VPN and do not port-forward the
   backend to the internet.
 - Set a strong parent password and store the recovery code offline.
-- Back up the backend data directory and `master.key` if you need evidence
-  recovery.
+- Back up the backend data directory and create a portable master-key backup if
+  you need evidence recovery.
+- Use full-disk encryption on the backend host.
 - Use standard, non-admin Windows accounts for children where possible.
 - Review [docs/SECURE_LAN_SETUP.md](docs/SECURE_LAN_SETUP.md) before remote
   access.

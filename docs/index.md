@@ -17,9 +17,9 @@ screenshots, OCR, vision/text classification, encrypted local evidence, and a
 parent dashboard.
 </p>
 
-[Install on one PC](PARENT_GUIDES/install-on-one-pc.md){ .md-button .md-button--primary }
-[Server + child PC](PARENT_GUIDES/install-server-and-child.md){ .md-button }
+[Quick Start From Source](#quick-start-from-source){ .md-button .md-button--primary }
 [Known limitations](https://github.com/the-vibe-dev/guardiannode/blob/main/KNOWN_LIMITATIONS.md){ .md-button }
+[Backend setup](BACKEND_SETUP.md){ .md-button }
 [Support development](SUPPORT.md){ .md-button }
 
 </div>
@@ -110,6 +110,24 @@ GUARDIANNODE_VISION_MODEL= \
 uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8787
 ```
 
+In another terminal after the backend starts, print the one-time setup token:
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("local_config/dev-data/keys/setup_token.json")
+print(json.loads(path.read_text(encoding="utf-8"))["token"])
+PY
+```
+
+For Windows source testing, the equivalent PowerShell command is:
+
+```powershell
+(Get-Content .\local_config\dev-data\keys\setup_token.json | ConvertFrom-Json).token
+```
+
 Build and test the dashboard separately when changing UI code:
 
 ```bash
@@ -120,12 +138,13 @@ npm test -- --run
 npm run build
 ```
 
-Open `http://127.0.0.1:8787/setup`, create the parent account, and write down
-the recovery code. Installer paths are maintainer qualification paths only in
-this alpha; do not pipe an unverified network response directly into a
-privileged shell.
+Open `http://127.0.0.1:8787/setup`, paste this one-time token, create the
+parent account, and write down the recovery code. Do not post the setup token in
+an issue or chat. See [Backend setup](BACKEND_SETUP.md) for more detail.
+Installer paths are maintainer qualification paths only in this alpha; do not
+pipe an unverified network response directly into a privileged shell.
 
-Step-by-step with screenshots: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
+Experimental installer qualification guides: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
 
 ## Guides
 

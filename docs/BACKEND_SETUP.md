@@ -32,9 +32,14 @@ and security/runtime flags. Use this to verify an installer-written
 
 ## First run
 
-1. Backend creates the evidence master key (random 32 bytes, AES-GCM). Windows
-   service installs store new keys as `keys/master.key.dpapi`; Linux/source
-   installs use `keys/master.key` with restrictive filesystem permissions.
+1. Backend creates the evidence master key (random 32 bytes, AES-GCM).
+   GuardianNode encrypts retained screenshot blobs and collected event text with
+   AES-256-GCM. On new Windows installations, the key is wrapped with Windows
+   DPAPI in LocalMachine scope and stored as `keys/master.key.dpapi`. On Linux,
+   macOS, and source deployments outside Windows, the current alpha stores
+   `keys/master.key` with restrictive filesystem permissions. Upgraded Windows
+   installations may retain a legacy raw key after generating a DPAPI-wrapped
+   copy; verify a portable backup before removing the legacy file.
 2. Backend creates `~/.guardiannode/guardiannode.db` (SQLite).
 3. Backend creates a one-time setup token in `keys/setup_token.json`.
 4. Setup wizard at `/setup` prompts for the setup token and admin account.
@@ -47,7 +52,17 @@ an installed backend Python environment:
 python -m app.services.encryption export-key-backup ~/guardiannode-master-key-backup.json
 ```
 
-Store that backup separately from the database and evidence directory.
+Restore it when moving or recovering the backend:
+
+```bash
+python -m app.services.encryption import-key-backup ~/guardiannode-master-key-backup.json
+```
+
+Store that backup separately from the database and evidence directory. DPAPI
+LocalMachine protects against casual file copying but is not a boundary against
+a sufficiently privileged process on that machine. The 12-word recovery code
+resets the parent dashboard account only. It cannot decrypt evidence and does
+not replace a master-key backup.
 
 ## Production install (Windows)
 

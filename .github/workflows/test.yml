@@ -71,6 +71,8 @@ jobs:
         run: pytest -v tests
       - name: Check generated hardware tier constants
         run: python scripts/sync_hardware_tiers.py --check
+      - name: Check third-party notices
+        run: python scripts/check_third_party_notices.py
 
   agent:
     runs-on: ubuntu-latest

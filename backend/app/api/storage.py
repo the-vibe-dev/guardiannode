@@ -328,8 +328,10 @@ def export_storage(
                     "evidence_blobs_missing": missing_files,
                     "note": (
                         "evidence/*.enc files are AES-256-GCM ciphertext exactly as stored; "
-                        "decryption requires this server's master key (keys/master.key) "
-                        "with the blob_id as associated data."
+                        "decryption requires this backend's master key, which may be "
+                        "DPAPI-wrapped on Windows or restored from a portable key backup, "
+                        "with the blob_id as associated data. The dashboard recovery code "
+                        "does not decrypt evidence."
                     ),
                 }
                 zf.writestr("manifest.json", json.dumps(manifest, indent=2))

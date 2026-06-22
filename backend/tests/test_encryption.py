@@ -75,6 +75,26 @@ def test_existing_raw_key_loads_and_gets_metadata():
     assert status["metadata"]["wrapping"] == expected_storage
 
 
+def test_master_key_status_reports_dpapi_metadata_mode():
+    for path in (encryption._key_path(), encryption._metadata_path()):
+        if path.exists():
+            path.unlink()
+    dpapi_path = encryption._dpapi_key_path()
+    dpapi_path.parent.mkdir(parents=True, exist_ok=True)
+    dpapi_path.write_bytes(b"dpapi-wrapped-placeholder")
+    encryption._write_key_metadata(wrapping="dpapi-local-machine", migrated_from="raw-file")
+    encryption._reset_cache()
+
+    status = encryption.master_key_status()
+
+    assert status["storage"] == "dpapi-local-machine"
+    assert status["raw_key_present"] is False
+    assert status["dpapi_key_present"] is True
+    assert status["metadata_present"] is True
+    assert status["metadata"]["wrapping"] == "dpapi-local-machine"
+    assert status["metadata"]["migrated_from"] == "raw-file"
+
+
 def test_master_key_backup_export_import_roundtrip(tmp_path):
     original = encryption.get_master_key()
     backup = tmp_path / "master-key-backup.json"

@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   validate:
+    if: ${{ !contains(github.ref_name, '-installer-test') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -37,6 +38,8 @@ jobs:
           pip install -e ".[dev]"
           python -m compileall -q app tests
           pytest -v
+          pip install pip-audit
+          pip-audit --strict .
 
       - name: Install agent and run checks
         working-directory: agent-windows
@@ -46,12 +49,14 @@ jobs:
           python -m compileall -q src tests
           pytest -v
           ruff check src tests
+          pip-audit --strict .
 
       - name: Run release helper checks
         run: |
           python scripts/check_feature_matrix.py
           python scripts/check_version_consistency.py
           python scripts/sync_hardware_tiers.py --check
+          python scripts/check_third_party_notices.py
           bash -n installer/server-linux/install.sh
           pytest -v tests
 
@@ -67,6 +72,7 @@ jobs:
           npm run typecheck
           npm test -- --run
           npm run build
+          diff -qr dist ../backend/app/static
 
       - name: Guard source-only release assets
         shell: bash
@@ -80,6 +86,7 @@ jobs:
           fi
 
   release:
+    if: ${{ !contains(github.ref_name, '-installer-test') }}
     runs-on: ubuntu-latest
     needs: validate
     steps:

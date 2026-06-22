@@ -62,9 +62,12 @@ does not upload child data to a vendor cloud.
 ## Step 7 — Hardware detection
 
 The installer checks your PC and recommends an AI model size:
-- **Tiny** (8 GB RAM or less) — works on any modern PC, slower
-- **Small** (8–16 GB RAM) — good balance
-- **Medium** (16+ GB RAM, ideally with a GPU) — fastest and most accurate
+
+| Tier | Requirement | Coverage |
+|---|---|---|
+| Text-only | Any supported PC with at least 8 GB RAM; no supported GPU required | Text/rule risks only; visual-only nudity/gore is not detected |
+| Vision | NVIDIA GPU with 12–15 GB VRAM | Vision classification plus text/rules |
+| Full | NVIDIA GPU with at least 16 GB VRAM | Vision plus the larger text-analysis path |
 
 Pick the recommended option unless you know better. Click **Next** and the installer downloads the model (1–5 GB depending on tier). This takes 5–20 minutes.
 
@@ -92,7 +95,11 @@ See [Pause monitoring when you use the PC](pause-monitoring-when-you-use-the-pc.
 
 GuardianNode runs in the background. If it detects a risk (grooming, scams, self-harm signals, etc.), it appears in your dashboard with a clear explanation. **Critical alerts** also trigger an immediate notification.
 
-Open the dashboard at any time to review alerts: `http://127.0.0.1:8787` from a bookmark on the same PC, or from your phone if you set up LAN mode in settings.
+Open the dashboard at any time to review alerts: `http://127.0.0.1:8787`
+from a bookmark on the same PC. The alpha dashboard is loopback-only by
+default. Advanced operators may configure access through a trusted VPN or TLS
+reverse proxy using `docs/SECURE_LAN_SETUP.md`; there is no one-click LAN
+settings control in this release.
 
 ## Got stuck?
 

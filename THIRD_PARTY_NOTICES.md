@@ -1,57 +1,79 @@
 # Third-Party Notices
 
-GuardianNode bundles or directly depends on the following third-party components. Each component retains its original license.
+GuardianNode bundles or directly depends on the following third-party
+components. Each component retains its original license.
 
-## Backend (Python)
+<!-- third-party-notices:acknowledged
+backend: fastapi, uvicorn, pydantic, pydantic-settings, sqlalchemy, alembic, cryptography, argon2-cffi, httpx, python-multipart, pyyaml, zeroconf, qrcode, pillow, pytesseract, python-ulid, itsdangerous, jinja2
+agent: httpx, pyyaml, psutil, mss, pillow, pydantic, argon2-cffi, cryptography, python-ulid, zeroconf, pywin32, pystray, opencv-python, pytesseract
+dashboard: @fontsource/inter, @fontsource/sora, react, react-dom, react-router-dom
+other: inno setup, winsw, pyinstaller, ollama
+-->
+
+## Backend Runtime Dependencies (Python)
 
 | Component | License | Project |
 |---|---|---|
-| FastAPI | MIT | https://github.com/tiangolo/fastapi |
-| Starlette | BSD-3 | https://github.com/encode/starlette |
-| Uvicorn | BSD-3 | https://github.com/encode/uvicorn |
+| FastAPI | MIT | https://github.com/fastapi/fastapi |
+| Uvicorn | BSD-3-Clause | https://github.com/encode/uvicorn |
 | Pydantic | MIT | https://github.com/pydantic/pydantic |
+| pydantic-settings | MIT | https://github.com/pydantic/pydantic-settings |
 | SQLAlchemy | MIT | https://www.sqlalchemy.org/ |
 | Alembic | MIT | https://alembic.sqlalchemy.org/ |
-| cryptography | Apache-2.0 / BSD-3 | https://github.com/pyca/cryptography |
+| cryptography | Apache-2.0 / BSD-3-Clause | https://github.com/pyca/cryptography |
 | argon2-cffi | MIT | https://github.com/hynek/argon2-cffi |
-| httpx | BSD-3 | https://github.com/encode/httpx |
+| httpx | BSD-3-Clause | https://github.com/encode/httpx |
 | python-multipart | Apache-2.0 | https://github.com/Kludex/python-multipart |
-| python-jose | MIT | https://github.com/mpdavis/python-jose |
+| PyYAML | MIT | https://github.com/yaml/pyyaml |
 | zeroconf | LGPL-2.1 | https://github.com/python-zeroconf/python-zeroconf |
-| qrcode | BSD-3 | https://github.com/lincolnloop/python-qrcode |
+| qrcode | BSD-3-Clause | https://github.com/lincolnloop/python-qrcode |
 | Pillow | HPND | https://python-pillow.org/ |
-| pyyaml | MIT | https://github.com/yaml/pyyaml |
+| pytesseract | Apache-2.0 | https://github.com/madmaze/pytesseract |
+| python-ulid | MIT | https://github.com/mdomke/python-ulid |
+| itsdangerous | BSD-3-Clause | https://github.com/pallets/itsdangerous |
+| Jinja2 | BSD-3-Clause | https://github.com/pallets/jinja |
 
-Note on `zeroconf` (LGPL-2.1): We use it as an unmodified Python package via
-PyPI. Users can replace it with an alternative mDNS implementation if their
-compliance requirements demand it.
+Note on `zeroconf` (LGPL-2.1): GuardianNode uses it as an unmodified Python
+package via PyPI. Operators can disable mDNS or replace the package in a source
+deployment if their compliance requirements demand it.
 
-## Agent (Windows)
+## Windows Agent Dependencies (Python)
 
 | Component | License | Project |
 |---|---|---|
-| pywin32 | PSF-2.0 | https://github.com/mhammond/pywin32 |
-| psutil | BSD-3 | https://github.com/giampaolo/psutil |
+| httpx | BSD-3-Clause | https://github.com/encode/httpx |
+| PyYAML | MIT | https://github.com/yaml/pyyaml |
+| psutil | BSD-3-Clause | https://github.com/giampaolo/psutil |
 | mss | MIT | https://github.com/BoboTiG/python-mss |
+| Pillow | HPND | https://python-pillow.org/ |
+| Pydantic | MIT | https://github.com/pydantic/pydantic |
+| argon2-cffi | MIT | https://github.com/hynek/argon2-cffi |
+| cryptography | Apache-2.0 / BSD-3-Clause | https://github.com/pyca/cryptography |
+| python-ulid | MIT | https://github.com/mdomke/python-ulid |
+| zeroconf | LGPL-2.1 | https://github.com/python-zeroconf/python-zeroconf |
+| pywin32 | PSF-2.0 | https://github.com/mhammond/pywin32 |
 | pystray | LGPL-3.0 | https://github.com/moses-palmer/pystray |
-| PaddleOCR (optional) | Apache-2.0 | https://github.com/PaddlePaddle/PaddleOCR |
-| pytesseract (optional) | Apache-2.0 | https://github.com/madmaze/pytesseract |
 | opencv-python | Apache-2.0 | https://github.com/opencv/opencv-python |
+| pytesseract | Apache-2.0 | https://github.com/madmaze/pytesseract |
 
-Note on `pystray` (LGPL-3.0): Used unmodified. Same caveat as zeroconf above.
+Note on `pystray` (LGPL-3.0): GuardianNode uses it as an unmodified package.
 
-## Dashboard (Node)
+## Dashboard Runtime Dependencies (Node)
 
 | Component | License | Project |
 |---|---|---|
+| @fontsource/inter | OFL-1.1 | https://github.com/fontsource/font-files/tree/main/fonts/google/inter |
+| @fontsource/sora | OFL-1.1 | https://github.com/fontsource/font-files/tree/main/fonts/google/sora |
 | React | MIT | https://github.com/facebook/react |
-| Vite | MIT | https://github.com/vitejs/vite |
-| Tailwind CSS | MIT | https://github.com/tailwindlabs/tailwindcss |
-| React Router | MIT | https://github.com/remix-run/react-router |
-| TanStack Query | MIT | https://github.com/TanStack/query |
-| Zod | MIT | https://github.com/colinhacks/zod |
+| React DOM | MIT | https://github.com/facebook/react |
+| React Router DOM | MIT | https://github.com/remix-run/react-router |
 
-## Installer & Service Wrappers
+Bundled font license texts are included at:
+
+- [`licenses/Inter-OFL-1.1.txt`](licenses/Inter-OFL-1.1.txt)
+- [`licenses/Sora-OFL-1.1.txt`](licenses/Sora-OFL-1.1.txt)
+
+## Installer, Build, And Service Wrappers
 
 | Component | License | Project |
 |---|---|---|
@@ -61,25 +83,32 @@ Note on `pystray` (LGPL-3.0): Used unmodified. Same caveat as zeroconf above.
 
 Note on `PyInstaller` (GPL-2.0): PyInstaller's bootloader exception explicitly
 allows distribution of the resulting executables under other licenses.
-GuardianNode-built `.exe` files are AGPL-3.0 unless a separate commercial
+GuardianNode-built executables are AGPL-3.0 unless a separate commercial
 license applies.
 
-## External services (optional, not bundled)
+## External Services And Models
 
 | Service | Used for | Required? |
 |---|---|---|
-| Ollama | Local LLM runtime | Yes (pulled at install) |
+| Ollama | Local LLM runtime | Required for model-backed classification |
 | SMTP server | Email notifications | Optional, parent-configured |
 | Pi-hole / AdGuard Home | Domain blocking | Optional integration |
 
-Models pulled from Ollama have their own licenses. See [`MODEL_LICENSES.md`](MODEL_LICENSES.md).
+Models pulled from Ollama have their own licenses. See
+[`MODEL_LICENSES.md`](MODEL_LICENSES.md).
 
-## License compliance verification
+## License Compliance Verification
 
-Before release, review installed dependencies against
-[`DEPENDENCY_POLICY.md`](DEPENDENCY_POLICY.md). A dedicated automated checker is
-planned, but this source checkout does not currently include one.
+Before release, run:
 
-## Reporting a missing notice
+```bash
+python scripts/check_third_party_notices.py
+```
 
-If you spot a dependency we should be acknowledging here, open an issue or PR.
+Also review installed dependency metadata against
+[`DEPENDENCY_POLICY.md`](DEPENDENCY_POLICY.md), especially before publishing
+binary installers or containers.
+
+## Reporting A Missing Notice
+
+If you spot a dependency we should acknowledge here, open an issue or PR.

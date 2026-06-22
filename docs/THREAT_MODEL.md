@@ -58,14 +58,21 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
 
 ### 3.3 Attacker who steals the backend disk / database
 - **Read evidence directly.** Mitigation: evidence blobs and redacted text are
-  encrypted at rest with AES-256-GCM; the database stores ciphertext.
-  **Honest limitation:** new Windows backend keys are wrapped with DPAPI
-  LocalMachine, but Linux/other platforms and migrated alpha installs may still
-  use a raw `<data>/keys/master.key` protected by filesystem permissions only.
-  An attacker with full machine access while the backend can decrypt, or with
-  the raw key directory, can decrypt stored evidence. At-rest encryption here
-  protects against partial exposure (for example, a copied database file or
-  evidence directory), not against total machine compromise.
+  encrypted at rest with AES-256-GCM. New Windows backend keys are wrapped with
+  DPAPI LocalMachine as `<data>/keys/master.key.dpapi`. Linux, macOS, and source
+  deployments outside Windows use a raw `<data>/keys/master.key` protected by
+  filesystem permissions only. Upgraded Windows alpha installs may retain a
+  legacy raw key after generating a DPAPI-wrapped copy; verify a portable
+  backup before removing the legacy file. An attacker with full machine access
+  while the backend can decrypt, with the raw key directory, or with sufficient
+  Windows privilege to use the DPAPI-wrapped key can decrypt stored evidence.
+  At-rest encryption protects against partial exposure, not total machine
+  compromise.
+- **Read plaintext metadata.** The current alpha does not encrypt the whole
+  SQLite database. App names, window titles, URLs, timestamps, profile fields,
+  risk summaries, snippets, alert notes, audit details, and pending screenshot
+  JSON metadata remain plaintext metadata in the protected backend data
+  directory. Use full-disk encryption on the backend host.
 - **Replay old data.** Retention policy and the cleanup worker bound how long
   evidence lives (see [RETENTION.md](RETENTION.md)).
 

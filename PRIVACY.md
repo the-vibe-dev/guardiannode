@@ -13,7 +13,7 @@ capture scope, retention, and access carefully.
 - Screenshots from the configured Windows session
 - OCR text extracted from screenshots
 - Vision model analysis of screenshots/images
-- App/window names and URLs where collectors support them
+- App/window names and URLs visible in captured screenshot context where available
 - Risk results, categories, summaries, and confidence scores
 - Parent/admin actions such as evidence views, exports, wipes, and pauses
 
@@ -48,14 +48,53 @@ directly to the public internet. See [docs/SECURE_LAN_SETUP.md](docs/SECURE_LAN_
 
 ## Evidence Storage
 
-Sensitive event fields and evidence blobs are encrypted at rest with AES-GCM
-using a local backend `master.key` file. The key is protected by filesystem
-permissions and installer-applied ACLs where available. It is not currently
-wrapped by DPAPI or another OS keystore.
+GuardianNode encrypts retained screenshot blobs and collected event text with
+AES-256-GCM. On new Windows installations, the 32-byte backend master key is
+wrapped with Windows DPAPI in LocalMachine scope and stored as
+`keys/master.key.dpapi`. On Linux, macOS, and source deployments outside
+Windows, the current alpha stores `keys/master.key` with restrictive filesystem
+permissions. Upgraded Windows installations may retain a legacy raw key after
+generating a DPAPI-wrapped copy; verify a portable backup before removing the
+legacy file. DPAPI LocalMachine protects against casual file copying but is not
+a boundary against a sufficiently privileged process on that machine.
 
-The 12-word recovery code resets parent dashboard access only. It does not
-derive, reconstruct, or back up the evidence encryption key. If `master.key` is
-lost, encrypted evidence may not be recoverable.
+Create a portable, passphrase-encrypted key backup from the backend environment:
+
+```bash
+cd backend
+python -m app.services.encryption export-key-backup /safe/path/guardiannode-master-key-backup.json
+```
+
+Restore it when moving or recovering the backend:
+
+```bash
+cd backend
+python -m app.services.encryption import-key-backup /safe/path/guardiannode-master-key-backup.json
+```
+
+The 12-word recovery code resets the parent dashboard account only. It cannot
+decrypt evidence and does not replace a master-key backup.
+
+## At-Rest Encryption Boundary
+
+| Data | Current alpha storage |
+|---|---|
+| Retained screenshot/evidence bytes | AES-GCM encrypted |
+| Collected OCR/event text in `Event.redacted_text_enc` | AES-GCM encrypted |
+| Completed `.gnexport` package | Encrypted with the backend master key |
+| App name, window title, URL, timestamps, device/profile IDs | Plaintext database metadata |
+| Child profile name, notes, age group, custom watch phrases | Plaintext database fields |
+| Risk summary, category list, evidence snippets, confidence | Plaintext database fields |
+| Alert notes/actions and notification summaries | Plaintext database fields |
+| Audit details and source IP | Plaintext database fields |
+| Pending screenshot image | Encrypted |
+| Pending screenshot JSON metadata | Plaintext in the protected backend data directory |
+
+GuardianNode does not encrypt the whole SQLite database in this alpha; the
+table above identifies plaintext metadata explicitly. Use
+full-disk encryption on the backend host. Anyone with privileged access to the
+live backend process, database, key material, or unlocked operating system may
+access GuardianNode data.
 
 ## Redaction And Filtering
 
