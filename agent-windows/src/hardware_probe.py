@@ -14,6 +14,11 @@ import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 
+try:
+    from .hardware_tiers import select_tier
+except ImportError:  # pragma: no cover - direct script execution by installers
+    from hardware_tiers import select_tier
+
 
 @dataclass
 class HardwareInfo:
@@ -90,72 +95,11 @@ def _detect_gpu() -> tuple[str | None, str | None, int | None]:
     return None, None, None
 
 
-# Tier selection thresholds (VRAM in GB). Sizes are the REAL hot footprint:
-# qwen3-vl:8b-instruct is ~7.5 GB of weights PLUS a ~3-4 GB compute-graph/KV workspace
-# at num_ctx=4096, so it needs the better part of a 12 GB card on its own.
-#
-#   vision_only: qwen3-vl:8b-instruct — the standard GPU path. The vision model does
-#                OCR, image classification (nudity/gore/weapons/etc.), AND
-#                text-risk classification (grooming/self-harm/scam) in one call.
-#                Needs ~6 GB+; comfortable on 8-12 GB.
-#   full:        vision LLM + a separate text LLM kept hot together. This does
-#                NOT fit on a single 12 GB GPU (the vision model alone wants
-#                ~11 GB). Only auto-selected at 16 GB+; otherwise it thrashes
-#                VRAM and the vision model errors out. vision_only already
-#                covers text, so full is a marginal second-opinion upgrade.
-#   text_only:   no/low-VRAM GPU. Tesseract OCR + a small text LLM on CPU. This
-#                is the no-GPU fallback and CANNOT see visual-only risks
-#                (nudity/gore in images without on-screen text).
-def _select_tier(ram_gb: int, vram_gb: int | None) -> tuple[str, str, str | None, str | None, float]:
-    v = vram_gb or 0
-    if v >= 16:
-        return (
-            "full",
-            f"GPU has {v} GB VRAM — enough to keep the vision LLM and a separate text "
-            "LLM hot together for a second opinion on extracted text.",
-            "llama3.2:3b",
-            "qwen3-vl:8b-instruct",
-            13.0,
-        )
-    if v >= 6:
-        return (
-            "vision_only",
-            f"GPU has {v} GB VRAM — runs the vision model, which detects visual risks "
-            "(nudity, gore, weapons, etc.), reads the on-screen text (OCR), and classifies "
-            "that text (grooming, self-harm, scams) in a single pass. Full coverage.",
-            None,
-            "qwen3-vl:8b-instruct",
-            11.0,
-        )
-    if ram_gb >= 8:
-        return (
-            "text_only",
-            "No GPU (or under 6 GB VRAM). Lower-power path: Tesseract OCR + a small text "
-            "LLM on the CPU, plus the rules engine. It reads and classifies on-screen TEXT "
-            "only — visual-only risks (nudity/gore/weapons in images without captions) will "
-            "NOT be detected. For full coverage, pair this PC with a GPU-enabled GuardianNode "
-            "server.",
-            "llama3.2:1b",
-            None,
-            0.0,
-        )
-    # <8 GB RAM is below our supported floor
-    return (
-        "text_only",
-        f"Limited RAM ({ram_gb} GB). Running the rules engine only — no LLM. "
-        "Detection will catch deterministic patterns but not nuanced grooming or any "
-        "visual risks.",
-        None,
-        None,
-        0.0,
-    )
-
-
 def probe() -> HardwareInfo:
     cores = max(1, os.cpu_count() or 1)
     ram = _ram_gb()
     vendor, name, vram = _detect_gpu()
-    tier, reasoning, text_model, vision_model, vram_est = _select_tier(ram, vram)
+    tier, reasoning, text_model, vision_model, vram_est = select_tier(ram, vram)
     return HardwareInfo(
         os=platform.system().lower(),
         cpu_cores=cores,

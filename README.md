@@ -114,8 +114,8 @@ Windows or Linux. Ollama model performance depends heavily on CPU/GPU/RAM.
 
 | Tier | Hardware | What it catches |
 |---|---|---|
-| `vision_only` | NVIDIA GPU, 6-12 GB VRAM | Screenshots/images plus OCR/text risk signals in one vision pass |
-| `text_only` | No GPU or low VRAM, 8+ GB RAM | OCR/text risks only; visual-only content may be missed |
+| `vision_only` | NVIDIA GPU, 12-15 GB VRAM | Screenshots/images plus OCR/text risk signals in one vision pass |
+| `text_only` | No GPU or under 12 GB VRAM, 8+ GB RAM recommended | OCR/text risks only; visual-only content may be missed |
 | `full` | NVIDIA GPU, 16+ GB VRAM or split endpoints | Vision plus separate text model kept available |
 
 Model choices are suggestions. GuardianNode does not bundle model weights; users
@@ -124,39 +124,101 @@ must review the license and performance of any Ollama model they install. See
 
 ## Quick Start
 
-### Single PC
+### Alpha Support Matrix
 
-1. Download `GuardianNodeChildSetup-0.1.0-alpha.1.exe` from
-   [Releases](https://github.com/the-vibe-dev/guardiannode/releases) once
-   alpha artifacts are published.
-2. Run the installer and choose **Install everything on this PC**.
-3. Finish setup in the local dashboard at `http://127.0.0.1:8787`.
-4. Create the parent account and write down the recovery code.
-5. Back up the backend data directory, especially the local encryption key file.
+| Mode | Alpha support |
+|---|---|
+| Source backend on loopback | Supported for technical evaluation |
+| Source all-in-one Windows evaluation | Experimental |
+| Separated LAN deployment | Advanced/experimental; TLS or VPN required |
+| Public Windows installer | Not supported |
+| Public Internet exposure | Unsupported |
 
-### Linux Server + Windows Child PC
+### Prerequisites
 
-On the server:
+- Python 3.12
+- Node.js 24
+- npm with `npm ci`
+- Ollama for model-backed classification
+- Linux, macOS, or Windows for backend/dashboard development
+- Windows 10/11 for source-agent testing
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
-```
+### Backend From Source
 
-Or with Docker:
+Run the backend bound to loopback for technical evaluation:
 
 ```bash
 git clone https://github.com/the-vibe-dev/guardiannode.git
-cd guardiannode/installer/server-linux
-docker compose up -d
+cd guardiannode
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e "backend[dev]"
+mkdir -p local_config/dev-data
+cat > local_config/dev.env <<'EOF'
+GUARDIANNODE_BIND_HOST=127.0.0.1
+GUARDIANNODE_BIND_PORT=8787
+GUARDIANNODE_DATA_DIR=local_config/dev-data
+GUARDIANNODE_ALLOWED_HOSTS=127.0.0.1,localhost,testserver
+GUARDIANNODE_MDNS_ENABLED=false
+GUARDIANNODE_CLASSIFIER_TIER=text_only
+GUARDIANNODE_TEXT_MODEL=
+GUARDIANNODE_VISION_MODEL=
+EOF
+set -a
+. local_config/dev.env
+set +a
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8787
 ```
 
-Open `http://127.0.0.1:8787/setup` on the server, enter the one-time setup token
-printed by the installer or stored in the server token file, create the parent
-account, and pull models. Then follow the manual LAN binding/firewall steps in
-the server + child guide before using **Devices -> Add device** to pair the child PC with
-`GuardianNodeChildSetup-0.1.0-alpha.1.exe`.
+Open `http://127.0.0.1:8787/setup`, create the parent account, and save the
+recovery code. Back up the backend data directory, especially the local
+encryption key material.
 
-Do not expose the backend directly to the public internet during alpha testing.
+### Dashboard From Source
+
+The backend serves the committed dashboard bundle from `backend/app/static`.
+For dashboard development or to refresh that bundle:
+
+```bash
+cd dashboard
+npm ci
+npm run typecheck
+npm test -- --run
+npm run build
+```
+
+### Windows Agent Development From Source
+
+Use a test Windows session and a loopback backend while the installer remains
+unqualified:
+
+```powershell
+cd agent-windows
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+pytest
+python -m src.main --once
+```
+
+Create and assign the child profile in the dashboard before relying on age
+policy behavior. Do not send parent passwords over plaintext LAN HTTP.
+
+### Experimental Maintainer Installer Testing
+
+Windows and Linux installer paths are for maintainer qualification only in this
+alpha. They are not the supported public installation method.
+
+For Linux script testing, prefer downloading a tagged script, verifying the
+published checksum or signature, reviewing it locally, then executing it with
+`sudo`. Do not pipe an unverified network response directly into a privileged
+shell.
+
+For Docker testing, clone the tagged source, review the Compose files, and run
+the deployment only on a trusted host. Do not expose the backend directly to the
+public internet during alpha testing.
 
 ## Evidence Encryption And Recovery
 

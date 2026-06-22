@@ -4,11 +4,10 @@ Three tiers govern what runs per screenshot:
 
 * **full**         — vision LLM + text LLM run in parallel. Vision LLM does OCR + visual
                      classification. Text LLM does nuanced text classification on the
-                     OCR'd content. Best coverage. Requires 10+ GB VRAM total
-                     (qwen2.5vl:7b + llama3.2:3b kept hot together).
+                     OCR'd content. Best coverage. Requires 16+ GB VRAM total.
 * **vision_only**  — vision LLM only. Vision LLM judges both image + text. Rules engine
                      also runs on OCR text for fast deterministic catches. Requires
-                     6+ GB VRAM.
+                     12+ GB VRAM.
 * **text_only**    — Tesseract OCR + small text LLM (llama3.2:1b) on CPU. NO image-only
                      risk detection (nudity/gore/weapons). Catches all text-based risks.
                      For low-end family PCs with no GPU.

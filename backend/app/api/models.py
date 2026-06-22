@@ -6,41 +6,12 @@ from pydantic import BaseModel
 
 from app.api.deps import current_user
 from app.db.models import User
+from app.hardware_tiers import TIER_INFO
 from app.services.classifier import classify_text
 from app.services.ollama_client import OllamaClient
 from app.settings import settings
 
 router = APIRouter(prefix="/models", tags=["models"])
-
-# What each detection tier actually does, for the dashboard explainer.
-TIER_INFO = {
-    "full": {
-        "label": "Full (GPU, 16 GB+)",
-        "detects_images": True,
-        "detects_text": True,
-        "summary": "Vision model (images + on-screen text) plus a separate text "
-                   "model for a second opinion on extracted text.",
-    },
-    "vision_only": {
-        "label": "Vision (GPU)",
-        "detects_images": True,
-        "detects_text": True,
-        "summary": "The vision model detects visual risks (nudity, gore, weapons, "
-                   "etc.), reads the on-screen text, and classifies that text "
-                   "(grooming, self-harm, scams) in a single pass. Full coverage.",
-    },
-    "text_only": {
-        "label": "Text only (no GPU)",
-        "detects_images": False,
-        "detects_text": True,
-        "summary": "Lower-power path for machines without a capable GPU: Tesseract "
-                   "OCR + a small text model on the CPU. Reads and classifies "
-                   "on-screen TEXT only — visual-only risks (nudity/gore/weapons in "
-                   "images without captions) are NOT detected. Pair with a "
-                   "GPU-enabled server for full coverage.",
-    },
-}
-
 
 class StatusResponse(BaseModel):
     ollama_available: bool

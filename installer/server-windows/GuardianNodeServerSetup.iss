@@ -75,6 +75,7 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags
 
 [Code]
 #include "..\shared\server_env_windows.iss"
+#include "..\shared\hardware_tiers.iss"
 
 var
   HardwareSummaryPage: TOutputMsgWizardPage;
@@ -108,18 +109,18 @@ begin
     if Pos('vram_gb=', Output) > 0 then
       VramGB := StrToIntDef(Trim(Copy(Output, Pos('vram_gb=', Output)+8, 99)), 0);
 
-    if VramGB >= 16 then begin
+    if VramGB >= {#GN_FULL_MIN_VRAM_GB} then begin
       DetectedTier := 'full';
-      DetectedTextModel := 'llama3.2:3b';
-      DetectedVisionModel := 'qwen3-vl:8b-instruct';
+      DetectedTextModel := '{#GN_FULL_TEXT_MODEL}';
+      DetectedVisionModel := '{#GN_VISION_MODEL}';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU — vision LLM + text LLM run together.';
-    end else if VramGB >= 10 then begin
+    end else if VramGB >= {#GN_VISION_ONLY_MIN_VRAM_GB} then begin
       DetectedTier := 'vision_only';
-      DetectedVisionModel := 'qwen3-vl:8b-instruct';
+      DetectedVisionModel := '{#GN_VISION_MODEL}';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU — vision LLM only.';
     end else if RamGB >= 8 then begin
       DetectedTier := 'text_only';
-      DetectedTextModel := 'llama3.2:1b';
+      DetectedTextModel := '{#GN_TEXT_ONLY_MODEL}';
       DetectedVisionModel := '';
       DetectedReasoning := 'No GPU — Tesseract + small text LLM on CPU. Visual-only risks won''t be detected.';
     end else begin

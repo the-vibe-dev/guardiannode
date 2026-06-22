@@ -4,8 +4,14 @@ Two ways to install:
 
 ## A) Native install (recommended for low-overhead deployments)
 
+For alpha maintainer testing, download the tagged script, verify its published
+SHA-256 or signature, review it locally, then run it with `sudo`. Avoid piping
+an unverified network response directly into a privileged shell.
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
+curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh
+# Verify the published checksum or signature before running:
+sudo bash install.sh
 ```
 
 What it does:

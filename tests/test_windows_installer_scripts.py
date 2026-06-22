@@ -65,3 +65,14 @@ def test_watchdog_respects_installer_maintenance_marker() -> None:
     assert "maintenance.flag" in text
     assert "_maintenance_mode_active" in text
     assert "watchdog repair actions paused" in text
+
+
+def test_windows_installers_use_generated_hardware_tier_constants() -> None:
+    for path in (CHILD_INSTALLER, SERVER_INSTALLER):
+        text = path.read_text(encoding="utf-8")
+        assert '#include "..\\shared\\hardware_tiers.iss"' in text
+        assert "{#GN_FULL_MIN_VRAM_GB}" in text
+        assert "{#GN_VISION_ONLY_MIN_VRAM_GB}" in text
+        assert "{#GN_VISION_MODEL}" in text
+        assert "VramGB >= 10" not in text
+        assert "VramGB >= 6" not in text

@@ -69,36 +69,61 @@ The installer checks your hardware and picks the strongest tier it can run:
 | Tier | Hardware | What it catches |
 |---|---|---|
 | **Full** | NVIDIA GPU with 16+ GB VRAM | Everything, with the most nuance on ambiguous chat |
-| **Vision** *(default)* | NVIDIA GPU with 6–12 GB VRAM | Explicit imagery + grooming/self-harm/scam text + your custom watch phrases |
+| **Vision** *(default)* | NVIDIA GPU with 12–15 GB VRAM | Explicit imagery + grooming/self-harm/scam text + your custom watch phrases |
 | **Text-only** | Any PC with 8 GB RAM, no GPU | Text risks only — visual-only content (nudity/gore without text) is **not** detected |
 
 No GPU in the kid's PC? Use the [two-machine setup](PARENT_GUIDES/install-server-and-child.md): the child's PC runs only the lightweight agent and a Linux or Windows box with a GPU does the AI work.
 
-## Install
+## Quick Start From Source
 
 **Alpha scope:** GuardianNode 0.1.0-alpha.1 is a source-code developer preview.
 Loopback all-in-one testing is the safest supported shape. Public Windows
 installer recommendation and ordinary family deployment are blocked until the
 Windows release validation gates pass.
 
-**Everything on one Windows PC from source or a maintainer-built test artifact:**
+| Mode | Alpha support |
+|---|---|
+| Source backend on loopback | Supported for technical evaluation |
+| Source all-in-one Windows evaluation | Experimental |
+| Separated LAN deployment | Advanced/experimental; TLS or VPN required |
+| Public Windows installer | Not supported |
+| Public Internet exposure | Unsupported |
 
-1. Build from source or use a maintainer-provided alpha test artifact.
-2. Pick **"Install everything on this PC"** — it detects your hardware and pulls the AI model (5–20 min)
-3. The dashboard opens; create your parent password and **write down the 12-word recovery code**
-
-**Linux server:**
+Start the backend on loopback:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
+git clone https://github.com/the-vibe-dev/guardiannode.git
+cd guardiannode
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e "backend[dev]"
+mkdir -p local_config/dev-data
+GUARDIANNODE_BIND_HOST=127.0.0.1 \
+GUARDIANNODE_BIND_PORT=8787 \
+GUARDIANNODE_DATA_DIR=local_config/dev-data \
+GUARDIANNODE_ALLOWED_HOSTS=127.0.0.1,localhost,testserver \
+GUARDIANNODE_MDNS_ENABLED=false \
+GUARDIANNODE_CLASSIFIER_TIER=text_only \
+GUARDIANNODE_TEXT_MODEL= \
+GUARDIANNODE_VISION_MODEL= \
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8787
 ```
 
-Then on the child's PC, get a pairing code from the dashboard (**Devices → Add device**) and run the installer with **"Connect to existing server"**.
+Build and test the dashboard separately when changing UI code:
 
-Fresh servers bind to `127.0.0.1` and require the one-time setup token printed by
-the installer or stored in the server token file. Complete first-run setup on
-the server, then follow the manual LAN binding/firewall steps in the server +
-child guide before pairing another PC.
+```bash
+cd dashboard
+npm ci
+npm run typecheck
+npm test -- --run
+npm run build
+```
+
+Open `http://127.0.0.1:8787/setup`, create the parent account, and write down
+the recovery code. Installer paths are maintainer qualification paths only in
+this alpha; do not pipe an unverified network response directly into a
+privileged shell.
 
 Step-by-step with screenshots: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
 

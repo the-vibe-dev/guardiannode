@@ -20,7 +20,7 @@ Alert
 
 ## When the vision LLM runs
 
-Vision analysis runs according to the configured classifier tier. In the default
+Vision analysis runs according to the configured classifier tier. In the
 vision-only tier, changed screenshots are queued and classified by the local
 vision model. In text-only tier, GuardianNode uses Tesseract plus the text
 classifier instead.

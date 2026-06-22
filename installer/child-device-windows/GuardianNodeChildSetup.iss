@@ -171,6 +171,7 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags
 
 [Code]
 #include "..\shared\server_env_windows.iss"
+#include "..\shared\hardware_tiers.iss"
 
 var
   ModePage: TInputOptionWizardPage;
@@ -216,24 +217,19 @@ begin
       VramGB := StrToIntDef(Trim(Copy(Output, Pos('vram_gb=', Output)+8, 99)), 0);
     end;
 
-    // NOTE: a single 12 GB GPU does NOT fit the "full" tier — qwen2.5vl alone
-    // wants ~11 GB once its compute graph is allocated, so adding a second
-    // (text) model thrashes VRAM and the vision model errors out. vision_only
-    // already does OCR + image + text classification, so we only pick "full"
-    // at 16 GB+ where both models genuinely fit hot.
-    if VramGB >= 16 then begin
+    if VramGB >= {#GN_FULL_MIN_VRAM_GB} then begin
       DetectedTier := 'full';
-      DetectedTextModel := 'llama3.2:3b';
-      DetectedVisionModel := 'qwen3-vl:8b-instruct';
+      DetectedTextModel := '{#GN_FULL_TEXT_MODEL}';
+      DetectedVisionModel := '{#GN_VISION_MODEL}';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — vision LLM plus a separate text LLM run together for a second opinion on extracted text.';
-    end else if VramGB >= 10 then begin
+    end else if VramGB >= {#GN_VISION_ONLY_MIN_VRAM_GB} then begin
       DetectedTier := 'vision_only';
       DetectedTextModel := '';
-      DetectedVisionModel := 'qwen3-vl:8b-instruct';
+      DetectedVisionModel := '{#GN_VISION_MODEL}';
       DetectedReasoning := IntToStr(VramGB) + ' GB GPU detected — the vision model detects visual risks (nudity, gore, weapons, etc.), reads the on-screen text, and classifies it (grooming, self-harm, scams) in one pass. Full coverage.';
     end else if RamGB >= 8 then begin
       DetectedTier := 'text_only';
-      DetectedTextModel := 'llama3.2:1b';
+      DetectedTextModel := '{#GN_TEXT_ONLY_MODEL}';
       DetectedVisionModel := '';
       DetectedReasoning := 'No suitable GPU detected. Lower-power path: Tesseract OCR + a small text LLM on the CPU. This reads and classifies on-screen TEXT only — visual-only risks (nudity/gore/weapons in images without captions) will NOT be detected. For full coverage, pair this PC with a GPU-enabled GuardianNode server.';
     end else begin

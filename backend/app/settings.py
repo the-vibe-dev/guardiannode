@@ -50,22 +50,9 @@ class Settings(BaseSettings):
     cors_allow_origin: str | None = None  # for dashboard dev server
     allowed_hosts: str = "127.0.0.1,localhost,::1,testserver"
     text_model: str = "llama3.2:3b"
-    # qwen2.5vl:7b is fast (~2-3s warm per frame at the settings below) and reads
-    # on-screen text + classifies images in one pass. It nominally offloads ~2 GB
-    # to CPU on a 12 GB card, but that does not hurt warm latency; the earlier
-    # OOM *crashes* came from too-large a context/image (see vision_num_ctx +
-    # vision_max_image_edge), not the model itself. qwen3-vl:8b fits fully but is
-    # markedly slower per frame, so it's not the default.
-    # qwen3-vl:8b fits FULLY on a 12 GB GPU (~7.6 GB, no CPU offload), unlike
-    # qwen2.5vl:7b whose ~7.5 GB vision compute graph pushed it to ~14 GB and
-    # OOM-crashed the runner. The client already disables Qwen3 "thinking" mode
-    # (think:false), so it's fast as well as crash-free.
-    # qwen3-vl:8b-INSTRUCT (not the default thinking variant) — fits fully on a
-    # 12 GB GPU (~7.6 GB, no CPU offload), returns clean single-shot JSON, and
-    # runs ~4-5s warm. The plain `qwen3-vl:8b` tag is the *thinking* variant,
-    # whose reasoning output goes to a separate field leaving `response` empty
-    # (Ollama bug ollama/ollama#14798) — do not use it. qwen2.5vl:7b also works
-    # but offloads ~2 GB to CPU and runs ~30s.
+    # qwen3-vl:8b-INSTRUCT is the alpha vision default. The hardware selector
+    # only auto-selects vision at 12+ GB VRAM because hot model/runtime memory
+    # needs substantial headroom beyond raw weight size.
     vision_model: str = "qwen3-vl:8b-instruct"
     # Full-screen OCR can itself be several thousand tokens. 4096 truncated
     # otherwise-valid JSON on real 1600x900 desktop frames.
@@ -76,9 +63,9 @@ class Settings(BaseSettings):
     rules_version: str = "0.1.0-alpha.1"
     # Classifier tier: governs which paths run per screenshot.
     #  "full"        — vision LLM + text LLM hot together; needs 16+ GB VRAM
-    #  "vision_only" — vision LLM only; needs 6+ GB VRAM
+    #  "vision_only" — vision LLM only; needs 12+ GB VRAM
     #  "text_only"   — Tesseract OCR + small text LLM (llama3.2:1b) on CPU; no GPU required
-    classifier_tier: str = "vision_only"
+    classifier_tier: str = "text_only"
     # Used in text_only tier and as fallback OCR when vision LLM unavailable.
     tesseract_enabled: bool = True
     retention_cleanup_enabled: bool = True

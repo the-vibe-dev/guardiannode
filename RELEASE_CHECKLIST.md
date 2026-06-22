@@ -16,6 +16,7 @@
 - [ ] Docker Compose config validates.
 - [ ] Docker image builds.
 - [ ] Installer build passes if installers are included.
+- [ ] Source alpha release workflow passes without publishing installer artifacts.
 
 ## 3. Security/Privacy
 
@@ -31,6 +32,7 @@
 - [ ] Version tag created.
 - [ ] Changelog updated.
 - [ ] Installer hashes generated if installers are included.
+- [ ] Source-only alpha has no `.exe` or `.msi` release assets.
 - [ ] Release notes include alpha warnings.
 
 ## 5. Messaging

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "models": {
+    "full_text_model": "llama3.2:3b",
+    "text_only_model": "llama3.2:1b",
+    "vision_model": "qwen3-vl:8b-instruct"
+  },
+  "thresholds": {
+    "text_only_min_vram_gb": 0,
+    "vision_only_min_vram_gb": 12,
+    "full_min_vram_gb": 16
+  },
+  "estimated_vram_gb": {
+    "text_only": 0.0,
+    "vision_only": 11.0,
+    "full": 13.0
+  },
+  "tiers": {
+    "full": {
+      "label": "Full (GPU, 16 GB+)",
+      "hardware": "NVIDIA GPU, 16+ GB VRAM or split endpoints",
+      "detects_images": true,
+      "detects_text": true,
+      "summary": "Vision model for screenshots plus a separate text model for a second opinion on extracted text."
+    },
+    "vision_only": {
+      "label": "Vision (GPU, 12 GB+)",
+      "hardware": "NVIDIA GPU, 12-15 GB VRAM",
+      "detects_images": true,
+      "detects_text": true,
+      "summary": "The vision model detects visual risks, reads on-screen text, and classifies text-risk signals in one pass."
+    },
+    "text_only": {
+      "label": "Text only (no/low VRAM)",
+      "hardware": "No GPU or under 12 GB VRAM; 8+ GB RAM recommended",
+      "detects_images": false,
+      "detects_text": true,
+      "summary": "Tesseract OCR plus a small text model on CPU where possible. Visual-only risks may be missed."
+    }
+  }
+}

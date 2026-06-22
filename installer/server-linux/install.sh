@@ -5,8 +5,8 @@
 # creates a 'guardiannode' system user, and points the parent at the
 # first-run web setup wizard.
 #
-# Run with: curl -fsSL ... | sudo bash
-#       or: sudo ./install.sh
+# Download, verify the published checksum/signature, review locally, then run:
+#   sudo ./install.sh
 
 set -Eeuo pipefail
 

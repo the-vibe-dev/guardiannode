@@ -39,9 +39,13 @@ You'll need:
 
 ### If your server is Linux
 
-Open a terminal and run:
+Open a terminal, download the tagged installer script, verify the published
+checksum or signature, review it locally, then run it:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh | sudo bash
+curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh
+# Verify the published checksum or signature before running:
+sudo bash install.sh
 ```
 
 Or with Docker (if you prefer):
