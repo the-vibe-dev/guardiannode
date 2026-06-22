@@ -6,7 +6,7 @@ components. Each component retains its original license.
 <!-- third-party-notices:acknowledged
 backend: fastapi, uvicorn, pydantic, pydantic-settings, sqlalchemy, alembic, cryptography, argon2-cffi, httpx, python-multipart, pyyaml, zeroconf, qrcode, pillow, pytesseract, python-ulid, itsdangerous, jinja2
 agent: httpx, pyyaml, psutil, mss, pillow, pydantic, argon2-cffi, cryptography, python-ulid, zeroconf, pywin32, pystray, opencv-python, pytesseract
-dashboard: @fontsource/inter, @fontsource/sora, react, react-dom, react-router-dom
+dashboard: @fontsource/inter, @fontsource/sora, @tailwindcss/postcss, react, react-dom, react-router-dom
 other: inno setup, winsw, pyinstaller, ollama
 -->
 
@@ -64,6 +64,7 @@ Note on `pystray` (LGPL-3.0): GuardianNode uses it as an unmodified package.
 |---|---|---|
 | @fontsource/inter | OFL-1.1 | https://github.com/fontsource/font-files/tree/main/fonts/google/inter |
 | @fontsource/sora | OFL-1.1 | https://github.com/fontsource/font-files/tree/main/fonts/google/sora |
+| @tailwindcss/postcss | MIT | https://github.com/tailwindlabs/tailwindcss |
 | React | MIT | https://github.com/facebook/react |
 | React DOM | MIT | https://github.com/facebook/react |
 | React Router DOM | MIT | https://github.com/remix-run/react-router |
