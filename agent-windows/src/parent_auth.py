@@ -1,8 +1,8 @@
-"""Parent password / recovery code verification on the agent side.
+"""Parent credential hashing helpers for the agent side.
 
-The agent stores an Argon2id hash of the parent password (for tray pause +
-uninstall confirm). The hash is set by the installer using the parent's
-chosen password. The agent never knows the plaintext after install.
+The alpha tray pause flow accepts the parent password only. Recovery codes are
+stored here for future migration/repair flows but do not authorize local tray
+pause or exit actions.
 """
 from __future__ import annotations
 

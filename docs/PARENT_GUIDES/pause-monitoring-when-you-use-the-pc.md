@@ -37,7 +37,7 @@ The kid sees the same yellow icon you do. We deliberately don't hide pauses from
 
 ## "I forgot my password — can I pause?"
 
-No. The pause requires the parent password (or the recovery code as a fallback). This is intentional — otherwise the kid could pause whenever they wanted. See [If you forget your password](if-you-forget-your-password.md).
+No. The local tray pause requires the parent password. The 12-word recovery code resets dashboard access only; it does not authorize tray pause or exit actions. See [If you forget your password](if-you-forget-your-password.md).
 
 ## Pausing from the dashboard (remote pause)
 

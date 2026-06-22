@@ -20,7 +20,7 @@ import httpx
 
 from src.config import AgentConfig, default_config_path
 from src.pairing_client import load_credentials
-from src.parent_auth import verify_password, verify_recovery_code
+from src.parent_auth import verify_password
 
 log = logging.getLogger("guardiannode.tray")
 
@@ -65,9 +65,9 @@ def _device_id() -> str | None:
     return creds.get("device_id")
 
 
-def _verify_password_or_recovery(s: str) -> bool:
+def _verify_parent_password(s: str) -> bool:
     # Local hash file (all-in-one installs that provisioned parent.json).
-    if verify_password(s) or verify_recovery_code(s):
+    if verify_password(s):
         return True
     # Child-only installs have no local parent hash. Never send a parent
     # password over plaintext LAN HTTP; only allow remote verification over
@@ -113,7 +113,7 @@ def _ask_password_dialog() -> str | None:
     result: dict = {"value": None}
     root = _new_root("GuardianNode — Parent verification")
     root.geometry("380x170")
-    tk.Label(root, text="Enter your parent password\n(or 12-word recovery code):").pack(pady=(14, 6))
+    tk.Label(root, text="Enter your parent password:").pack(pady=(14, 6))
     entry = tk.Entry(root, show="*", width=36)
     entry.pack(pady=4)
     entry.focus_set()
@@ -198,7 +198,7 @@ def pause_flow() -> None:
     pw = _ask_password()
     if not pw:
         return
-    if not _verify_password_or_recovery(pw):
+    if not _verify_parent_password(pw):
         log.warning("incorrect parent password")
         return
     duration = _ask_duration()
@@ -296,7 +296,7 @@ def _try_pystray() -> Callable[[], None] | None:
 
         def _menu_exit(icon, item):  # noqa: ANN001
             pw = _ask_password()
-            if pw and _verify_password_or_recovery(pw):
+            if pw and _verify_parent_password(pw):
                 icon.stop()
 
         def _status_text(*_args) -> str:
@@ -317,7 +317,7 @@ def _try_pystray() -> Callable[[], None] | None:
             pystray.MenuItem("Pause monitoring", _menu_pause),
             pystray.MenuItem("Resume", _menu_resume),
             pystray.MenuItem("Open dashboard", lambda *_: _open_dashboard()),
-            pystray.MenuItem("Exit (parent password required)", _menu_exit),
+            pystray.MenuItem("Exit tray (parent password required)", _menu_exit),
         )
         icon = pystray.Icon("GuardianNode", green if not is_paused() else yellow, "GuardianNode", menu)
         icon.run()

@@ -72,10 +72,9 @@ Pairing credentials live separately in
 - `redactor.py` — best-effort text filtering helpers where used
 - `durable_queue.py` — encrypted SQLite retry queue for screenshot payloads during outages
 - `backend_client.py` — HTTP client to backend
-- `tray_app.py` — pystray-based notification icon
-- `tray_pause.py` — pause flow with password + duration
+- `tray_app.py` — pystray-based notification icon and local pause UI
 - `watchdog.py` — paired watchdog service using Windows Terminal Services APIs for active sessions
-- `parent_auth.py` — Argon2id verification + recovery code
+- `parent_auth.py` — Argon2id credential hashing helpers; recovery codes do not authorize tray actions
 
 ## Tests
 
