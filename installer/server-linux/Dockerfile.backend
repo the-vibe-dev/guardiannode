@@ -10,7 +10,7 @@ COPY dashboard/ ./dashboard/
 RUN cd dashboard && npm run build
 
 # ---- Stage 2: Python runtime ----
-FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+FROM python:3.14.6-slim-bookworm@sha256:a70519002c49552ea0a853de47599cf40479b001bd7a624f1112eaf44dcaccc7
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates sqlite3 && \
     find /var/lib/apt/lists -mindepth 1 -delete && \
