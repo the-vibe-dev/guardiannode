@@ -90,6 +90,7 @@ Name: "{commonappdata}\GuardianNode\logs";  Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\keys";  Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\Secure"; Permissions: system-modify
+Name: "{commonappdata}\GuardianNode\AgentSecure"; Permissions: system-modify
 
 [Icons]
 ; Neither the agent nor the tray uses a Startup-folder shortcut — both run via

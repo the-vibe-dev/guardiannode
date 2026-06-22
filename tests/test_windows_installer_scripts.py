@@ -96,6 +96,13 @@ def test_child_installer_installs_endpoint_broker_before_session_tasks() -> None
     assert "delete GuardianNodeBroker" in text
 
 
+def test_child_installer_precreates_broker_secure_directories() -> None:
+    text = CHILD_INSTALLER.read_text(encoding="utf-8")
+
+    assert r"GuardianNode\Secure" in text
+    assert r"GuardianNode\AgentSecure" in text
+
+
 def test_watchdog_respects_installer_maintenance_marker() -> None:
     text = WATCHDOG.read_text(encoding="utf-8")
 
