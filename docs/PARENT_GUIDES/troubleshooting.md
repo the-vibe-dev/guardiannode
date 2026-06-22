@@ -41,8 +41,8 @@ If that fails, Ollama isn't running. Start it via the Ollama tray icon, or run `
 
 ### Dashboard shows the device as offline
 - Confirm the kid's PC is on and connected to the network.
-- Open Services → **GuardianNode Agent** → should be Running.
-- Check `C:\ProgramData\GuardianNode\logs\agent.log` for connection errors.
+- Open Services -> **GuardianNode Endpoint Broker** -> should be Running.
+- Check `C:\ProgramData\GuardianNode\logs\` for broker or agent connection errors.
 - If you're in separated mode, verify the server IP hasn't changed (router DHCP). Pin the server's IP in your router's DHCP settings.
 
 ## Agent
@@ -50,13 +50,13 @@ If that fails, Ollama isn't running. Start it via the Ollama tray icon, or run `
 ### Tray icon is missing
 The tray app runs in the user session, not as a service. If it crashed:
 1. Start menu → search "GuardianNode Tray" → click to relaunch.
-2. To make it auto-start on login, the installer added a Start Menu Startup shortcut by default.
+2. The installer registers a per-user logon scheduled task so the tray starts on future logins.
 
 ### Tray icon is red
 Red means the agent can't reach the backend. Hover over the icon for the specific error.
 
 ### "Kill agent" / Task Manager → it comes back
-That's the watchdog working as designed. The agent and watchdog restart each other. To stop them legitimately, pause monitoring or uninstall GuardianNode from an administrator account.
+That's the watchdog and scheduled-task supervision working as designed. To stop monitoring legitimately, pause from the tray/dashboard or uninstall GuardianNode from an administrator account.
 
 ### Antivirus flagged the agent
 Some antivirus products flag PyInstaller-bundled apps as suspicious because the technique is sometimes used by malware. Add GuardianNode to your AV exception list:
@@ -74,10 +74,11 @@ Use Windows Settings or Programs & Features from an administrator account. The a
 1. Reboot the PC.
 2. Run `GuardianNodeChildSetup-0.1.0-alpha.1.exe` again — the installer detects an existing install and offers **Repair** and **Uninstall** options.
 3. If that fails, manually:
-   - Stop services: `sc stop GuardianNodeWatchdog && sc stop GuardianNodeAgent && sc stop GuardianNodeBackend`
-   - Delete services: `sc delete GuardianNodeWatchdog && sc delete GuardianNodeAgent && sc delete GuardianNodeBackend`
+   - Stop services: `sc stop GuardianNodeWatchdog2; sc stop GuardianNodeWatchdog; sc stop GuardianNodeBroker; sc stop GuardianNodeBackend`
+   - Delete services: `sc delete GuardianNodeWatchdog2; sc delete GuardianNodeWatchdog; sc delete GuardianNodeBroker; sc delete GuardianNodeBackend`
    - Delete folder: `Remove-Item -Recurse -Force "C:\Program Files\GuardianNode"`
    - Delete data: `Remove-Item -Recurse -Force "C:\ProgramData\GuardianNode"`
+   - Delete scheduled tasks: `schtasks /Delete /TN GuardianNodeAgent /F; schtasks /Delete /TN GuardianNodeTray /F`
    - Manually clean up start-menu shortcuts.
 
 ## Performance

@@ -32,6 +32,9 @@
 # Windows endpoint identity, queueing, pairing, capture, broker/service work,
 # installers, and service wrappers.
 /agent-windows/src/durable_queue.py @the-vibe-dev
+/agent-windows/src/broker_client.py @the-vibe-dev
+/agent-windows/src/broker_protocol.py @the-vibe-dev
+/agent-windows/src/broker_service.py @the-vibe-dev
 /agent-windows/src/pairing_client.py @the-vibe-dev
 /agent-windows/src/backend_client.py @the-vibe-dev
 /agent-windows/src/parent_auth.py @the-vibe-dev

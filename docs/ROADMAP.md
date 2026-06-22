@@ -10,11 +10,11 @@
 - ✅ Screenshot-based collection with server-side OCR (replaced the earlier MV3 browser extension, now removed)
 - ✅ Dashboard (React + Vite + Tailwind) — login, dashboard, devices, risk feed, alert detail, settings
 - ✅ Linux server installer: `install.sh` + systemd + Docker Compose
-- ✅ Windows server installer (Inno Setup)
-- ✅ Windows child-device installer (Inno Setup) with watchdog/service ACL hardening
+- ⚠️ Windows server installer (Inno Setup; maintainer qualification only)
+- ⚠️ Windows child-device installer (Inno Setup; broker/ACL/matrix qualification still required)
 - ⚠️ Authenticated server discovery/pinning for separated mode
-- ✅ Wine-based cross-build for Windows installers on Linux
-- ✅ GitHub release workflow
+- ⚠️ Wine-based cross-build for Windows installers on Linux
+- ✅ Source-only GitHub release workflow
 
 ## v0.2 — Hardening + real-world alpha testing
 
