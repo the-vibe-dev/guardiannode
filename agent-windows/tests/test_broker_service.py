@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+from types import SimpleNamespace
 
 from src.broker_protocol import image_to_b64, make_request
-from src.broker_service import BrokerCommandHandler
+from src.broker_service import BrokerCommandHandler, WindowsNamedPipeServer
 from src.parent_auth import write_credentials
 from src.pairing_client import save_credentials
 
@@ -192,3 +194,55 @@ def test_agent_broker_mode_does_not_load_credentials_or_sender(monkeypatch) -> N
         asyncio.run(main.main_async(cfg))
     except asyncio.CancelledError:
         pass
+
+
+def test_named_pipe_identity_validation_uses_win32security_impersonation(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeSecurity:
+        TokenUser = object()
+
+        @staticmethod
+        def ImpersonateNamedPipeClient(_pipe):
+            calls.append("impersonate")
+
+        @staticmethod
+        def OpenThreadToken(*_args):
+            calls.append("open-token")
+            return "token"
+
+        @staticmethod
+        def GetTokenInformation(_token, _kind):
+            return "sid", 0
+
+        @staticmethod
+        def ConvertSidToStringSid(_sid):
+            return "S-1-5-21-test"
+
+        @staticmethod
+        def RevertToSelf():
+            calls.append("revert")
+
+    monkeypatch.setitem(__import__("sys").modules, "win32api", SimpleNamespace(GetCurrentThread=lambda: "thread"))
+    monkeypatch.setitem(__import__("sys").modules, "win32con", SimpleNamespace(TOKEN_QUERY=1))
+    monkeypatch.setitem(__import__("sys").modules, "win32pipe", SimpleNamespace())
+    monkeypatch.setitem(__import__("sys").modules, "win32security", FakeSecurity)
+
+    assert WindowsNamedPipeServer._validate_client_identity("pipe") is True
+    assert calls == ["impersonate", "open-token", "revert"]
+
+
+def test_named_pipe_server_reads_frame_before_impersonating_client() -> None:
+    source = inspect.getsource(WindowsNamedPipeServer.serve_forever)
+
+    assert source.index("frame = self._read_frame(pipe)") < source.index("self._validate_client_identity(pipe)")
+
+
+def test_named_pipe_server_flushes_responses_before_disconnect() -> None:
+    source = inspect.getsource(WindowsNamedPipeServer.serve_forever)
+
+    assert source.count("win32file.FlushFileBuffers(pipe)") >= 2
+    assert source.index("win32file.WriteFile(pipe, encode_frame(response))") < source.index(
+        "win32file.FlushFileBuffers(pipe)",
+        source.index("win32file.WriteFile(pipe, encode_frame(response))"),
+    )

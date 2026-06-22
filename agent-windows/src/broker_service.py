@@ -269,12 +269,14 @@ class WindowsNamedPipeServer:
             )
             try:
                 win32pipe.ConnectNamedPipe(pipe, None)
+                frame = self._read_frame(pipe)
                 if not self._validate_client_identity(pipe):
                     win32file.WriteFile(pipe, encode_frame(make_response("", ok=False, error="unauthorized client")))
+                    win32file.FlushFileBuffers(pipe)
                     continue
-                frame = self._read_frame(pipe)
                 response = self.handler.handle_message(decode_frame(frame))
                 win32file.WriteFile(pipe, encode_frame(response))
+                win32file.FlushFileBuffers(pipe)
             except pywintypes.error as exc:
                 log.warning("named pipe request failed: %s", exc)
             finally:
@@ -302,11 +304,10 @@ class WindowsNamedPipeServer:
     def _validate_client_identity(pipe) -> bool:  # noqa: ANN001
         import win32api  # type: ignore
         import win32con  # type: ignore
-        import win32pipe  # type: ignore
         import win32security  # type: ignore
 
         try:
-            win32pipe.ImpersonateNamedPipeClient(pipe)
+            win32security.ImpersonateNamedPipeClient(pipe)
             token = win32security.OpenThreadToken(
                 win32api.GetCurrentThread(),
                 win32con.TOKEN_QUERY,

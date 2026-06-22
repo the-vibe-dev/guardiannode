@@ -1,4 +1,4 @@
-; Generated from shared/hardware_tiers.json. Do not edit by hand.
+// Generated from shared/hardware_tiers.json. Do not edit by hand.
 
 #define GN_TEXT_ONLY_MIN_VRAM_GB 0
 #define GN_VISION_ONLY_MIN_VRAM_GB 12

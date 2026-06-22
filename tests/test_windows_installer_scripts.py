@@ -103,6 +103,20 @@ def test_child_installer_precreates_broker_secure_directories() -> None:
     assert r"GuardianNode\AgentSecure" in text
 
 
+def test_child_installer_hardens_broker_owned_data_before_start() -> None:
+    text = CHILD_INSTALLER.read_text(encoding="utf-8")
+
+    config_line = _line_number(text, "BeforeInstall: WriteRuntimeConfigBeforeStart")
+    harden_line = _line_number(text, "BeforeInstall: HardenDataAclsBeforeStart")
+    broker_self_test = _line_number(text, 'GuardianNodeBroker.exe"; Parameters: "--self-test"')
+
+    assert config_line < harden_line < broker_self_test
+    assert '\\Secure" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F' in text
+    assert '\\AgentSecure" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F' in text
+    assert '\\keys" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F' in text
+    assert '\\server.env" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F' in text
+
+
 def test_watchdog_respects_installer_maintenance_marker() -> None:
     text = WATCHDOG.read_text(encoding="utf-8")
 

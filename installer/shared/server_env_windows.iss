@@ -1,6 +1,6 @@
-; Shared GuardianNode backend environment writer for Windows installers.
+// Shared GuardianNode backend environment writer for Windows installers.
 
-procedure SaveStringsAtomic(const Path: String; const Lines: TArrayOfString);
+procedure SaveStringsAtomic(Path: String; Lines: TArrayOfString);
 var
   TmpPath: String;
 begin
@@ -12,13 +12,7 @@ begin
     RaiseException('Could not finalize ' + Path);
 end;
 
-procedure WriteGuardianNodeServerEnv(
-  const DataDir: String;
-  const Tier: String;
-  const TextModel: String;
-  const VisionModel: String;
-  const OllamaUrl: String
-);
+procedure WriteGuardianNodeServerEnv(DataDir: String; Tier: String; TextModel: String; VisionModel: String; OllamaUrl: String);
 var
   EnvPath: String;
   EnvFile: TArrayOfString;

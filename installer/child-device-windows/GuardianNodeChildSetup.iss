@@ -105,6 +105,7 @@ Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntiltermi
 
 ; ---- Restrict install dir ACL (before anything starts) ----
 Filename: "icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F /grant:r Users:(OI)(CI)RX"; Flags: runhidden waituntilterminated
+Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; StatusMsg: "Securing GuardianNode data directories..."; BeforeInstall: HardenDataAclsBeforeStart
 
 ; ---- All-in-one mode: install Ollama + pull models for the detected tier ----
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configure_ollama_windows.ps1"" -Tier ""{code:GetTier}"" -TextModel ""{code:GetTextModel}"" -VisionModel ""{code:GetVisionModel}"" -OllamaUrl ""http://127.0.0.1:11434"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing Ollama and pulling AI models (this may take 5-20 minutes)..."; Check: IsAllInOne
@@ -687,4 +688,15 @@ end;
 procedure WriteRuntimeConfigBeforeStart;
 begin
   WriteRuntimeConfig;
+end;
+
+procedure HardenDataAclsBeforeStart;
+var
+  DataRoot: String;
+begin
+  DataRoot := ExpandConstant('{commonappdata}\GuardianNode');
+  RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\Secure" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F');
+  RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\AgentSecure" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F');
+  RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\keys" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F');
+  RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\server.env" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F');
 end;

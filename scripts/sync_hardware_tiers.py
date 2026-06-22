@@ -85,7 +85,7 @@ def _pascal_string(value: str) -> str:
 def _render_inno(data: dict[str, Any]) -> str:
     models = data["models"]
     thresholds = data["thresholds"]
-    return f'''; Generated from shared/hardware_tiers.json. Do not edit by hand.
+    return f'''// Generated from shared/hardware_tiers.json. Do not edit by hand.
 
 #define GN_TEXT_ONLY_MIN_VRAM_GB {thresholds["text_only_min_vram_gb"]}
 #define GN_VISION_ONLY_MIN_VRAM_GB {thresholds["vision_only_min_vram_gb"]}
