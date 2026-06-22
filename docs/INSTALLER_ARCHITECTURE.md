@@ -65,6 +65,18 @@ durable queue. This remains an installer no-go until clean Windows 10/11 tests
 confirm the named-pipe ACLs, ProgramData ACLs, standard-user behavior,
 upgrade/repair/uninstall, and multi-session operation.
 
+After installing on a Windows qualification machine, run the bundled ACL
+collector from an elevated PowerShell prompt:
+
+```powershell
+& "$env:ProgramFiles\GuardianNode\qualify_acls.ps1"
+```
+
+It writes `icacls`, `Get-Acl`, service SDDL, and scheduled-task evidence under
+`%ProgramData%\GuardianNode\logs\qualification` and fails if low-privilege
+identities can read or write broker secrets, queue, policy, pause, or service
+state.
+
 ## Windows Server Installer
 
 The shipped server installer is implemented in

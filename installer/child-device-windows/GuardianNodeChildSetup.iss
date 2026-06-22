@@ -72,6 +72,7 @@ Source: "..\build\stage\winsw\Backend.xml";     DestDir: "{app}"; DestName: "Gua
 
 ; ---- Scheduled-task registration helper ----
 Source: "register_agent_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "qualify_acls.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ---- Brand icons (shortcuts + tray runtime icon) ----
 Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
