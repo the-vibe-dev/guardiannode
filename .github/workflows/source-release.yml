@@ -57,6 +57,7 @@ jobs:
           python scripts/check_version_consistency.py
           python scripts/sync_hardware_tiers.py --check
           python scripts/check_third_party_notices.py
+          python scripts/check_repository_controls.py
           bash -n installer/server-linux/install.sh
           pytest -v tests
 

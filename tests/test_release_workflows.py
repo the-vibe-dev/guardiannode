@@ -36,3 +36,4 @@ def test_ci_checks_generated_hardware_tier_constants() -> None:
 
     assert "python scripts/sync_hardware_tiers.py --check" in text
     assert "python scripts/check_third_party_notices.py" in text
+    assert "python scripts/check_repository_controls.py" in text

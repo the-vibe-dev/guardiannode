@@ -1,0 +1,49 @@
+# GuardianNode code ownership.
+#
+# Replace @the-vibe-dev with narrower maintainer teams when they exist. These
+# entries make high-risk paths explicit so branch protection can require owner
+# review before merge.
+
+* @the-vibe-dev
+
+# Repository governance, release automation, and dependency policy.
+/.github/ @the-vibe-dev
+/scripts/ @the-vibe-dev
+/RELEASE_CHECKLIST.md @the-vibe-dev
+/DEPENDENCY_POLICY.md @the-vibe-dev
+/THIRD_PARTY_NOTICES.md @the-vibe-dev
+/MODEL_LICENSES.md @the-vibe-dev
+/COMMERCIAL-LICENSE.md @the-vibe-dev
+/LICENSE @the-vibe-dev
+
+# Security-sensitive backend state, credentials, encryption, storage, and APIs.
+/backend/app/services/encryption.py @the-vibe-dev
+/backend/app/services/credential_store.py @the-vibe-dev
+/backend/app/services/key_status.py @the-vibe-dev
+/backend/app/api/auth.py @the-vibe-dev
+/backend/app/api/devices.py @the-vibe-dev
+/backend/app/api/events.py @the-vibe-dev
+/backend/app/api/evidence.py @the-vibe-dev
+/backend/app/api/storage.py @the-vibe-dev
+/backend/app/api/recovery.py @the-vibe-dev
+/backend/app/db.py @the-vibe-dev
+/backend/app/models.py @the-vibe-dev
+
+# Windows endpoint identity, queueing, pairing, capture, broker/service work,
+# installers, and service wrappers.
+/agent-windows/src/durable_queue.py @the-vibe-dev
+/agent-windows/src/pairing_client.py @the-vibe-dev
+/agent-windows/src/backend_client.py @the-vibe-dev
+/agent-windows/src/parent_auth.py @the-vibe-dev
+/agent-windows/src/tray_app.py @the-vibe-dev
+/agent-windows/src/tray_pause.py @the-vibe-dev
+/agent-windows/src/watchdog.py @the-vibe-dev
+/agent-windows/src/screenshot_capture.py @the-vibe-dev
+/installer/ @the-vibe-dev
+
+# Public security/privacy/release claims.
+/README.md @the-vibe-dev
+/SECURITY.md @the-vibe-dev
+/PRIVACY.md @the-vibe-dev
+/KNOWN_LIMITATIONS.md @the-vibe-dev
+/docs/ @the-vibe-dev

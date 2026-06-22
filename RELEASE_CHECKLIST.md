@@ -3,6 +3,10 @@
 ## 1. Repo Hygiene
 
 - [ ] License is AGPL-3.0.
+- [ ] CODEOWNERS exists and resolves to real maintainers or teams.
+- [ ] Main branch protection, protected tags, secret scanning, push protection,
+      Dependabot alerts, and private vulnerability reporting are configured
+      according to `docs/REPOSITORY_CONTROLS.md`.
 - [ ] No placeholder emails or fake contact domains remain.
 - [ ] No obvious broken documentation links or missing referenced files.
 - [ ] README says alpha/developer preview.
@@ -29,7 +33,8 @@
 
 ## 4. Release Artifacts
 
-- [ ] Version tag created.
+- [ ] Version tag created and signed or otherwise verified by an approved
+      maintainer key.
 - [ ] Changelog updated.
 - [ ] Installer hashes generated if installers are included.
 - [ ] Source-only alpha has no `.exe` or `.msi` release assets.
