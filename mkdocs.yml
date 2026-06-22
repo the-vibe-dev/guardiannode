@@ -86,6 +86,7 @@ nav:
       - Power-user/source install: POWER_USER_INSTALL.md
       - End-to-end testing: E2E_TESTING.md
       - Reproducible builds: REPRODUCIBLE_BUILDS.md
+      - Windows source-agent validation: release-validation/windows-source-agent-2026-06-22.md
       - Repository controls: REPOSITORY_CONTROLS.md
       - Launch messaging: LAUNCH_MESSAGING.md
       - Alpha release notes: RELEASE_NOTES_0.1.0-alpha.1.md
