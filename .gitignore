@@ -29,6 +29,7 @@ MANIFEST
 htmlcov/
 .tox/
 .nox/
+.ignored-cleanup/
 
 # Virtual environments
 venv/
