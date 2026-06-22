@@ -146,6 +146,7 @@ cp "$WINSW_EXE" "$STAGE/winsw/WinSW.exe"
 cp "$BUILD/winsw_templates/Watchdog.xml" "$STAGE/winsw/Watchdog.xml"
 cp "$BUILD/winsw_templates/Helper.xml"   "$STAGE/winsw/Helper.xml"
 cp "$BUILD/winsw_templates/Backend.xml"  "$STAGE/winsw/Backend.xml"
+cp "$BUILD/winsw_templates/Broker.xml"   "$STAGE/winsw/Broker.xml"
 
 # ---- 4. Build dashboard ----
 blue "Building dashboard..."
@@ -183,6 +184,10 @@ BAT
   cat > "$STAGE/agent/GuardianNodeTray.exe.bat" <<'BAT'
 @echo off
 "%~dp0..\..\..\python\python.exe" -m src.tray_app %*
+BAT
+  cat > "$STAGE/agent/GuardianNodeBroker.exe.bat" <<'BAT'
+@echo off
+"%~dp0..\..\..\python\python.exe" -m src.broker_service %*
 BAT
 }
 

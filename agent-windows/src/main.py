@@ -33,6 +33,12 @@ log = logging.getLogger("guardiannode.agent")
 
 def _is_locally_paused() -> bool:
     if os.name == "nt":
+        try:
+            from src.broker_client import BrokerClient
+
+            return bool(BrokerClient().status().get("paused", False))
+        except Exception:
+            pass
         path = os.path.join(os.environ.get("PROGRAMDATA", "C:\\ProgramData"), "GuardianNode", "paused_until")
     else:
         path = os.path.expanduser("~/.guardiannode/paused_until")
@@ -396,6 +402,18 @@ async def capture_config_loop(client: BackendClient, cfg: AgentConfig) -> None:
 
 
 async def main_async(cfg: AgentConfig) -> None:
+    if os.name == "nt" and cfg.broker_enabled and not cfg.dry_run:
+        from src.broker_client import BrokerScreenshotQueue
+
+        screenshot_queue = BrokerScreenshotQueue()
+        log.info(
+            "agent started in broker mode: cadence=%ds monitored_apps=%d",
+            cfg.ocr_cadence_seconds,
+            len(cfg.monitored_apps),
+        )
+        await capture_loop(cfg, screenshot_queue)  # type: ignore[arg-type]
+        return
+
     # Complete pairing left pending by the installer (or a previous failed run).
     try:
         await asyncio.to_thread(bootstrap_pairing, socket.gethostname(), __version__)

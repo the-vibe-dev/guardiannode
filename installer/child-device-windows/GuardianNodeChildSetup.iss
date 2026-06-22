@@ -56,7 +56,9 @@ Source: "..\..\README.md";   DestDir: "{app}"; Flags: ignoreversion
 ; The agent itself is NOT a service: services live in session 0 and cannot
 ; capture a logged-in user's desktop. The agent runs per user session via the
 ; GuardianNodeAgent scheduled task (see register_agent_task.ps1). Only the
-; watchdog (tamper resistance) and the backend (all-in-one) are services.
+; endpoint broker, watchdogs, and optional backend are services.
+Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBrokerService.exe"; Flags: ignoreversion
+Source: "..\build\stage\winsw\Broker.xml";      DestDir: "{app}"; DestName: "GuardianNodeBrokerService.xml"; Flags: ignoreversion
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Watchdog.xml";    DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.xml"; Flags: ignoreversion
 ; Secondary watchdog (mutual resurrection — see Helper.xml). GuardianNode-branded
@@ -118,6 +120,13 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: ru
 Filename: "sc.exe"; Parameters: "stop GuardianNodeAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "delete GuardianNodeAgent"; Flags: runhidden waituntilterminated
 
+; ---- Install + start endpoint broker before session tasks. The broker owns
+; device credentials, durable queue, pause state, and backend upload transport. ----
+Filename: "{app}\agent\GuardianNodeBroker.exe"; Parameters: "--self-test"; Flags: runhidden waituntilterminated; StatusMsg: "Validating GuardianNode broker..."
+Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Endpoint Broker service..."
+Filename: "sc.exe"; Parameters: "sdset GuardianNodeBroker {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
+Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; StatusMsg: "Starting GuardianNode Endpoint Broker service..."
+
 ; ---- Register the agent + tray as logon scheduled tasks for ALL users and start them ----
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeAgent.exe"" -TaskName ""GuardianNodeAgent"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode monitoring for all users..."
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeTray.exe"" -TaskName ""GuardianNodeTray"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode tray for all users..."
@@ -166,6 +175,9 @@ Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeTray"; Flags: runhid
 Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeTray /F"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeAgent.exe /F"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeTray.exe /F"; Flags: runhidden waituntilterminated
+Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeBroker.exe /F"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 
@@ -312,6 +324,9 @@ begin
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeWatchdog.exe /F');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeAgent.exe /F');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeTray.exe /F');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeBroker');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
   Result := '';
 end;
 

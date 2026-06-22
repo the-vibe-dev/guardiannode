@@ -23,7 +23,7 @@ Status definitions:
 | Windows tray/status UI | Experimental | Windows | `agent-windows/src/tray_app.py` | Manual Windows validation |
 | Windows watchdog | Experimental | Windows | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
 | Durable encrypted agent queue | Experimental | Windows | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |
-| Privileged Windows broker | Planned | Windows | Planned broker service | Not implemented |
+| Privileged Windows broker | Experimental | Windows | `agent-windows/src/broker_service.py` | `agent-windows/tests/test_broker_service.py` |
 | Clipboard collector | Planned | Windows | Planned collector | Not implemented |
 | File collector | Planned | Windows | Planned collector | Not implemented |
 | Accessibility collector | Planned | Windows | Planned collector | Not implemented |

@@ -4,11 +4,16 @@ Runs on the child's PC in the signed-in Windows desktop session. It captures the
 visible screen, OCRs visible text, sends screenshots to the backend for local
 classification, and keeps a tray icon visible for pause/status actions.
 
-The installer also registers service/watchdog components for resilience, but
-desktop capture must happen in the user's interactive session. Windows service
-session 0 cannot reliably see the child's desktop, so the installer starts the
-agent with `runasoriginaluser` and registers all-user logon tasks for future
-logins.
+The installer also registers a GuardianNode Endpoint Broker service and
+watchdog components for resilience. Desktop capture still happens in the user's
+interactive session because Windows service session 0 cannot reliably see the
+child's desktop. In broker mode, the session process sends bounded screenshot
+payloads over local IPC; the broker owns the device credential, durable queue,
+pause state, and backend upload transport.
+
+This broker path is experimental until it passes the clean Windows standard-user
+matrix. Source testing without the broker can set `broker_enabled: false` in
+`agent.yaml` or use `--dry-run`.
 
 ## Development setup
 
@@ -59,8 +64,10 @@ monitored_apps:
   - brave.exe
 ```
 
-Pairing credentials live separately in
-`C:\ProgramData\GuardianNode\device.json`.
+In current installer builds, pairing credentials are intended to live under the
+broker-owned `C:\ProgramData\GuardianNode\Secure\device.json`. A legacy
+`C:\ProgramData\GuardianNode\device.json` may exist on upgraded alpha systems
+and is migrated by the broker when possible.
 
 ## Components
 
@@ -71,6 +78,9 @@ Pairing credentials live separately in
 - `ocr_engine.py` — Tesseract OCR wrapper; PaddleOCR is only a planned optional path
 - `redactor.py` — best-effort text filtering helpers where used
 - `durable_queue.py` — encrypted SQLite retry queue for screenshot payloads during outages
+- `broker_protocol.py` — bounded versioned local IPC protocol
+- `broker_client.py` — session-process client for the endpoint broker
+- `broker_service.py` — privileged endpoint broker service entrypoint
 - `backend_client.py` — HTTP client to backend
 - `tray_app.py` — pystray-based notification icon and local pause UI
 - `watchdog.py` — paired watchdog service using Windows Terminal Services APIs for active sessions

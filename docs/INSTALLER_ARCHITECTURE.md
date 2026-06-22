@@ -25,11 +25,13 @@ Flow:
 2. Select the child age group.
 3. In separated mode, enter the explicit server URL and pairing code from the parent dashboard.
 4. In all-in-one mode, run a hardware probe and choose the model tier.
-5. Install the agent, tray, watchdog services, optional backend, and scheduled logon tasks.
+5. Install the endpoint broker, agent, tray, watchdog services, optional backend, and scheduled logon tasks.
 6. Open the dashboard only when the installer knows the dashboard URL.
 
 The agent and tray run in the signed-in Windows user session because service
-session 0 cannot capture the desktop. Watchdog services are resilience helpers.
+session 0 cannot capture the desktop. The GuardianNode Endpoint Broker runs as
+a service and is intended to own device credentials, queue state, pause state,
+and backend upload transport. Watchdog services are resilience helpers.
 
 The alpha does not ship a tested password-gated uninstaller wrapper. Uninstall
 protection relies on normal Windows administrator/UAC permissions plus service
@@ -48,17 +50,20 @@ Target ACLs for clean-machine testing:
 | `%ProgramData%\GuardianNode\keys\master.key` | Legacy/raw evidence encryption key for migrated alpha installs | SYSTEM + Administrators only; remove only after a verified portable key backup |
 | `%ProgramData%\GuardianNode\evidence\` | Encrypted evidence blobs | SYSTEM + Administrators only |
 | `%ProgramData%\GuardianNode\server.env` | Backend service configuration | SYSTEM + Administrators modify |
-| `%ProgramData%\GuardianNode\agent.yaml` | Child capture configuration | Administrators modify; interactive users read |
-| `%ProgramData%\GuardianNode\pending_pairing.json` | Installer-to-agent enrollment handoff | Administrators create; interactive agent session reads and deletes |
-| `%ProgramData%\GuardianNode\device.json` | Device bearer token and backend URL | Current alpha requires interactive-agent read/write; this remains a release risk until replaced by DPAPI or a privileged local broker |
-| `%ProgramData%\GuardianNode\paused_until` | Local pause marker | Interactive tray writes; agent reads |
+| `%ProgramData%\GuardianNode\agent.yaml` | Child capture configuration | Administrators modify; interactive users read non-secret capture settings |
+| `%ProgramData%\GuardianNode\pending_pairing.json` | Installer-to-broker enrollment handoff | Administrators create; broker reads and deletes |
+| `%ProgramData%\GuardianNode\Secure\device.json` | Device bearer token and backend URL | Broker-owned target storage; SYSTEM + Administrators only after Windows ACL qualification |
+| `%ProgramData%\GuardianNode\device.json` | Legacy device credential from older alpha installs | Broker migration source only; not the intended current authority |
+| `%ProgramData%\GuardianNode\Secure\pause_state.json` | Authoritative pause state in broker mode | Broker-owned target storage; SYSTEM + Administrators only after Windows ACL qualification |
+| `%ProgramData%\GuardianNode\paused_until` | Legacy local pause marker | Compatibility fallback only; not acceptable for a qualified installer release |
+| `%ProgramData%\GuardianNode\AgentSecure\queue.sqlite` and `queue.key` | Durable upload queue | Broker-owned target storage; SYSTEM + Administrators only after Windows ACL qualification |
 | `%ProgramData%\GuardianNode\logs\` | Agent/tray/backend logs | Service/agent append; Administrators read |
 
-The unresolved design item is `device.json`: an agent that captures the
-interactive desktop must run in the user's session, so it can read any bearer
-token it uses directly. A stronger Windows design should store the token behind
-DPAPI for the task identity or move token use into a privileged local broker
-with a narrow named-pipe API.
+The current architecture introduces the `GuardianNodeBroker` service so the
+interactive capture helper no longer needs to own the backend bearer token or
+durable queue. This remains an installer no-go until clean Windows 10/11 tests
+confirm the named-pipe ACLs, ProgramData ACLs, standard-user behavior,
+upgrade/repair/uninstall, and multi-session operation.
 
 ## Windows Server Installer
 
@@ -123,6 +128,7 @@ fingerprint together with a one-time enrollment secret.
 ## Service Naming
 
 Installed services use GuardianNode-branded names:
-`GuardianNodeBackend`, `GuardianNodeWatchdog`, and `GuardianNodeWatchdog2`.
+`GuardianNodeBackend`, `GuardianNodeBroker`, `GuardianNodeWatchdog`, and
+`GuardianNodeWatchdog2`.
 Transparent naming is intentional; tamper resistance comes from Windows
 permissions, not hiding process names.

@@ -1,7 +1,8 @@
 # PyInstaller spec for the GuardianNode child-device agent.
 # Build on Windows:  pyinstaller --noconfirm guardiannode_agent.spec
 # Output: dist/GuardianNodeAgent/ containing GuardianNodeAgent.exe,
-# GuardianNodeTray.exe, GuardianNodeWatchdog.exe and one shared _internal/.
+# GuardianNodeBroker.exe, GuardianNodeTray.exe, GuardianNodeWatchdog.exe and
+# one shared _internal/.
 from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = collect_submodules("src") + [
@@ -29,16 +30,19 @@ def make_analysis(script):
 
 
 a_agent = make_analysis("entry_agent.py")
+a_broker = make_analysis("entry_broker.py")
 a_tray = make_analysis("entry_tray.py")
 a_watchdog = make_analysis("entry_watchdog.py")
 
 MERGE(
     (a_agent, "GuardianNodeAgent", "GuardianNodeAgent"),
+    (a_broker, "GuardianNodeBroker", "GuardianNodeBroker"),
     (a_tray, "GuardianNodeTray", "GuardianNodeTray"),
     (a_watchdog, "GuardianNodeWatchdog", "GuardianNodeWatchdog"),
 )
 
 pyz_agent = PYZ(a_agent.pure)
+pyz_broker = PYZ(a_broker.pure)
 pyz_tray = PYZ(a_tray.pure)
 pyz_watchdog = PYZ(a_watchdog.pure)
 
@@ -46,6 +50,11 @@ exe_agent = EXE(
     pyz_agent, a_agent.scripts, [],
     # The monitoring agent logs to ProgramData and must not open a console.
     exclude_binaries=True, name="GuardianNodeAgent", console=False, icon=None,
+)
+exe_broker = EXE(
+    pyz_broker, a_broker.scripts, [],
+    # The broker runs as a Windows service and owns secrets/queue/transport.
+    exclude_binaries=True, name="GuardianNodeBroker", console=True, icon=None,
 )
 exe_tray = EXE(
     pyz_tray, a_tray.scripts, [],
@@ -59,6 +68,7 @@ exe_watchdog = EXE(
 
 coll = COLLECT(
     exe_agent, a_agent.binaries, a_agent.datas,
+    exe_broker, a_broker.binaries, a_broker.datas,
     exe_tray, a_tray.binaries, a_tray.datas,
     exe_watchdog, a_watchdog.binaries, a_watchdog.datas,
     name="GuardianNodeAgent",

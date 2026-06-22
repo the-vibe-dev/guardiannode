@@ -40,6 +40,7 @@ dev = [
 
 [project.scripts]
 guardiannode-agent = "src.main:cli"
+guardiannode-broker = "src.broker_service:cli"
 guardiannode-watchdog = "src.watchdog:cli"
 guardiannode-tray = "src.tray_app:cli"
 

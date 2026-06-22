@@ -45,9 +45,11 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
   backend tracks `last_seen` and surfaces offline/heartbeat gaps to the parent. We
   do **not** hide the agent — GuardianNode is visible monitoring by design (a tray
   icon and clear install footprint), not stealthware.
-- **Local pause abuse.** A local `paused_until` file can pause capture; pauses are
-  bounded and intended to be parent-initiated. Treat the child account as
-  non-administrative for this to hold.
+- **Local pause abuse.** Qualified Windows installer builds are moving pause
+  authority into the GuardianNode broker service. Legacy/source fallback paths
+  may still read a local `paused_until` marker, so ordinary-family installer
+  release remains blocked until clean Windows tests prove the child account
+  cannot alter pause state directly.
 
 ### 3.2 Network attacker on the LAN
 - **Sniff agent->backend traffic.** Mitigation: use all-in-one mode, a trusted

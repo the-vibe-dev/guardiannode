@@ -1,6 +1,7 @@
 """System tray icon + pause UX.
 
-Right-click → Pause → enter password → pick duration → POST to backend.
+Right-click -> Pause -> enter parent password -> pick duration -> request the
+local endpoint broker to pause capture.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.broker_client import BrokerClient
 from src.config import AgentConfig, default_config_path
 from src.pairing_client import load_credentials
 from src.parent_auth import verify_password
@@ -53,6 +55,12 @@ def already_running() -> bool:
 
 
 def _backend_url() -> str:
+    try:
+        backend_url = BrokerClient().status().get("backend_url")
+        if backend_url:
+            return str(backend_url)
+    except Exception:
+        pass
     creds = load_credentials() or {}
     if creds.get("backend_url"):
         return creds["backend_url"]
@@ -61,6 +69,12 @@ def _backend_url() -> str:
 
 
 def _device_id() -> str | None:
+    try:
+        device_id = BrokerClient().status().get("device_id")
+        if device_id:
+            return str(device_id)
+    except Exception:
+        pass
     creds = load_credentials() or {}
     return creds.get("device_id")
 
@@ -209,10 +223,8 @@ def pause_flow() -> None:
         log.warning("device not paired; cannot pause")
         return
     try:
-        # Local tray pause is enforced by the capture loop. Dashboard-visible
-        # pause is available through the authenticated parent dashboard.
-        _set_local_pause(duration)
-        log.info("paused locally for %d seconds", duration)
+        BrokerClient().pause(duration, actor="local-tray")
+        log.info("requested broker pause for %d seconds", duration)
     except Exception as e:
         log.warning("pause failed: %s", e)
 
@@ -232,6 +244,10 @@ def _set_local_pause(duration_seconds: int) -> None:
 
 
 def is_paused() -> bool:
+    try:
+        return bool(BrokerClient().status().get("paused", False))
+    except Exception:
+        pass
     import time as _t
     path = _pause_flag_path()
     try:
@@ -289,9 +305,11 @@ def _try_pystray() -> Callable[[], None] | None:
 
         def _menu_resume(icon, item):  # noqa: ANN001
             try:
-                os.remove(_pause_flag_path())
-            except OSError:
-                pass
+                pw = _ask_password()
+                if pw and _verify_parent_password(pw):
+                    BrokerClient().resume(actor="local-tray")
+            except Exception as e:
+                log.warning("resume failed: %s", e)
             icon.icon = green
 
         def _menu_exit(icon, item):  # noqa: ANN001

@@ -85,6 +85,40 @@ def test_bootstrap_reads_device_token_for_local_bootstrap(tmp_path, monkeypatch)
     assert result["device_id"] == "dev-local"
 
 
+def test_bootstrap_can_read_explicit_bootstrap_token_path_for_broker_storage(tmp_path, monkeypatch):
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({"backend_url": "http://127.0.0.1:8787", "local_bootstrap": True}))
+    secure_device = tmp_path / "Secure" / "device.json"
+    root_keys = tmp_path / "keys"
+    root_keys.mkdir()
+    bootstrap_token = root_keys / "device_bootstrap_token.json"
+    bootstrap_token.write_text(json.dumps({"token": "broker-bootstrap-secret"}))
+
+    def fake_bootstrap(
+        backend_url,
+        device_bootstrap_token,
+        hostname,
+        platform="windows",
+        agent_version="0.1.0-alpha.1",
+    ):
+        assert backend_url == "http://127.0.0.1:8787"
+        assert device_bootstrap_token == "broker-bootstrap-secret"
+        assert hostname == "family-pc"
+        return "dev-local", "tok-local"
+
+    monkeypatch.setattr(pairing_client, "bootstrap_local_with_server", fake_bootstrap)
+    result = pairing_client.bootstrap_pairing(
+        "family-pc",
+        "0.1.0-alpha.1",
+        pending_path=pending,
+        device_path=secure_device,
+        bootstrap_token_path=bootstrap_token,
+    )
+
+    assert result["device_token"] == "tok-local"
+    assert json.loads(secure_device.read_text())["device_token"] == "tok-local"
+
+
 def test_bootstrap_removes_pending_on_rejected_code(tmp_path, monkeypatch):
     pending = tmp_path / "pending_pairing.json"
     pending.write_text(json.dumps({"backend_url": "http://srv:8787", "code": "999999"}))

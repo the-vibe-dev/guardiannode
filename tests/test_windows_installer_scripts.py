@@ -21,10 +21,15 @@ def test_child_installer_writes_config_before_starting_components() -> None:
 
     config_line = _line_number(text, "BeforeInstall: WriteRuntimeConfigBeforeStart")
     first_backend_start = _line_number(text, 'Parameters: "start"; Flags: runhidden waituntilterminated; Check: IsAllInOne')
+    broker_install = _line_number(text, 'GuardianNodeBrokerService.exe"; Parameters: "install"')
+    broker_start = _line_number(text, 'GuardianNodeBrokerService.exe"; Parameters: "start"')
     first_task_register = _line_number(text, 'Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\\register_agent_task.ps1')
     first_watchdog_start = _line_number(text, "GuardianNodeWatchdogService.exe\"; Parameters: \"start")
 
     assert config_line < first_backend_start
+    assert config_line < broker_install
+    assert broker_install < broker_start
+    assert broker_start < first_task_register
     assert config_line < first_task_register
     assert config_line < first_watchdog_start
     assert "CurStepChanged" not in text
@@ -56,7 +61,31 @@ def test_child_installer_uses_allow_only_service_dacl_and_no_taskbar_pin() -> No
 
     assert "D;;" not in text
     assert "GuardianNodeServiceSddl" in text
+    assert "sdset GuardianNodeBroker {#GuardianNodeServiceSddl}" in text
     assert "pin_to_taskbar" not in text
+
+
+def test_child_installer_installs_endpoint_broker_before_session_tasks() -> None:
+    text = CHILD_INSTALLER.read_text(encoding="utf-8")
+    build_script = (ROOT / "installer" / "build" / "build_all.sh").read_text(encoding="utf-8")
+    bundle_verify = (ROOT / "agent-windows" / "scripts" / "verify_windows_bundle.ps1").read_text(encoding="utf-8")
+
+    assert "GuardianNodeBrokerService.exe" in text
+    assert "GuardianNodeBrokerService.xml" in text
+    assert "GuardianNodeBroker.exe\"; Parameters: \"--self-test" in text
+    assert "GuardianNodeBroker.exe" in bundle_verify
+    assert "Broker.xml" in build_script
+
+    broker_start = _line_number(text, 'GuardianNodeBrokerService.exe"; Parameters: "start"')
+    agent_task = _line_number(text, 'TaskName ""GuardianNodeAgent""')
+    tray_task = _line_number(text, 'TaskName ""GuardianNodeTray""')
+    watchdog_start = _line_number(text, 'GuardianNodeWatchdogService.exe"; Parameters: "start"')
+    assert broker_start < agent_task
+    assert broker_start < tray_task
+    assert broker_start < watchdog_start
+
+    assert "stop GuardianNodeBroker" in text
+    assert "delete GuardianNodeBroker" in text
 
 
 def test_watchdog_respects_installer_maintenance_marker() -> None:

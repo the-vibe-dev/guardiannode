@@ -47,6 +47,7 @@ function Assert-Executable {
 }
 
 Assert-Executable -Name "GuardianNodeAgent.exe" -Subsystem 2 -Arguments @("--version")
+Assert-Executable -Name "GuardianNodeBroker.exe" -Subsystem 3 -Arguments @("--self-test")
 Assert-Executable -Name "GuardianNodeTray.exe" -Subsystem 2 -Arguments @("--self-test")
 Assert-Executable -Name "GuardianNodeWatchdog.exe" -Subsystem 3 -Arguments @("--help")
 

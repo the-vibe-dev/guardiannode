@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<service>
+  <id>GuardianNodeBroker</id>
+  <name>GuardianNode Endpoint Broker</name>
+  <description>Owns GuardianNode device credentials, queue, pause state, and backend upload transport for local capture sessions.</description>
+  <executable>%BASE%\agent\GuardianNodeBroker.exe</executable>
+  <arguments>--config %ProgramData%\GuardianNode\agent.yaml</arguments>
+  <workingdirectory>%BASE%\agent</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>false</delayedAutoStart>
+</service>

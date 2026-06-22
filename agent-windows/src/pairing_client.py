@@ -144,8 +144,11 @@ def pending_pairing_path() -> Path:
     return default_device_path().parent / "pending_pairing.json"
 
 
-def _read_local_device_bootstrap_token(device_path: Path | None = None) -> str | None:
-    path = (device_path or default_device_path()).parent / "keys" / "device_bootstrap_token.json"
+def _read_local_device_bootstrap_token(
+    device_path: Path | None = None,
+    token_path: Path | None = None,
+) -> str | None:
+    path = token_path or (device_path or default_device_path()).parent / "keys" / "device_bootstrap_token.json"
     try:
         data = json.loads(path.read_text("utf-8"))
         return str(data.get("token") or "").strip() or None
@@ -159,6 +162,7 @@ def bootstrap_pairing(
     *,
     pending_path: Path | None = None,
     device_path: Path | None = None,
+    bootstrap_token_path: Path | None = None,
     attempts: int = 5,
     retry_delay: float = 10.0,
 ) -> dict | None:
@@ -190,7 +194,7 @@ def bootstrap_pairing(
     local_bootstrap = bool(pending.get("local_bootstrap", False))
     device_bootstrap_token = str(pending.get("device_bootstrap_token", "")).strip()
     if local_bootstrap and not device_bootstrap_token:
-        device_bootstrap_token = _read_local_device_bootstrap_token(device_path) or ""
+        device_bootstrap_token = _read_local_device_bootstrap_token(device_path, bootstrap_token_path) or ""
     if not code and not local_bootstrap:
         log.error("pending pairing file has no code; removing it")
         pending_path.unlink(missing_ok=True)

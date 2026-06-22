@@ -64,6 +64,7 @@ class AgentConfig:
     durable_queue_max_items: int = 200
     durable_queue_max_bytes: int = 256 * 1024 * 1024
     durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
+    broker_enabled: bool = True
 
     @classmethod
     def from_path(cls, path: Path) -> "AgentConfig":

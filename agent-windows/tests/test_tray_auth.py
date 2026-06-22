@@ -20,3 +20,18 @@ def test_tray_refuses_remote_password_over_plain_http(monkeypatch) -> None:
     monkeypatch.setattr(tray_app.httpx, "Client", _unexpected_client)
 
     assert not tray_app._verify_parent_password("correct horse battery staple")
+
+
+def test_tray_reads_backend_and_device_from_broker_before_legacy_files(monkeypatch) -> None:
+    class FakeBrokerClient:
+        def status(self) -> dict:
+            return {
+                "backend_url": "http://127.0.0.1:8787",
+                "device_id": "dev-from-broker",
+            }
+
+    monkeypatch.setattr(tray_app, "BrokerClient", FakeBrokerClient)
+    monkeypatch.setattr(tray_app, "load_credentials", lambda: {"device_id": "legacy-dev"})
+
+    assert tray_app._backend_url() == "http://127.0.0.1:8787"
+    assert tray_app._device_id() == "dev-from-broker"

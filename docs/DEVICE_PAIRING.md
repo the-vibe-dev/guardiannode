@@ -7,10 +7,13 @@ Used in separated mode to link a child device's agent to the parent's server.
 The installer never talks to the backend itself. It writes
 `C:\ProgramData\GuardianNode\pending_pairing.json` containing the wizard's
 server URL and 6-digit code (or `{"local_bootstrap": true}` for all-in-one
-installs). On every start, the agent checks for this file before its main
-loop (`pairing_client.bootstrap_pairing`):
+installs). In current broker-enabled builds, the GuardianNode Endpoint Broker
+reads this file and stores the resulting device credential in broker-owned
+storage. Legacy/source agent mode checks the same file before its main loop
+(`pairing_client.bootstrap_pairing`):
 
-- If `device.json` already holds a token, the pending file is ignored.
+- If broker-owned `Secure\device.json` or legacy `device.json` already holds a
+  token, the pending file is ignored.
 - The agent requires an explicit server URL. mDNS discovery is advisory only in
   this alpha because a LAN advertisement does not authenticate the parent server.
 - Transient failures (server still booting) retry 5 times, 10s apart, then
