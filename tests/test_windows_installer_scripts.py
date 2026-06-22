@@ -49,10 +49,9 @@ def test_child_only_install_does_not_stage_backend_or_dashboard_payload() -> Non
     text = CHILD_INSTALLER.read_text(encoding="utf-8")
 
     backend_line = next(line for line in text.splitlines() if r"build\stage\backend\*" in line)
-    dashboard_line = next(line for line in text.splitlines() if r"build\stage\dashboard\*" in line)
 
     assert "Check: IsAllInOne" in backend_line
-    assert "Check: IsAllInOne" in dashboard_line
+    assert r"build\stage\dashboard\*" not in text
     assert r"UninstallDisplayIcon={app}\agent\{#MyAppExeName}" in text
 
 

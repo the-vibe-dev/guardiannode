@@ -103,12 +103,44 @@ jobs:
 
   build-backend-exe:
     runs-on: windows-latest
-    needs: [test-backend]
+    needs: [test-backend, build-dashboard]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dashboard-dist
+          path: dashboard-dist
+      - name: Embed verified dashboard artifact
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dashboard-dist/index.html")) {
+            throw "dashboard artifact missing index.html"
+          }
+          if (Test-Path "backend/app/static") {
+            Remove-Item -Recurse -Force "backend/app/static"
+          }
+          New-Item -ItemType Directory -Force "backend/app/static" | Out-Null
+          Copy-Item -Recurse -Force "dashboard-dist/*" "backend/app/static/"
+          $dashboard = Get-ChildItem "dashboard-dist" -Recurse -File | Sort-Object FullName
+          $embedded = Get-ChildItem "backend/app/static" -Recurse -File | Sort-Object FullName
+          if ($dashboard.Count -ne $embedded.Count) {
+            throw "embedded dashboard file count mismatch"
+          }
+          for ($i = 0; $i -lt $dashboard.Count; $i++) {
+            $relativeDashboard = $dashboard[$i].FullName.Substring((Resolve-Path "dashboard-dist").Path.Length)
+            $relativeEmbedded = $embedded[$i].FullName.Substring((Resolve-Path "backend/app/static").Path.Length)
+            if ($relativeDashboard -ne $relativeEmbedded) {
+              throw "embedded dashboard path mismatch: $relativeDashboard vs $relativeEmbedded"
+            }
+            $left = (Get-FileHash $dashboard[$i].FullName -Algorithm SHA256).Hash
+            $right = (Get-FileHash $embedded[$i].FullName -Algorithm SHA256).Hash
+            if ($left -ne $right) {
+              throw "embedded dashboard hash mismatch: $relativeDashboard"
+            }
+          }
       - name: Install backend + PyInstaller
         working-directory: backend
         run: |
@@ -166,10 +198,6 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dashboard-dist
-          path: installer/build/stage/dashboard
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
           name: backend-bundle
           path: installer/build/stage/backend
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -204,6 +232,7 @@ jobs:
           Copy-Item installer/build/winsw_templates/Watchdog.xml installer/build/stage/winsw/
           Copy-Item installer/build/winsw_templates/Helper.xml   installer/build/stage/winsw/
           Copy-Item installer/build/winsw_templates/Backend.xml  installer/build/stage/winsw/
+          Copy-Item installer/build/winsw_templates/Broker.xml   installer/build/stage/winsw/
 
       - name: Install Inno Setup
         shell: pwsh

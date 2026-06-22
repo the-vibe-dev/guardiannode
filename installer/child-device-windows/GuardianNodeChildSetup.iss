@@ -44,9 +44,6 @@ Source: "..\build\stage\agent\*"; DestDir: "{app}\agent"; Flags: recursesubdirs 
 ; ---- Bundled backend (if all-in-one mode) ----
 Source: "..\build\stage\backend\*"; DestDir: "{app}\backend"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
 
-; ---- Dashboard built static files ----
-Source: "..\build\stage\dashboard\*"; DestDir: "{app}\backend\app\static"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
-
 ; ---- Documentation ----
 Source: "..\..\PRIVACY.md";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE";     DestDir: "{app}"; Flags: ignoreversion

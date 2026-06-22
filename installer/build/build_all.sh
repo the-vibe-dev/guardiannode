@@ -148,12 +148,11 @@ cp "$BUILD/winsw_templates/Helper.xml"   "$STAGE/winsw/Helper.xml"
 cp "$BUILD/winsw_templates/Backend.xml"  "$STAGE/winsw/Backend.xml"
 cp "$BUILD/winsw_templates/Broker.xml"   "$STAGE/winsw/Broker.xml"
 
-# ---- 4. Build dashboard ----
+# ---- 4. Build dashboard for local verification. Release backend bundles embed
+# the dashboard artifact before PyInstaller; installers no longer stage an
+# independent dashboard copy beside the frozen backend.
 blue "Building dashboard..."
 ( cd "$ROOT/dashboard" && npm install --silent && npm run build --silent )
-rm -rf "$STAGE/dashboard"
-mkdir -p "$STAGE/dashboard"
-cp -r "$ROOT/dashboard/dist/." "$STAGE/dashboard/"
 
 # ---- 5. Stage agent + backend payloads (fail-closed) ----
 # Real PyInstaller bundles are expected at build/prebuilt/agent (with

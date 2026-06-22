@@ -17,6 +17,18 @@ def test_installer_release_does_not_run_on_ordinary_source_tags() -> None:
     assert "workflow_dispatch:" in text
 
 
+def test_installer_release_embeds_single_dashboard_artifact_and_broker_template() -> None:
+    text = INSTALLERS.read_text(encoding="utf-8")
+
+    assert "needs: [test-backend, build-dashboard]" in text
+    assert "name: dashboard-dist" in text
+    assert "Embed verified dashboard artifact" in text
+    assert "Copy-Item -Recurse -Force \"dashboard-dist/*\" \"backend/app/static/\"" in text
+    assert "embedded dashboard hash mismatch" in text
+    assert "path: installer/build/stage/dashboard" not in text
+    assert "Copy-Item installer/build/winsw_templates/Broker.xml" in text
+
+
 def test_source_release_is_prerelease_and_rejects_windows_binaries() -> None:
     text = SOURCE_RELEASE.read_text(encoding="utf-8")
 
