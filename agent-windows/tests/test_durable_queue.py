@@ -1,13 +1,44 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import sqlite3
+from pathlib import Path
 
 import httpx
 import pytest
 
 from src.durable_queue import DurableScreenshotQueue
 from src.main import screenshot_sender_loop
+
+
+def _construct_queue_process(
+    queue_path: str,
+    key_path: str,
+    barrier,
+    results,
+) -> None:
+    try:
+        barrier.wait(timeout=10)
+        q = DurableScreenshotQueue(Path(queue_path), key_path=Path(key_path))
+        results.put(("ok", q.key_path.read_bytes()))
+    except Exception as exc:  # pragma: no cover - exercised in child process
+        results.put(("error", repr(exc)))
+
+
+def _claim_once_process(
+    queue_path: str,
+    key_path: str,
+    barrier,
+    results,
+) -> None:
+    try:
+        barrier.wait(timeout=10)
+        q = DurableScreenshotQueue(Path(queue_path), key_path=Path(key_path), lease_seconds=30)
+        payload = q._get_ready()
+        results.put(("ok", None if payload is None else payload.get("app_name")))
+    except Exception as exc:  # pragma: no cover - exercised in child process
+        results.put(("error", repr(exc)))
 
 
 def _queue(tmp_path, **kwargs) -> DurableScreenshotQueue:
@@ -53,6 +84,39 @@ def test_durable_queue_survives_process_restart_and_retry_delay(tmp_path):
     assert recovered["idempotency_key"] == payload["idempotency_key"]
 
 
+def test_durable_queue_rejects_ack_from_wrong_lease_owner(tmp_path):
+    q = _queue(tmp_path)
+    q.put_nowait({"image_bytes": b"frame", "app_name": "Browser"})
+    payload = asyncio.run(q.get())
+
+    attacker_payload = dict(payload)
+    attacker_payload["_queue_lease_owner"] = "not-the-claim-owner"
+    _queue(tmp_path).ack_payload(attacker_payload)
+    assert q.qsize() == 1
+
+    q.ack_payload(payload)
+    assert q.qsize() == 0
+
+
+def test_durable_queue_recovers_expired_lease(tmp_path):
+    q1 = _queue(tmp_path, lease_seconds=30)
+    q1.put_nowait({"image_bytes": b"frame", "app_name": "Browser"})
+    first = q1._get_ready()
+    assert first is not None
+
+    q2 = _queue(tmp_path, lease_seconds=30)
+    assert q2._get_ready() is None
+
+    with sqlite3.connect(tmp_path / "queue.sqlite") as conn:
+        conn.execute("UPDATE screenshot_queue SET lease_until = 0")
+
+    recovered = q2._get_ready()
+    assert recovered is not None
+    assert recovered["idempotency_key"] == first["idempotency_key"]
+    q2.ack_payload(recovered)
+    assert q2.qsize() == 0
+
+
 def test_durable_queue_enforces_item_cap_by_dropping_oldest(tmp_path):
     q = _queue(tmp_path, max_items=2)
     q.put_nowait({"image_bytes": b"one", "app_name": "One"})
@@ -62,6 +126,57 @@ def test_durable_queue_enforces_item_cap_by_dropping_oldest(tmp_path):
     assert q.qsize() == 2
     first = asyncio.run(q.get())
     assert first["app_name"] == "Two"
+
+
+def test_concurrent_queue_constructors_converge_on_one_key(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    barrier = ctx.Barrier(8)
+    results = ctx.Queue()
+    queue_path = str(tmp_path / "queue.sqlite")
+    key_path = str(tmp_path / "queue.key")
+    processes = [
+        ctx.Process(target=_construct_queue_process, args=(queue_path, key_path, barrier, results))
+        for _ in range(8)
+    ]
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=20)
+
+    assert all(process.exitcode == 0 for process in processes)
+    received = [results.get(timeout=1) for _ in processes]
+    assert [status for status, _ in received] == ["ok"] * len(processes), received
+    keys = {value for _, value in received}
+    assert len(keys) == 1
+    assert len(next(iter(keys))) == 32
+
+
+def test_two_processes_cannot_claim_same_item(tmp_path):
+    q = _queue(tmp_path, lease_seconds=30)
+    q.put_nowait({"image_bytes": b"frame", "app_name": "Browser"})
+
+    ctx = multiprocessing.get_context("spawn")
+    barrier = ctx.Barrier(2)
+    results = ctx.Queue()
+    processes = [
+        ctx.Process(
+            target=_claim_once_process,
+            args=(str(tmp_path / "queue.sqlite"), str(tmp_path / "queue.key"), barrier, results),
+        )
+        for _ in range(2)
+    ]
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=20)
+
+    assert all(process.exitcode == 0 for process in processes)
+    received = [results.get(timeout=1) for _ in processes]
+    assert [status for status, _ in received] == ["ok", "ok"]
+    claimed = [value for _, value in received if value is not None]
+    assert claimed == ["Browser"]
 
 
 class FlakyClient:
