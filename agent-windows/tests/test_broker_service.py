@@ -5,6 +5,7 @@ import json
 
 from src.broker_protocol import image_to_b64, make_request
 from src.broker_service import BrokerCommandHandler
+from src.parent_auth import write_credentials
 from src.pairing_client import save_credentials
 
 
@@ -25,6 +26,8 @@ def _handler(tmp_path) -> BrokerCommandHandler:
         pause_path=tmp_path / "pause_state.json",
         credential_path=tmp_path / "secure" / "device.json",
         legacy_credential_path=tmp_path / "legacy" / "device.json",
+        parent_credential_path=tmp_path / "secure" / "parent.json",
+        legacy_parent_credential_path=tmp_path / "legacy" / "parent.json",
     )
 
 
@@ -75,15 +78,61 @@ def test_broker_queues_screenshot_without_profile_authority(tmp_path) -> None:
 
 def test_broker_pause_resume_state_is_authoritative(tmp_path) -> None:
     handler = _handler(tmp_path)
-    pause = handler.handle_message(make_request("pause", {"duration_seconds": 60, "actor": "test"}))
+    write_credentials("correct horse", "alpha beta gamma", handler.parent_credential_path)
+    pause = handler.handle_message(
+        make_request(
+            "pause",
+            {
+                "duration_seconds": 60,
+                "actor": "test",
+                "parent_password": "correct horse",
+            },
+        )
+    )
     status = handler.handle_message(make_request("status"))
-    resume = handler.handle_message(make_request("resume", {"actor": "test"}))
+    resume = handler.handle_message(
+        make_request("resume", {"actor": "test", "parent_password": "correct horse"})
+    )
     resumed_status = handler.handle_message(make_request("status"))
 
     assert pause["ok"]
     assert status["payload"]["paused"] is True
     assert resume["ok"]
     assert resumed_status["payload"]["paused"] is False
+
+
+def test_broker_rejects_pause_without_parent_password(tmp_path) -> None:
+    handler = _handler(tmp_path)
+
+    missing = handler.handle_message(make_request("pause", {"duration_seconds": 60, "actor": "test"}))
+    wrong = handler.handle_message(
+        make_request(
+            "pause",
+            {
+                "duration_seconds": 60,
+                "actor": "test",
+                "parent_password": "wrong",
+            },
+        )
+    )
+
+    assert not missing["ok"]
+    assert "parent_password is required" in missing["error"]
+    assert not wrong["ok"]
+    assert "parent verification failed" in wrong["error"]
+
+
+def test_broker_verify_parent_has_no_state_side_effect(tmp_path) -> None:
+    handler = _handler(tmp_path)
+    write_credentials("correct horse", "alpha beta gamma", handler.parent_credential_path)
+
+    response = handler.handle_message(
+        make_request("verify_parent", {"actor": "test", "parent_password": "correct horse"})
+    )
+
+    assert response["ok"]
+    assert response["payload"]["verified"] is True
+    assert handler._load_pause().paused is False
 
 
 def test_broker_rejects_replayed_request_id(tmp_path) -> None:

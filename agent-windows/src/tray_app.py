@@ -15,14 +15,10 @@ import tempfile
 import tkinter as tk
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse
-
-import httpx
 
 from src.broker_client import BrokerClient
 from src.config import AgentConfig, default_config_path
 from src.pairing_client import load_credentials
-from src.parent_auth import verify_password
 
 log = logging.getLogger("guardiannode.tray")
 
@@ -77,31 +73,6 @@ def _device_id() -> str | None:
         pass
     creds = load_credentials() or {}
     return creds.get("device_id")
-
-
-def _verify_parent_password(s: str) -> bool:
-    # Local hash file (all-in-one installs that provisioned parent.json).
-    if verify_password(s):
-        return True
-    # Child-only installs have no local parent hash. Never send a parent
-    # password over plaintext LAN HTTP; only allow remote verification over
-    # HTTPS or loopback.
-    try:
-        backend_url = _backend_url().rstrip("/")
-        parsed = urlparse(backend_url)
-        is_loopback = parsed.hostname in {"127.0.0.1", "::1", "localhost"}
-        if parsed.scheme != "https" and not is_loopback:
-            log.warning("refusing remote parent-password check over non-HTTPS backend URL")
-            return False
-        with httpx.Client(timeout=10.0) as c:
-            r = c.post(
-                f"{backend_url}/api/auth/login",
-                json={"password": s},
-            )
-            return r.status_code == 200
-    except Exception as e:
-        log.warning("online parent-password check failed: %s", e)
-        return False
 
 
 # --- Dialogs ---------------------------------------------------------------
@@ -212,9 +183,6 @@ def pause_flow() -> None:
     pw = _ask_password()
     if not pw:
         return
-    if not _verify_parent_password(pw):
-        log.warning("incorrect parent password")
-        return
     duration = _ask_duration()
     if not duration:
         return
@@ -223,7 +191,7 @@ def pause_flow() -> None:
         log.warning("device not paired; cannot pause")
         return
     try:
-        BrokerClient().pause(duration, actor="local-tray")
+        BrokerClient().pause(duration, actor="local-tray", parent_password=pw)
         log.info("requested broker pause for %d seconds", duration)
     except Exception as e:
         log.warning("pause failed: %s", e)
@@ -306,19 +274,30 @@ def _try_pystray() -> Callable[[], None] | None:
         def _menu_resume(icon, item):  # noqa: ANN001
             try:
                 pw = _ask_password()
-                if pw and _verify_parent_password(pw):
-                    BrokerClient().resume(actor="local-tray")
+                if pw:
+                    BrokerClient().resume(actor="local-tray", parent_password=pw)
             except Exception as e:
                 log.warning("resume failed: %s", e)
             icon.icon = green
 
         def _menu_exit(icon, item):  # noqa: ANN001
             pw = _ask_password()
-            if pw and _verify_parent_password(pw):
+            if not pw:
+                return
+            try:
+                BrokerClient().verify_parent(pw, actor="local-tray")
                 icon.stop()
+            except Exception as e:
+                log.warning("exit tray verification failed: %s", e)
 
         def _status_text(*_args) -> str:
             # Diagnostics: which backend this device reports to + pairing state.
+            try:
+                status = BrokerClient().status()
+                if status.get("paired"):
+                    return f"Paired with {status.get('backend_url', '?')}"
+            except Exception:
+                pass
             creds = load_credentials() or {}
             if creds.get("device_token"):
                 return f"Paired with {creds.get('backend_url', '?')}"

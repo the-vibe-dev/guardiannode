@@ -9,17 +9,28 @@ def test_tray_auth_does_not_use_recovery_codes() -> None:
     source = Path(tray_app.__file__).read_text(encoding="utf-8").lower()
     assert "verify_recovery_code" not in source
     assert "12-word recovery code" not in source
+    assert "httpx" not in source
+    assert "/api/auth/login" not in source
 
 
-def test_tray_refuses_remote_password_over_plain_http(monkeypatch) -> None:
-    def _unexpected_client(*_args, **_kwargs):
-        raise AssertionError("remote password check should not be attempted")
+def test_tray_pause_sends_password_to_broker(monkeypatch) -> None:
+    calls: list[tuple[int, str]] = []
 
-    monkeypatch.setattr(tray_app, "verify_password", lambda _password: False)
-    monkeypatch.setattr(tray_app, "_backend_url", lambda: "http://192.0.2.10:8787")
-    monkeypatch.setattr(tray_app.httpx, "Client", _unexpected_client)
+    class FakeBrokerClient:
+        def status(self) -> dict:
+            return {"device_id": "dev-1"}
 
-    assert not tray_app._verify_parent_password("correct horse battery staple")
+        def pause(self, duration_seconds: int, *, actor: str, parent_password: str) -> dict:
+            calls.append((duration_seconds, parent_password))
+            return {"paused": True}
+
+    monkeypatch.setattr(tray_app, "BrokerClient", FakeBrokerClient)
+    monkeypatch.setattr(tray_app, "_ask_password", lambda: "correct horse")
+    monkeypatch.setattr(tray_app, "_ask_duration", lambda: 900)
+
+    tray_app.pause_flow()
+
+    assert calls == [(900, "correct horse")]
 
 
 def test_tray_reads_backend_and_device_from_broker_before_legacy_files(monkeypatch) -> None:

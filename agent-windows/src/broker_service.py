@@ -36,6 +36,8 @@ from src.config import AgentConfig, default_config_path, default_device_path
 from src.durable_queue import DurableScreenshotQueue, default_key_path, default_queue_path
 from src.main import screenshot_sender_loop
 from src.pairing_client import bootstrap_pairing, load_credentials, pending_pairing_path, save_credentials
+from src.parent_auth import _credentials_path as legacy_parent_credentials_path
+from src.parent_auth import verify_password
 
 log = logging.getLogger("guardiannode.broker")
 
@@ -54,6 +56,10 @@ def broker_device_path() -> Path:
 
 def broker_pause_path() -> Path:
     return default_secure_dir() / "pause_state.json"
+
+
+def broker_parent_credentials_path() -> Path:
+    return default_secure_dir() / "parent.json"
 
 
 def broker_bootstrap_token_path() -> Path:
@@ -97,12 +103,16 @@ class BrokerCommandHandler:
         pause_path: Path | None = None,
         credential_path: Path | None = None,
         legacy_credential_path: Path | None = None,
+        parent_credential_path: Path | None = None,
+        legacy_parent_credential_path: Path | None = None,
         replay_cache: RequestReplayCache | None = None,
     ):
         self.queue = queue
         self.pause_path = pause_path or broker_pause_path()
         self.credential_path = credential_path or broker_device_path()
         self.legacy_credential_path = legacy_credential_path or default_device_path()
+        self.parent_credential_path = parent_credential_path or broker_parent_credentials_path()
+        self.legacy_parent_credential_path = legacy_parent_credential_path or legacy_parent_credentials_path()
         self.replay_cache = replay_cache or RequestReplayCache()
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -143,13 +153,18 @@ class BrokerCommandHandler:
             self.queue.put_nowait(payload)
             return {"status": "queued", "queue_depth": self.queue.qsize()}
         if request.action == "pause":
+            self._require_parent_password(request.payload)
             until = int(time.time()) + int(request.payload["duration_seconds"])
             actor = str(request.payload.get("actor") or "local-parent")[:128]
             self._save_pause(PauseState(paused_until=until, actor=actor))
             return {"paused": True, "paused_until": until}
         if request.action == "resume":
+            self._require_parent_password(request.payload)
             self._save_pause(PauseState())
             return {"paused": False, "paused_until": 0}
+        if request.action == "verify_parent":
+            self._require_parent_password(request.payload)
+            return {"verified": True}
         raise ProtocolError("unsupported action")
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
@@ -188,6 +203,14 @@ class BrokerCommandHandler:
             if value:
                 out[key] = value
         return out
+
+    def _require_parent_password(self, payload: dict[str, Any]) -> None:
+        password = str(payload.get("parent_password") or "")
+        if verify_password(password, self.parent_credential_path):
+            return
+        if verify_password(password, self.legacy_parent_credential_path):
+            return
+        raise ProtocolError("parent verification failed")
 
     def _load_pause(self) -> PauseState:
         try:
