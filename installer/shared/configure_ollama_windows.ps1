@@ -1,4 +1,4 @@
-# GuardianNode — Windows Ollama bootstrap.
+# GuardianNode - Windows Ollama bootstrap.
 #
 # Called by the Inno Setup installer's [Run] section. Receives:
 #   -Tier <full | vision_only | text_only>
@@ -63,12 +63,79 @@ function Test-OllamaReachable {
     }
 }
 
+function Download-File {
+    param(
+        [Parameter(Mandatory=$true)][string]$Url,
+        [Parameter(Mandatory=$true)][string]$Destination
+    )
+
+    Remove-Item -Path $Destination -Force -ErrorAction SilentlyContinue
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        Write-Log "Downloading with curl.exe ..."
+        & $curl.Source --fail --location --silent --show-error --connect-timeout 30 --max-time 1800 --retry 3 --retry-delay 5 --output $Destination $Url
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $Destination) -and ((Get-Item $Destination).Length -gt 0)) {
+            return $true
+        }
+        Write-Log "curl.exe download failed with exit code $LASTEXITCODE."
+    }
+
+    try {
+        Write-Log "Downloading with Invoke-WebRequest ..."
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination -TimeoutSec 1800
+        return (Test-Path $Destination) -and ((Get-Item $Destination).Length -gt 0)
+    } catch {
+        Write-Log "Invoke-WebRequest download failed: $_"
+        return $false
+    }
+}
+
+function Get-OllamaExecutable {
+    $ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
+    if ($ollama) {
+        return $ollama.Source
+    }
+    $candidate = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+    if (Test-Path $candidate) {
+        return $candidate
+    }
+    return $null
+}
+
+function Start-OllamaServer {
+    $ollamaPath = Get-OllamaExecutable
+    if (-not $ollamaPath) {
+        Write-Log "Ollama executable was not found."
+        return $false
+    }
+    Write-Log "Starting Ollama server from $ollamaPath ..."
+    Start-Process -FilePath $ollamaPath -ArgumentList "serve" -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    for ($i = 0; $i -lt 30; $i++) {
+        if (Test-OllamaReachable) {
+            return $true
+        }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+
 function Install-Ollama {
+    if (Get-OllamaExecutable) {
+        Write-Log "Ollama is installed but not reachable. Starting server ..."
+        if (Start-OllamaServer) {
+            Write-Log "Ollama is now reachable."
+            return $true
+        }
+    }
+
     Write-Log "Ollama not reachable at $OllamaUrl. Downloading OllamaSetup.exe ..."
     $url = "https://ollama.com/download/OllamaSetup.exe"
-    $dst = Join-Path $env:TEMP "OllamaSetup.exe"
+    $dst = Join-Path $env:TEMP ("OllamaSetup-{0}.exe" -f ([Guid]::NewGuid().ToString("N")))
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dst -TimeoutSec 600
+        if (-not (Download-File -Url $url -Destination $dst)) {
+            Write-Log "Ollama installer download failed or produced an empty file."
+            return $false
+        }
         Write-Log "Downloaded to $dst, running silent install ..."
         # Ollama installer uses /VERYSILENT-style flags or InstallShield; try common ones.
         $p = Start-Process -FilePath $dst -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru -ErrorAction Stop
@@ -79,6 +146,9 @@ function Install-Ollama {
         [System.Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "24h", "Machine")
         [System.Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "3", "Machine")
         Write-Log "Set OLLAMA_KEEP_ALIVE=24h and OLLAMA_MAX_LOADED_MODELS=3 (Machine scope)"
+        if (-not (Test-OllamaReachable)) {
+            [void](Start-OllamaServer)
+        }
     } catch {
         Write-Log "ERROR installing Ollama: $_"
         return $false
@@ -133,7 +203,7 @@ if ($Tier -eq "text_only" -and -not $TextModel) {
     exit 0
 }
 
-# Skip Ollama setup if URL is remote — assume the parent's server already has it.
+# Skip Ollama setup if URL is remote; assume the parent's server already has it.
 $isLocal = $OllamaUrl -match "://(127\.0\.0\.1|localhost)"
 if ($isLocal) {
     if (-not (Test-OllamaReachable)) {
@@ -146,7 +216,7 @@ if ($isLocal) {
     }
 } else {
     if (-not (Test-OllamaReachable)) {
-        Write-Log "Remote Ollama at $OllamaUrl unreachable. Continuing anyway — backend will retry at runtime."
+        Write-Log "Remote Ollama at $OllamaUrl unreachable. Continuing anyway; backend will retry at runtime."
     } else {
         Write-Log "Remote Ollama reachable."
     }

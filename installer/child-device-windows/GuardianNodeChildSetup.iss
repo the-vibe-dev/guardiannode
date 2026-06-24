@@ -195,26 +195,57 @@ var
   DetectedVisionModel: String;
   DetectedReasoning: String;
 
+function HardwareProbeScript: String;
+begin
+  Result :=
+    'param([string]$OutPath)' + #13#10 +
+    '$ram = [int]([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB))' + #13#10 +
+    '$vram = 0' + #13#10 +
+    '$smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue' + #13#10 +
+    'if ($smi) {' + #13#10 +
+    '  $line = & $smi.Source --query-gpu=memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1' + #13#10 +
+    '  if ($line) { $vram = [int]([math]::Floor([int]$line / 1024)) }' + #13#10 +
+    '}' + #13#10 +
+    'if ($vram -le 0) {' + #13#10 +
+    '  $class = ''HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}''' + #13#10 +
+    '  foreach ($key in Get-ChildItem $class -ErrorAction SilentlyContinue) {' + #13#10 +
+    '    $p = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue' + #13#10 +
+    '    if ($p.DriverDesc -match ''NVIDIA'') {' + #13#10 +
+    '      $bytes = 0' + #13#10 +
+    '      $qw = $p.''HardwareInformation.qwMemorySize''' + #13#10 +
+    '      $legacy = $p.''HardwareInformation.MemorySize''' + #13#10 +
+    '      if ($qw) { $bytes = [int64]$qw } elseif ($legacy) { $bytes = [int64][uint32]$legacy }' + #13#10 +
+    '      $candidate = [int]([math]::Floor($bytes / 1GB))' + #13#10 +
+    '      if ($candidate -gt $vram) { $vram = $candidate }' + #13#10 +
+    '    }' + #13#10 +
+    '  }' + #13#10 +
+    '}' + #13#10 +
+    '"ram_gb=$ram vram_gb=$vram" | Out-File -Encoding ascii $OutPath' + #13#10;
+end;
+
 // Detect classifier tier by running PowerShell. We can't run the full
 // hardware_probe.py at install time (Python isn't there yet), so we do a
-// minimal inline detection: count RAM and check for nvidia-smi VRAM.
+// minimal inline detection: count RAM and check nvidia-smi, then fall back to
+// Windows display-adapter registry VRAM when NVML is unavailable.
 procedure ProbeHardware;
 var
   ResultCode: Integer;
-  TmpPath: String;
+  ScriptPath, TmpPath: String;
   Lines: TArrayOfString;
   Output: String;
   RamGB, VramGB: Integer;
 begin
   DetectedTier := 'text_only';
-  DetectedTextModel := '';
+  DetectedTextModel := '{#GN_TEXT_ONLY_MODEL}';
   DetectedVisionModel := '';
-  DetectedReasoning := 'Hardware probe did not complete. Conservative default: rules/OCR only until the parent explicitly changes models.';
+  DetectedReasoning := 'Hardware probe did not complete. Conservative default: Tesseract OCR plus a small CPU-capable text model.';
 
   TmpPath := ExpandConstant('{tmp}\hw_probe.txt');
-  // PowerShell inline: emit "ram_gb=X vram_gb=Y" with VRAM 0 if no nvidia-smi.
+  ScriptPath := ExpandConstant('{tmp}\gn_hw_probe.ps1');
+  SaveStringToFile(ScriptPath, HardwareProbeScript(), False);
+  // PowerShell emits "ram_gb=X vram_gb=Y" with VRAM 0 if no GPU source is usable.
   Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -Command "$ram = [int]([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)); $vram = 0; try { $smi = Get-Command nvidia-smi -ErrorAction Stop; $line = & $smi --query-gpu=memory.total --format=csv,noheader,nounits | Select -First 1; if ($line) { $vram = [int]([math]::Floor([int]$line / 1024)) } } catch {}; ""ram_gb=$ram vram_gb=$vram"" | Out-File -Encoding ascii ''' + TmpPath + '''"',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '" -OutPath "' + TmpPath + '"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if LoadStringsFromFile(TmpPath, Lines) and (GetArrayLength(Lines) > 0) then begin

@@ -77,6 +77,9 @@ def _detect_gpu() -> tuple[str | None, str | None, int | None]:
         except Exception:
             pass
     if os.name == "nt":
+        registry_gpu = _detect_windows_gpu_registry()
+        if registry_gpu[0] is not None:
+            return registry_gpu
         try:
             out = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
@@ -92,6 +95,47 @@ def _detect_gpu() -> tuple[str | None, str | None, int | None]:
                 return vendor, name, None
         except Exception:
             pass
+    return None, None, None
+
+
+def _detect_windows_gpu_registry() -> tuple[str | None, str | None, int | None]:
+    """Read Windows display-adapter registry metadata when NVML is unavailable."""
+    command = r"""
+$bestName = ""
+$bestBytes = 0
+Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue | ForEach-Object {
+  $p = Get-ItemProperty $_.PsPath -ErrorAction SilentlyContinue
+  if ($p.DriverDesc -match 'NVIDIA') {
+    $bytes = 0
+    if ($p.'HardwareInformation.qwMemorySize') {
+      $bytes = [int64]$p.'HardwareInformation.qwMemorySize'
+    } elseif ($p.'HardwareInformation.MemorySize') {
+      $bytes = [int64][uint32]$p.'HardwareInformation.MemorySize'
+    }
+    if ($bytes -gt $bestBytes) {
+      $bestBytes = $bytes
+      $bestName = [string]$p.DriverDesc
+    }
+  }
+}
+if ($bestName) {
+  [pscustomobject]@{ name = $bestName; vram_gb = [int][math]::Floor($bestBytes / 1GB) } | ConvertTo-Json -Compress
+}
+"""
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        payload = json.loads((out.stdout or "").strip() or "{}")
+        name = payload.get("name")
+        vram_gb = payload.get("vram_gb")
+        if isinstance(name, str) and name and isinstance(vram_gb, int) and vram_gb > 0:
+            return "nvidia", name, vram_gb
+    except Exception:
+        pass
     return None, None, None
 
 

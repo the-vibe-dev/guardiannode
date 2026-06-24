@@ -117,6 +117,15 @@ def test_child_installer_hardens_broker_owned_data_before_start() -> None:
     assert '\\server.env" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F' in text
 
 
+def test_child_installer_probe_uses_registry_vram_fallback_and_text_model_default() -> None:
+    text = CHILD_INSTALLER.read_text(encoding="utf-8")
+
+    assert "HardwareInformation.qwMemorySize" in text
+    assert "HardwareInformation.MemorySize" in text
+    assert "DetectedTextModel := '{#GN_TEXT_ONLY_MODEL}'" in text
+    assert "--query-gpu=memory.total" in text
+
+
 def test_watchdog_respects_installer_maintenance_marker() -> None:
     text = WATCHDOG.read_text(encoding="utf-8")
 

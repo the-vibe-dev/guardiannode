@@ -1,4 +1,6 @@
-from src.hardware_probe import probe
+from types import SimpleNamespace
+
+from src.hardware_probe import _detect_windows_gpu_registry, probe
 from src.hardware_tiers import select_tier
 
 
@@ -35,3 +37,12 @@ def test_tier_boundaries_are_conservative_for_current_vision_model():
             assert vision_model and text_model is None
         else:
             assert vision_model is None
+
+
+def test_windows_registry_gpu_fallback_reads_qword_vram(monkeypatch):
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(stdout='{"name":"NVIDIA GeForce RTX 3060","vram_gb":12}', stderr="", returncode=0)
+
+    monkeypatch.setattr("src.hardware_probe.subprocess.run", fake_run)
+
+    assert _detect_windows_gpu_registry() == ("nvidia", "NVIDIA GeForce RTX 3060", 12)
