@@ -7,12 +7,10 @@ active user session. Disconnected RDP sessions are observed but not relaunched
 until they become active again; locked local sessions remain active from the
 Terminal Services perspective and keep their existing agent/tray process.
 
-Two copies of this watchdog run as services under different names
-(`GuardianNodeWatchdog` and `GuardianNodeWatchdogHelper`). Each is told its
-peer via ``--peer-service`` and restarts the peer if it is stopped, so ending
-one service from Task Manager is undone by the other. A child who is a local
-admin can still kill everything at once, which is why the backend also raises
-an alert when a device stops sending heartbeats — see the offline monitor.
+The production installer runs one GuardianNode-branded watchdog service and
+uses SCM/WinSW recovery to restart it if it crashes. Ending the service still
+requires administrator rights; the backend also raises an alert when a device
+stops sending heartbeats — see the offline monitor.
 """
 from __future__ import annotations
 

@@ -53,16 +53,11 @@ Source: "..\..\README.md";   DestDir: "{app}"; Flags: ignoreversion
 ; The agent itself is NOT a service: services live in session 0 and cannot
 ; capture a logged-in user's desktop. The agent runs per user session via the
 ; GuardianNodeAgent scheduled task (see register_agent_task.ps1). Only the
-; endpoint broker, watchdogs, and optional backend are services.
+; endpoint broker, watchdog, and optional backend are services.
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBrokerService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Broker.xml";      DestDir: "{app}"; DestName: "GuardianNodeBrokerService.xml"; Flags: ignoreversion
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Watchdog.xml";    DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.xml"; Flags: ignoreversion
-; Secondary watchdog (mutual resurrection — see Helper.xml). GuardianNode-branded
-; on purpose: transparent naming is a product requirement; tamper resistance
-; comes from the service ACL (admin-only stop), not from hiding the name.
-Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdog2Service.exe"; Flags: ignoreversion
-Source: "..\build\stage\winsw\Helper.xml";      DestDir: "{app}"; DestName: "GuardianNodeWatchdog2Service.xml"; Flags: ignoreversion
 ; Backend service only exists in all-in-one mode
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBackendService.exe"; Flags: ignoreversion; Check: IsAllInOne
 Source: "..\build\stage\winsw\Backend.xml";     DestDir: "{app}"; DestName: "GuardianNodeBackendService.xml"; Flags: ignoreversion skipifsourcedoesntexist; Check: IsAllInOne
@@ -131,23 +126,20 @@ Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "start"; Flags: run
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeAgent.exe"" -TaskName ""GuardianNodeAgent"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode monitoring for all users..."
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeTray.exe"" -TaskName ""GuardianNodeTray"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode tray for all users..."
 
-; ---- Install + start BOTH watchdog services (each revives the other + the agent/tray tasks) ----
+; ---- Install + start one watchdog service. WinSW/SCM recovery restarts the
+; watchdog itself; the watchdog keeps the agent/tray scheduled tasks healthy. ----
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
-Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
 ; ---- Restrict the service ACLs: allow-only DACL, no explicit deny ACEs ----
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
-Filename: "sc.exe"; Parameters: "sdset GuardianNodeWatchdog2 {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
 
-; ---- Remove the legacy obscurely-named secondary watchdog from older installs ----
+; ---- Remove legacy watchdog services from older installs ----
+Filename: "sc.exe"; Parameters: "stop GuardianNodeWatchdog2"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "delete GuardianNodeWatchdog2"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "stop EndpointHealthAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "delete EndpointHealthAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeBackend {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated; Check: IsAllInOne
-
-; ---- Start the tray now for the installing user (per-session mutex prevents duplicates) ----
-Filename: "{app}\agent\GuardianNodeTray.exe"; Flags: nowait runasoriginaluser
 
 ; ---- Leave maintenance mode only after services/tasks are installed and started ----
 Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; BeforeInstall: ClearMaintenanceMarker
@@ -161,7 +153,7 @@ Filename: "{code:GetDashboardUrl}"; Flags: shellexec postinstall skipifsilent; D
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""New-Item -ItemType Directory -Force -Path '$env:ProgramData\GuardianNode\Secure' | Out-Null; New-Item -ItemType File -Force -Path '$env:ProgramData\GuardianNode\Secure\maintenance.flag' | Out-Null"""; Flags: runhidden waituntilterminated
-; Both watchdogs first, or they would revive each other / the tasks mid-uninstall.
+; Stop legacy secondary watchdog first if present, then the current watchdog.
 Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\GuardianNodeWatchdog2Service.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
 ; Legacy name from older installs
@@ -339,8 +331,9 @@ begin
   CreateMaintenanceMarker;
 
   // Free locked binaries before the file-copy stage so upgrades don't roll back
-  // with "file in use". Stop BOTH watchdogs first (they revive each other), then
-  // the legacy agent service, the scheduled tasks, and finally the processes.
+  // with "file in use". Stop the legacy secondary watchdog first if present,
+  // then the current watchdog, legacy agent service, scheduled tasks, and
+  // finally the processes.
   RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog2');
   RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog2');
   RunHidden('{sys}\sc.exe', 'stop EndpointHealthAgent');   // legacy name (pre-rename installs)

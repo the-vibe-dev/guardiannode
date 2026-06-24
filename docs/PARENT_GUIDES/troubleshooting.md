@@ -74,10 +74,10 @@ Use Windows Settings or Programs & Features from an administrator account. The a
 1. Reboot the PC.
 2. Run `GuardianNodeChildSetup-0.1.0-alpha.1.exe` again — the installer detects an existing install and offers **Repair** and **Uninstall** options.
 3. If that fails, manually:
-   - Stop services: `sc stop GuardianNodeWatchdog2; sc stop GuardianNodeWatchdog; sc stop GuardianNodeBroker; sc stop GuardianNodeBackend`
-   - Delete services: `sc delete GuardianNodeWatchdog2; sc delete GuardianNodeWatchdog; sc delete GuardianNodeBroker; sc delete GuardianNodeBackend`
-   - Delete folder: `Remove-Item -Recurse -Force "C:\Program Files\GuardianNode"`
-   - Delete data: `Remove-Item -Recurse -Force "C:\ProgramData\GuardianNode"`
+   - Stop services: `sc stop GuardianNodeWatchdog; sc stop GuardianNodeBroker; sc stop GuardianNodeBackend`
+   - Delete services: `sc delete GuardianNodeWatchdog; sc delete GuardianNodeBroker; sc delete GuardianNodeBackend`
+   - Move the install folder aside: `Move-Item "C:\Program Files\GuardianNode" "C:\Program Files\GuardianNode.disabled"`
+   - Move data aside only after backing up keys: `Move-Item "C:\ProgramData\GuardianNode" "C:\ProgramData\GuardianNode.disabled"`
    - Delete scheduled tasks: `schtasks /Delete /TN GuardianNodeAgent /F; schtasks /Delete /TN GuardianNodeTray /F`
    - Manually clean up start-menu shortcuts.
 

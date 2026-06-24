@@ -140,7 +140,6 @@ fingerprint together with a one-time enrollment secret.
 ## Service Naming
 
 Installed services use GuardianNode-branded names:
-`GuardianNodeBackend`, `GuardianNodeBroker`, `GuardianNodeWatchdog`, and
-`GuardianNodeWatchdog2`.
+`GuardianNodeBackend`, `GuardianNodeBroker`, and `GuardianNodeWatchdog`.
 Transparent naming is intentional; tamper resistance comes from Windows
 permissions, not hiding process names.

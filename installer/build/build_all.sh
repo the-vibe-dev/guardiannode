@@ -144,7 +144,6 @@ fi
 verify_sha256 "$WINSW_EXE" "$WINSW_SHA256"
 cp "$WINSW_EXE" "$STAGE/winsw/WinSW.exe"
 cp "$BUILD/winsw_templates/Watchdog.xml" "$STAGE/winsw/Watchdog.xml"
-cp "$BUILD/winsw_templates/Helper.xml"   "$STAGE/winsw/Helper.xml"
 cp "$BUILD/winsw_templates/Backend.xml"  "$STAGE/winsw/Backend.xml"
 cp "$BUILD/winsw_templates/Broker.xml"   "$STAGE/winsw/Broker.xml"
 

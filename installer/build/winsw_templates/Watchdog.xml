@@ -4,7 +4,7 @@
   <name>GuardianNode Watchdog</name>
   <description>Restarts the GuardianNode agent and tray if they're stopped</description>
   <executable>%BASE%\agent\GuardianNodeWatchdog.exe</executable>
-  <arguments>--interval 5 --peer-service GuardianNodeWatchdog2</arguments>
+  <arguments>--interval 5</arguments>
   <workingdirectory>%BASE%\agent</workingdirectory>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>

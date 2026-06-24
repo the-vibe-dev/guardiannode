@@ -33,8 +33,7 @@ $protectedPaths = @(
 $services = @(
     "GuardianNodeBroker",
     "GuardianNodeBackend",
-    "GuardianNodeWatchdog",
-    "GuardianNodeWatchdog2"
+    "GuardianNodeWatchdog"
 )
 
 $tasks = @(

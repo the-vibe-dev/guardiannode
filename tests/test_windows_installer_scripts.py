@@ -73,6 +73,21 @@ def test_child_installer_uses_allow_only_service_dacl_and_no_taskbar_pin() -> No
     assert "pin_to_taskbar" not in text
 
 
+def test_child_installer_uses_single_watchdog_and_single_tray_launch_path() -> None:
+    text = CHILD_INSTALLER.read_text(encoding="utf-8")
+    watchdog_xml = (ROOT / "installer" / "build" / "winsw_templates" / "Watchdog.xml").read_text(
+        encoding="utf-8"
+    )
+    build_script = (ROOT / "installer" / "build" / "build_all.sh").read_text(encoding="utf-8")
+
+    assert "GuardianNodeWatchdog2Service.exe\"; Parameters: \"install" not in text
+    assert "GuardianNodeWatchdog2Service.exe\"; Parameters: \"start" not in text
+    assert "sdset GuardianNodeWatchdog2" not in text
+    assert "--peer-service" not in watchdog_xml
+    assert "Helper.xml" not in build_script
+    assert 'GuardianNodeTray.exe"; Flags: nowait runasoriginaluser' not in text
+
+
 def test_child_installer_installs_endpoint_broker_before_session_tasks() -> None:
     text = CHILD_INSTALLER.read_text(encoding="utf-8")
     build_script = (ROOT / "installer" / "build" / "build_all.sh").read_text(encoding="utf-8")
@@ -124,6 +139,14 @@ def test_child_installer_probe_uses_registry_vram_fallback_and_text_model_defaul
     assert "HardwareInformation.MemorySize" in text
     assert "DetectedTextModel := '{#GN_TEXT_ONLY_MODEL}'" in text
     assert "--query-gpu=memory.total" in text
+
+
+def test_server_installer_probe_uses_registry_vram_fallback_when_nvml_fails() -> None:
+    text = SERVER_INSTALLER.read_text(encoding="utf-8")
+
+    assert "HardwareInformation.qwMemorySize" in text
+    assert "HardwareInformation.MemorySize" in text
+    assert "$smi.Source --query-gpu=memory.total" in text
 
 
 def test_watchdog_respects_installer_maintenance_marker() -> None:
