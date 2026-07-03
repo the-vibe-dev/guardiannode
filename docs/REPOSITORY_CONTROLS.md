@@ -1,8 +1,8 @@
 # Repository Controls Maintainer Checklist
 
 This file records repository settings that cannot be fully enforced from source
-code. Complete these settings before cutting a public source tag, and re-check
-them before installer or stable releases.
+code. Complete these settings before cutting a public alpha tag, and re-check
+them before installer, stable, or broader consumer releases.
 
 ## Branch Protection For `main`
 
@@ -31,12 +31,11 @@ Required status checks for source changes:
 - [ ] Protect `v*` tags.
 - [ ] Restrict tag creation/deletion to release maintainers.
 - [ ] Require a signed or otherwise verified tag for public releases.
-- [ ] Confirm `v0.1.0-alpha.1` and all ordinary `v*` tags use the source-only
-      workflow, not the installer workflow.
-- [ ] Confirm source releases contain no `.exe`, `.msi`, or unsigned installer
-      attachments.
-- [ ] Keep installer qualification tags on the dedicated
-      `v*-installer-test*` path until the Windows gate passes.
+- [ ] Confirm source archives are generated from the protected release tag.
+- [ ] Confirm installer assets, if attached, match the release tag, SHA-256
+      checksums, and Windows validation evidence.
+- [ ] Confirm unsigned installer assets are explicitly documented as unsigned
+      alpha artifacts with SmartScreen/Defender warning guidance.
 
 ## Security Features
 
@@ -65,11 +64,13 @@ Required status checks for source changes:
 - [ ] Signing credentials are hardware-backed or cloud-KMS backed where
       possible.
 
-## Verification Before Source Alpha
+## Verification Before Public Alpha
 
 - [ ] Live source CI is green on the exact release commit.
 - [ ] A fresh clone README smoke test has been performed.
 - [ ] The release tag matches `VERSION`.
 - [ ] The release tag is signed or verified by an approved maintainer key.
-- [ ] Release notes mark the release as source-only alpha/developer preview.
-- [ ] Windows installer artifacts remain unavailable to ordinary users.
+- [ ] Release notes mark the release as public alpha, not production/stable.
+- [ ] Windows installer artifacts, if published, include SHA-256 checksums,
+      signing status, SmartScreen/Defender warning guidance, and a link to the
+      Windows installer validation evidence.

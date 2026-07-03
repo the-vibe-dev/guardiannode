@@ -45,11 +45,11 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
   backend tracks `last_seen` and surfaces offline/heartbeat gaps to the parent. We
   do **not** hide the agent — GuardianNode is visible monitoring by design (a tray
   icon and clear install footprint), not stealthware.
-- **Local pause abuse.** Qualified Windows installer builds are moving pause
-  authority into the GuardianNode broker service. Legacy/source fallback paths
-  may still read a local `paused_until` marker, so ordinary-family installer
-  release remains blocked until clean Windows tests prove the child account
-  cannot alter pause state directly.
+- **Local pause abuse.** Windows installer builds keep pause state under the
+  GuardianNode broker/service path and restrict the protected data directories
+  to administrators and SYSTEM. Legacy/source fallback paths may still be easier
+  for a local administrator to alter, so this alpha remains for technical
+  parents and is not a tamper-proof consumer product.
 
 ### 3.2 Network attacker on the LAN
 - **Sniff agent->backend traffic.** Mitigation: use all-in-one mode, a trusted

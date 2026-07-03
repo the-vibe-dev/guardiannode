@@ -116,6 +116,43 @@ def test_runtime_settings_requires_parent_and_reports_effective_config(monkeypat
     assert body["ollama"]["status_timeout_seconds"] == 4
     assert body["ollama"]["pull_timeout_seconds"] == 900
     assert body["security"]["allowed_hosts"] == ["127.0.0.1", "localhost"]
+    assert body["security"]["warnings"] == []
     assert body["database"] == {"driver": "sqlite"}
     assert "session_secret" not in str(body).lower()
     assert "db_url" not in str(body).lower()
+
+
+def test_runtime_settings_warns_when_backend_bound_beyond_loopback(monkeypatch, tmp_path):
+    monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GUARDIANNODE_BIND_HOST", "0.0.0.0")
+    monkeypatch.setenv("GUARDIANNODE_ALLOWED_HOSTS", "127.0.0.1,localhost,192.168.1.42")
+    from app import settings as settings_mod
+
+    settings_mod.settings = settings_mod.Settings()
+    settings_mod.settings.mdns_enabled = False
+    from app.api import health as health_api
+    health_api.settings = settings_mod.settings
+    from app import main as main_api
+    from app.db.models import Base
+    from app.db.session import get_engine
+    main_api.settings = settings_mod.settings
+    from app.services.setup_token import ensure_setup_token
+
+    Base.metadata.create_all(bind=get_engine())
+    client = TestClient(main_api.create_app(), base_url="http://192.168.1.42")
+    token = ensure_setup_token()
+    response = client.post(
+        "/api/auth/setup",
+        json={
+            "display_name": "Parent",
+            "password": "correct horse battery",
+            "recovery_code": "one two three",
+            "setup_token": token,
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/health/runtime-settings")
+    assert response.status_code == 200
+    warnings = response.json()["security"]["warnings"]
+    assert any("public internet" in warning for warning in warnings)

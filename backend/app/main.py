@@ -297,6 +297,11 @@ async def lifespan(app: FastAPI):
     if settings.notification_worker_enabled:
         background_tasks.append(asyncio.create_task(notification_worker.loop()))
     log.info("GuardianNode backend %s listening on %s:%s", __version__, settings.bind_host, settings.bind_port)
+    if settings.binds_beyond_loopback():
+        log.warning(
+            "GuardianNode backend is listening beyond loopback; keep it on a trusted "
+            "LAN/VPN/TLS path and do not expose it directly to the public internet."
+        )
     try:
         yield
     finally:

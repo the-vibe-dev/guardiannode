@@ -2,7 +2,8 @@
 
 This guide describes the all-in-one alpha test shape: everything runs on the
 same machine and the backend stays on loopback. GuardianNode 0.1.0-alpha.1 is a
-source-code developer preview, not a recommended family installer release.
+public alpha for technical parents and early evaluators, not a finished
+consumer product for ordinary non-technical families.
 
 ## Before you start
 
@@ -13,15 +14,16 @@ You'll need:
 - About 5–10 GB free disk space (depends on the AI model size)
 - Admin access on the PC
 
-## Step 1 — Get a test build
+## Step 1 — Get the alpha installer
 
-Build from source or use a maintainer-provided alpha test artifact. Do not treat
-unsigned Windows artifacts as recommended family installers until the Windows
-release validation matrix is complete.
+Download `GuardianNodeChildSetup-0.1.0-alpha.1.exe` from the official GitHub
+release and verify the published SHA-256 checksum before running it. The alpha
+installer is unsigned, so Windows SmartScreen, Defender, or other antivirus
+software may warn before trust reputation exists.
 
 ## Step 2 — Run the installer
 
-Double-click the alpha test artifact you built or were given for validation.
+Double-click `GuardianNodeChildSetup-0.1.0-alpha.1.exe`.
 
 **If Windows says "Windows protected your PC":** That's expected for unsigned
 alpha builds. See [When Windows says "Protected your PC"](when-windows-says-protected-your-pc.md)
@@ -75,13 +77,22 @@ Pick the recommended option unless you know better. Click **Next** and the insta
 
 The installer runs a synthetic test to make sure everything works. If any check fails, click the link next to it for help.
 
-## Step 9 — Open the dashboard
+## Step 9 — Open the dashboard and verify operation
 
 Click **Open Parent Dashboard**. Your browser opens to `http://127.0.0.1:8787`. Sign in with your parent password.
 
 The installer starts the monitoring agent and the tray icon for the current
 Windows user. It also registers all-user logon tasks so the agent and tray
 launch again whenever a Windows account signs in.
+
+To confirm the alpha is working:
+
+- Open **Devices** and confirm this PC appears online.
+- Open **Model Status** or **Pipeline Health** and confirm the expected
+  text-only, vision, or full tier.
+- Use a known-safe synthetic test phrase and confirm a risk event appears in the
+  dashboard. Do not use real child private messages for testing.
+- Check logs at `C:\ProgramData\GuardianNode\logs\` if something does not start.
 
 ## Pausing monitoring when you use the PC
 
@@ -100,6 +111,18 @@ from a bookmark on the same PC. The alpha dashboard is loopback-only by
 default. Advanced operators may configure access through a trusted VPN or TLS
 reverse proxy using `docs/SECURE_LAN_SETUP.md`; there is no one-click LAN
 settings control in this release.
+
+## Stop, disable, or uninstall
+
+- Pause monitoring from the visible GuardianNode tray icon when a parent uses
+  the PC.
+- Uninstall from Windows Settings or Programs & Features as an administrator.
+- The uninstaller stops GuardianNode services, deletes the scheduled tasks, and
+  removes installed program files. GuardianNode data under
+  `C:\ProgramData\GuardianNode` may be retained so parents can back up keys,
+  logs, and evidence intentionally.
+- See [Troubleshooting](troubleshooting.md) for manual cleanup steps if
+  uninstall is interrupted.
 
 ## Got stuck?
 

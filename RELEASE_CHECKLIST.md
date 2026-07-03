@@ -37,7 +37,8 @@
       maintainer key.
 - [ ] Changelog updated.
 - [ ] Installer hashes generated if installers are included.
-- [ ] Source-only alpha has no `.exe` or `.msi` release assets.
+- [ ] Installer assets, if included, match the release tag, documented
+      SHA-256 hashes, signing status, and Windows validation evidence.
 - [ ] Release notes include alpha warnings.
 
 ## 5. Messaging
@@ -46,4 +47,6 @@
 - [ ] Do not claim detection is certain.
 - [ ] Do not claim redaction is certain.
 - [ ] Do not claim signed installers unless artifacts are actually signed.
+- [ ] Unsigned installer release notes include SmartScreen/Defender warning
+      guidance and checksum verification steps.
 - [ ] Use "alpha/developer preview".

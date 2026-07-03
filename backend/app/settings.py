@@ -138,10 +138,19 @@ class Settings(BaseSettings):
         hosts = configured or ["127.0.0.1", "localhost", "::1", "testserver"]
         for host in hosts:
             _validate_allowed_host(host)
-        if self.bind_host not in {"0.0.0.0", "::", ""}:
+        if not self.binds_beyond_loopback():
             _validate_allowed_host(self.bind_host)
             hosts.append(self.bind_host)
         return list(dict.fromkeys(hosts))
+
+    def binds_beyond_loopback(self) -> bool:
+        host = self.bind_host.strip()
+        if not host:
+            return True
+        try:
+            return ipaddress.ip_address(host).is_unspecified
+        except ValueError:
+            return False
 
     def ensure_dirs(self) -> None:
         for d in (self.data_dir, self.keys_dir, self.evidence_dir, self.logs_dir):

@@ -44,10 +44,10 @@ support, encrypted evidence storage, and a parent dashboard.
 > as the only child-safety measure. It is not an emergency service and is not a
 > substitute for parenting, communication, or professional support.
 >
-> **Supported in this alpha:** source-code developer preview and loopback
-> all-in-one testing by technically experienced users. Public Windows installer
-> recommendation, raw LAN deployments, and ordinary family deployment are not
-> yet supported.
+> **Supported in this alpha:** Windows 11 installer testing and source-code
+> evaluation by technical parents, developers, early evaluators, and safety
+> reviewers. This is not a finished consumer product for ordinary non-technical
+> families. Do not expose GuardianNode directly to the public internet.
 
 GuardianNode is for parents and guardians monitoring devices they own or
 administer for their own children. It is not stealthware, employee monitoring
@@ -128,10 +128,12 @@ must review the license and performance of any Ollama model they install. See
 
 | Mode | Alpha support |
 |---|---|
+| Windows 11 all-in-one installer | Supported public alpha path for technical parents |
+| Windows 11 server installer | Supported public alpha path for parent-owned server PCs |
+| Windows 11 child-only installer | Supported public alpha path when paired to a trusted parent server |
 | Source backend on loopback | Supported for technical evaluation |
-| Source all-in-one Windows evaluation | Experimental |
-| Separated LAN deployment | Advanced/experimental; TLS or VPN required |
-| Public Windows installer | Not supported |
+| Source all-in-one Windows evaluation | Supported for technical evaluation |
+| Separated private LAN/VPN deployment | Advanced alpha path; explicit opt-in, trusted LAN/VPN/TLS required |
 | Public Internet exposure | Unsupported |
 
 ### Prerequisites
@@ -142,6 +144,26 @@ must review the license and performance of any Ollama model they install. See
 - Ollama for model-backed classification
 - Linux, macOS, or Windows for backend/dashboard development
 - Windows 10/11 for source-agent testing
+
+### Windows 11 Installer Alpha
+
+The public alpha can include unsigned Windows x64-compatible installers:
+
+- `GuardianNodeChildSetup-0.1.0-alpha.1.exe`
+- `GuardianNodeServerSetup-0.1.0-alpha.1.exe`
+
+The child installer supports all-in-one mode and child-only pairing mode. The
+server installer installs the parent backend/dashboard and can stay local-only
+or explicitly enable private LAN/VPN child-PC access. Admin rights are required.
+Unsigned alpha installers may trigger SmartScreen, Defender, or antivirus
+warnings; verify the release checksums before running them.
+
+Start with:
+
+- [Install on one PC](docs/PARENT_GUIDES/install-on-one-pc.md)
+- [Install a server + child PC](docs/PARENT_GUIDES/install-server-and-child.md)
+- [When Windows says "Protected your PC"](docs/PARENT_GUIDES/when-windows-says-protected-your-pc.md)
+- [Troubleshooting and uninstall](docs/PARENT_GUIDES/troubleshooting.md)
 
 ### Backend From Source
 
@@ -209,8 +231,8 @@ npm run build
 
 ### Windows Agent Development From Source
 
-Use a test Windows session and a loopback backend while the installer remains
-unqualified:
+Use a test Windows session and a loopback backend when you want to develop or
+debug the agent directly instead of using the public alpha installer:
 
 ```powershell
 cd agent-windows

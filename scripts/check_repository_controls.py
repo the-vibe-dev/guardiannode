@@ -58,7 +58,8 @@ def main() -> int:
             "Enable GitHub secret scanning",
             "Enable push protection",
             "Enable private vulnerability reporting",
-            "source-only",
+            "installer assets, if attached",
+            "SmartScreen/Defender warning guidance",
         ],
         failures,
     )
@@ -67,7 +68,8 @@ def main() -> int:
         [
             "docs/REPOSITORY_CONTROLS.md",
             "signed or otherwise verified",
-            "Source-only alpha has no `.exe` or `.msi` release assets",
+            "Installer hashes generated if installers are included",
+            "SmartScreen/Defender",
         ],
         failures,
     )

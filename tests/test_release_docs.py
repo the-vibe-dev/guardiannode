@@ -64,3 +64,27 @@ def test_export_manifest_does_not_hard_code_raw_master_key_only() -> None:
     assert "keys/master.key) with the blob_id" not in storage_api
     assert "DPAPI-wrapped on Windows" in storage_api
     assert "portable key backup" in storage_api
+
+
+def test_alpha_release_docs_match_public_installer_scope() -> None:
+    combined = (
+        read("README.md")
+        + "\n"
+        + read("docs/index.md")
+        + "\n"
+        + read("docs/RELEASE_NOTES_0.1.0-alpha.1.md")
+        + "\n"
+        + read("docs/release/windows-11-alpha-installer-validation.md")
+    )
+
+    assert "technical parents" in combined
+    assert "GuardianNodeChildSetup-0.1.0-alpha.1.exe" in combined
+    assert "GuardianNodeServerSetup-0.1.0-alpha.1.exe" in combined
+    assert "b271dd24c448ac8c333f5c86548cac2d12c35a41c48de7193d62f376becb1fb7" in combined
+    assert "92314f7613341bd2ba47c34d96131f44e63126ef7cacd248f59642604fcf954f" in combined
+    assert "Do not expose GuardianNode directly to the public internet" in combined
+    normalized = " ".join(combined.split())
+    assert "not a guarantee of child safety" in normalized
+    assert "not a replacement for parental involvement" in normalized
+    assert "Public Windows installer | Not supported" not in combined
+    assert "Windows installers are intentionally not attached" not in combined

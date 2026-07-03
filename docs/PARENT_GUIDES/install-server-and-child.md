@@ -18,8 +18,11 @@ You'll need:
 
 ### If your server is Windows
 
-1. Build the server installer from source or use a maintainer-provided alpha test artifact.
-2. Run the installer.
+1. Download `GuardianNodeServerSetup-0.1.0-alpha.1.exe` from the official
+   GitHub release and verify the published SHA-256 checksum.
+2. Run the installer as an administrator. The alpha installer is unsigned, so
+   Windows SmartScreen, Defender, or other antivirus software may warn before
+   trust reputation exists.
 3. On **Server access**, choose one:
    - **Only this PC** for an all-local parent dashboard.
    - **Private LAN/VPN child PCs can connect** when this PC will pair child PCs.
@@ -89,7 +92,8 @@ Keep this page open while you walk to the kid's PC.
 
 ## Step 3 — Install on the child's PC
 
-1. Build the child installer from source or copy the maintainer-provided alpha test artifact to the kid's PC.
+1. Copy `GuardianNodeChildSetup-0.1.0-alpha.1.exe` from the official GitHub
+   release to the kid's PC and verify the published SHA-256 checksum.
 2. Run it. (See [SmartScreen guide](when-windows-says-protected-your-pc.md) if Windows complains.)
 3. On wizard page 2, pick **"Connect to existing GuardianNode server"**.
 4. Enter the explicit trusted VPN/TLS server URL. Use a raw `http://192.168...` URL only in a private lab test.
@@ -103,6 +107,23 @@ On your phone or any computer on the home network, open the dashboard URL. The n
 Try opening a simple app on the kid's PC. Within a short period, an event may
 appear in the **Risk Feed** with risk level "none" or "low" if the pipeline
 captures a meaningful screen change. That confirms the pipeline works.
+
+For a stronger alpha smoke test, use a known-safe synthetic test phrase and
+confirm a risk event appears in the dashboard. Do not test with real child
+private messages. Logs are under `C:\ProgramData\GuardianNode\logs\` on Windows
+and the systemd journal on native Linux servers.
+
+## Stop, disable, or uninstall
+
+- Windows server: Start Menu -> **GuardianNode Server** -> **Stop service**.
+- Windows child PC: use the visible GuardianNode tray icon to pause monitoring,
+  or uninstall from Windows Settings / Programs & Features as an administrator.
+- Native Linux server: `sudo systemctl stop guardiannode-backend`.
+- Windows uninstall removes services, scheduled tasks, and installed program
+  files. GuardianNode data under `C:\ProgramData\GuardianNode` may be retained
+  so parents can back up keys, logs, and evidence intentionally.
+- See [Troubleshooting](troubleshooting.md) for manual cleanup steps if
+  uninstall is interrupted.
 
 ## Pausing on the child's PC
 

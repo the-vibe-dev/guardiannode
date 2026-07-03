@@ -17,7 +17,8 @@ screenshots, OCR, vision/text classification, encrypted local evidence, and a
 parent dashboard.
 </p>
 
-[Quick Start From Source](#quick-start-from-source){ .md-button .md-button--primary }
+[Windows alpha install](PARENT_GUIDES/install-on-one-pc.md){ .md-button .md-button--primary }
+[Quick Start From Source](#quick-start-from-source){ .md-button }
 [Known limitations](https://github.com/the-vibe-dev/guardiannode/blob/main/KNOWN_LIMITATIONS.md){ .md-button }
 [Backend setup](BACKEND_SETUP.md){ .md-button }
 [Support development](SUPPORT.md){ .md-button }
@@ -74,20 +75,30 @@ The installer checks your hardware and picks the strongest tier it can run:
 
 No GPU in the kid's PC? Use the [two-machine setup](PARENT_GUIDES/install-server-and-child.md): the child's PC runs only the lightweight agent and a Linux or Windows box with a GPU does the AI work.
 
-## Quick Start From Source
+## Quick Start
 
-**Alpha scope:** GuardianNode 0.1.0-alpha.1 is a source-code developer preview.
-Loopback all-in-one testing is the safest supported shape. Public Windows
-installer recommendation and ordinary family deployment are blocked until the
-Windows release validation gates pass.
+**Alpha scope:** GuardianNode 0.1.0-alpha.1 is a public alpha for technical
+parents and early evaluators. Windows 11 installers are allowed alpha artifacts
+when published from the tagged release with checksums. This is not a finished
+consumer product for ordinary non-technical families, and it must not be exposed
+directly to the public internet.
 
 | Mode | Alpha support |
 |---|---|
+| Windows 11 all-in-one installer | Supported public alpha path for technical parents |
+| Windows 11 server installer | Supported public alpha path for parent-owned server PCs |
+| Windows 11 child-only installer | Supported public alpha path when paired to a trusted parent server |
 | Source backend on loopback | Supported for technical evaluation |
-| Source all-in-one Windows evaluation | Experimental |
-| Separated LAN deployment | Advanced/experimental; TLS or VPN required |
-| Public Windows installer | Not supported |
+| Source all-in-one Windows evaluation | Supported for technical evaluation |
+| Separated private LAN/VPN deployment | Advanced alpha path; explicit opt-in, trusted LAN/VPN/TLS required |
 | Public Internet exposure | Unsupported |
+
+For Windows, start with [Install on one PC](PARENT_GUIDES/install-on-one-pc.md)
+or [Install a server + child PC](PARENT_GUIDES/install-server-and-child.md).
+Unsigned alpha installers may trigger SmartScreen or antivirus warnings; verify
+published SHA-256 checksums before running them.
+
+## Quick Start From Source
 
 Start the backend on loopback:
 
@@ -141,10 +152,9 @@ npm run build
 Open `http://127.0.0.1:8787/setup`, paste this one-time token, create the
 parent account, and write down the recovery code. Do not post the setup token in
 an issue or chat. See [Backend setup](BACKEND_SETUP.md) for more detail.
-Installer paths are maintainer qualification paths only in this alpha; do not
-pipe an unverified network response directly into a privileged shell.
+Do not pipe an unverified network response directly into a privileged shell.
 
-Experimental installer qualification guides: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
+Installer guides: [one PC](PARENT_GUIDES/install-on-one-pc.md) · [server + child PC](PARENT_GUIDES/install-server-and-child.md) · [troubleshooting](PARENT_GUIDES/troubleshooting.md)
 
 ## Guides
 

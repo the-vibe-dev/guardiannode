@@ -41,6 +41,20 @@ def _database_driver() -> str:
     return parsed.scheme or "unknown"
 
 
+def _security_warnings() -> list[str]:
+    warnings: list[str] = []
+    if settings.binds_beyond_loopback():
+        warnings.append(
+            "Backend is listening beyond loopback. Keep GuardianNode on a trusted LAN/VPN/TLS "
+            "path and do not expose it directly to the public internet."
+        )
+    if settings.cors_allow_origin:
+        warnings.append("CORS is enabled for a configured origin; keep that origin parent-controlled.")
+    if settings.allowed_hosts.strip() == "*":
+        warnings.append("Wildcard Host headers are enabled for development mode only.")
+    return warnings
+
+
 @router.get("/health/runtime-settings", response_model=RuntimeSettingsResponse)
 def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse:
     """Parent-only diagnostic view of effective non-secret runtime settings."""
@@ -53,6 +67,7 @@ def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse
             "dev_mode": settings.dev_mode,
             "https_only_cookies": settings.https_only_cookies,
             "mdns_enabled": settings.mdns_enabled,
+            "warnings": _security_warnings(),
         },
         classifier={
             "tier": settings.classifier_tier,
