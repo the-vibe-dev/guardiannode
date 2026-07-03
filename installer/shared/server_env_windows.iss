@@ -12,14 +12,14 @@ begin
     RaiseException('Could not finalize ' + Path);
 end;
 
-procedure WriteGuardianNodeServerEnv(DataDir: String; Tier: String; TextModel: String; VisionModel: String; OllamaUrl: String);
+procedure WriteGuardianNodeServerEnvForNetwork(DataDir: String; Tier: String; TextModel: String; VisionModel: String; OllamaUrl: String; BindHost: String; AllowedHosts: String);
 var
   EnvPath: String;
   EnvFile: TArrayOfString;
 begin
   EnvPath := AddBackslash(DataDir) + 'server.env';
   SetArrayLength(EnvFile, 17);
-  EnvFile[0] := 'GUARDIANNODE_BIND_HOST=127.0.0.1';
+  EnvFile[0] := 'GUARDIANNODE_BIND_HOST=' + BindHost;
   EnvFile[1] := 'GUARDIANNODE_BIND_PORT=8787';
   EnvFile[2] := 'GUARDIANNODE_DATA_DIR=' + DataDir;
   EnvFile[3] := 'GUARDIANNODE_MDNS_ENABLED=false';
@@ -33,8 +33,21 @@ begin
   EnvFile[11] := 'GUARDIANNODE_VISION_NUM_CTX=8192';
   EnvFile[12] := 'GUARDIANNODE_VISION_MAX_IMAGE_EDGE=2560';
   EnvFile[13] := 'GUARDIANNODE_LOG_LEVEL=INFO';
-  EnvFile[14] := 'GUARDIANNODE_ALLOWED_HOSTS=127.0.0.1,localhost';
+  EnvFile[14] := 'GUARDIANNODE_ALLOWED_HOSTS=' + AllowedHosts;
   EnvFile[15] := 'GUARDIANNODE_HTTPS_ONLY_COOKIES=false';
   EnvFile[16] := 'GUARDIANNODE_RETENTION_CLEANUP_ENABLED=true';
   SaveStringsAtomic(EnvPath, EnvFile);
+end;
+
+procedure WriteGuardianNodeServerEnv(DataDir: String; Tier: String; TextModel: String; VisionModel: String; OllamaUrl: String);
+begin
+  WriteGuardianNodeServerEnvForNetwork(
+    DataDir,
+    Tier,
+    TextModel,
+    VisionModel,
+    OllamaUrl,
+    '127.0.0.1',
+    '127.0.0.1,localhost'
+  );
 end;

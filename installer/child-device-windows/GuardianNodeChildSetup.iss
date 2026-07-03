@@ -217,6 +217,8 @@ begin
     '"ram_gb=$ram vram_gb=$vram" | Out-File -Encoding ascii $OutPath' + #13#10;
 end;
 
+function InstallerParam(Name: String): String; forward;
+
 // Detect classifier tier by running PowerShell. We can't run the full
 // hardware_probe.py at install time (Python isn't there yet), so we do a
 // minimal inline detection: count RAM and check nvidia-smi, then fall back to
@@ -277,7 +279,19 @@ begin
 end;
 
 function IsAllInOne: Boolean;
+var
+  ModeParam: String;
 begin
+  ModeParam := Lowercase(InstallerParam('MODE'));
+  if ModeParam = 'allinone' then begin
+    Result := True;
+    Exit;
+  end;
+  if (ModeParam = 'child') or (InstallerParam('SERVERURL') <> '') or
+     (InstallerParam('PAIRCODE') <> '') then begin
+    Result := False;
+    Exit;
+  end;
   Result := (ModePage.SelectedValueIndex = 0);
 end;
 
@@ -321,6 +335,7 @@ end;
 
 function ValidateInstallInputs(var ErrorMessage: String): Boolean; forward;
 function RunOllamaSetup(ScriptPath: String): Boolean; forward;
+function RunTesseractOnlySetup(ScriptPath: String): Boolean; forward;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -356,10 +371,15 @@ begin
   RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
   RunHidden('{sys}\sc.exe', 'delete GuardianNodeBroker');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
+  ExtractTemporaryFile('configure_ollama_windows.ps1');
   if IsAllInOne then begin
-    ExtractTemporaryFile('configure_ollama_windows.ps1');
     if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then begin
       Result := 'GuardianNode Ollama/model setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
+      Exit;
+    end;
+  end else begin
+    if not RunTesseractOnlySetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then begin
+      Result := 'GuardianNode OCR setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
       Exit;
     end;
   end;
@@ -392,6 +412,22 @@ begin
     ' -TextModel "' + GetTextModel('') + '"' +
     ' -VisionModel "' + GetVisionModel('') + '"' +
     ' -OllamaUrl "http://127.0.0.1:11434"';
+  Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := ResultCode = 0;
+end;
+
+function RunTesseractOnlySetup(ScriptPath: String): Boolean;
+var
+  ResultCode: Integer;
+  Params: String;
+begin
+  Params :=
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"' +
+    ' -Tier "text_only"' +
+    ' -TextModel ""' +
+    ' -VisionModel ""' +
+    ' -OllamaUrl "http://127.0.0.1:11434"' +
+    ' -TesseractOnly';
   Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := ResultCode = 0;
 end;

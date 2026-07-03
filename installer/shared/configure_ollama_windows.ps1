@@ -7,10 +7,11 @@
 #   -OllamaUrl <http://host:port> (defaults to local)
 #
 # Behavior:
-#   1. Check if Ollama is reachable. If not, download + silent-install Ollama for Windows.
-#   2. Pull the required models for the chosen tier (skip if already pulled).
-#   3. Configure Ollama service env: OLLAMA_MAX_LOADED_MODELS, OLLAMA_KEEP_ALIVE.
-#   4. Print final summary; exit 0 on success, non-zero on failure.
+#   1. Check/install Tesseract OCR for deterministic phrase detection.
+#   2. Check if Ollama is reachable. If not, download + silent-install Ollama for Windows.
+#   3. Pull the required models for the chosen tier (skip if already pulled).
+#   4. Configure service env: TESSDATA_PREFIX, PATH, OLLAMA_MAX_LOADED_MODELS, OLLAMA_KEEP_ALIVE.
+#   5. Print final summary; exit 0 on success, non-zero on failure.
 
 param(
     [Parameter(Mandatory=$true)]
@@ -20,7 +21,8 @@ param(
     [string]$TextModel = "",
     [string]$VisionModel = "",
     [string]$OllamaUrl = "http://127.0.0.1:11434",
-    [string]$LogPath = "C:\ProgramData\GuardianNode\logs\install-ollama.log"
+    [string]$LogPath = "C:\ProgramData\GuardianNode\logs\install-ollama.log",
+    [switch]$TesseractOnly
 )
 
 $ErrorActionPreference = "Continue"
@@ -36,8 +38,12 @@ function Write-Log {
     Add-Content -Path $LogPath -Value $line
 }
 
-# Pick default models per tier if not explicitly given
-if (-not $TextModel) {
+# Pick default models per tier if not explicitly given. Child-only installs use
+# Tesseract locally but send classification to the parent server.
+if ($TesseractOnly) {
+    $TextModel = ""
+    $VisionModel = ""
+} elseif (-not $TextModel) {
     switch ($Tier) {
         "full"        { $TextModel = "llama3.2:3b" }
         "text_only"   { $TextModel = "llama3.2:1b" }
@@ -88,6 +94,109 @@ function Download-File {
         Write-Log "Invoke-WebRequest download failed: $_"
         return $false
     }
+}
+
+function Get-TesseractExecutable {
+    $tesseract = Get-Command tesseract.exe -ErrorAction SilentlyContinue
+    if ($tesseract) {
+        return $tesseract.Source
+    }
+    $candidates = @(
+        (Join-Path $env:ProgramFiles "Tesseract-OCR\tesseract.exe")
+    )
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} "Tesseract-OCR\tesseract.exe")
+    }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Set-TesseractEnvironment {
+    param([Parameter(Mandatory=$true)][string]$TesseractExe)
+
+    $installDir = Split-Path -Parent $TesseractExe
+    $tessData = Join-Path $installDir "tessdata"
+    [System.Environment]::SetEnvironmentVariable("TESSDATA_PREFIX", $tessData, "Machine")
+    $env:TESSDATA_PREFIX = $tessData
+
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $pathParts = @()
+    if ($machinePath) {
+        $pathParts = @($machinePath -split ";" | Where-Object { $_ })
+    }
+    if (-not ($pathParts | Where-Object { $_.TrimEnd("\") -ieq $installDir.TrimEnd("\") })) {
+        $newPath = (@($pathParts) + $installDir) -join ";"
+        [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
+        $env:Path = "$installDir;$env:Path"
+        Write-Log "Added Tesseract install directory to Machine PATH: $installDir"
+    } else {
+        Write-Log "Tesseract install directory already present in Machine PATH: $installDir"
+    }
+    Write-Log "Set TESSDATA_PREFIX=$tessData (Machine scope)"
+}
+
+function Test-TesseractExecutable {
+    param([string]$TesseractExe = "")
+
+    if (-not $TesseractExe) {
+        $TesseractExe = Get-TesseractExecutable
+    }
+    if (-not $TesseractExe) {
+        return $false
+    }
+    try {
+        $out = & $TesseractExe --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "Tesseract available: $($out | Select-Object -First 1)"
+            Set-TesseractEnvironment -TesseractExe $TesseractExe
+            return $true
+        }
+        Write-Log "Tesseract version check failed with exit code $LASTEXITCODE."
+        return $false
+    } catch {
+        Write-Log "Tesseract version check failed: $_"
+        return $false
+    }
+}
+
+function Install-Tesseract {
+    if (Test-TesseractExecutable) {
+        return $true
+    }
+
+    $url = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+    $installDir = Join-Path $env:ProgramFiles "Tesseract-OCR"
+    $dst = Join-Path $env:TEMP ("TesseractSetup-{0}.exe" -f ([Guid]::NewGuid().ToString("N")))
+    Write-Log "Tesseract not found. Downloading Tesseract OCR installer from UB Mannheim build ..."
+    try {
+        if (-not (Download-File -Url $url -Destination $dst)) {
+            Write-Log "Tesseract installer download failed or produced an empty file."
+            return $false
+        }
+        Write-Log "Downloaded to $dst, running silent Tesseract install ..."
+        # UB Mannheim's Tesseract package is NSIS. /S is silent and /D=...
+        # must be the final switch; the rest of the line is treated as the path.
+        $argLine = '/S /D={0}' -f $installDir
+        $p = Start-Process -FilePath $dst -ArgumentList $argLine -PassThru -ErrorAction Stop
+        if (-not $p.WaitForExit(600000)) {
+            Write-Log "ERROR Tesseract installer timed out after 10 minutes; killing process $($p.Id)."
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            return $false
+        }
+        Write-Log "Tesseract installer exit code: $($p.ExitCode)"
+    } catch {
+        Write-Log "ERROR installing Tesseract OCR: $_"
+        return $false
+    } finally {
+        Remove-Item -Path $dst -Force -ErrorAction SilentlyContinue
+    }
+
+    $exe = Join-Path $installDir "tesseract.exe"
+    return (Test-TesseractExecutable -TesseractExe $exe)
 }
 
 function Get-OllamaExecutable {
@@ -306,6 +415,16 @@ function Pull-Model {
 }
 
 # --- Main ---
+
+if (-not (Install-Tesseract)) {
+    Write-Log "Tesseract OCR install/check failed. Aborting because screenshot text detection would be unreliable."
+    exit 2
+}
+
+if ($TesseractOnly) {
+    Write-Log "Tesseract-only mode requested. Skipping Ollama entirely."
+    exit 0
+}
 
 if ($Tier -eq "text_only" -and -not $TextModel) {
     Write-Log "Tier text_only with no LLM. Skipping Ollama entirely (rules engine + Tesseract only)."

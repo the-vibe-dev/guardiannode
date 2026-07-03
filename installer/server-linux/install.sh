@@ -18,6 +18,7 @@ GN_DATA="${GN_DATA:-/var/lib/guardiannode}"
 GN_LOG="${GN_LOG:-/var/log/guardiannode}"
 GN_BIND_HOST="${GN_BIND_HOST:-127.0.0.1}"
 GN_BIND_PORT="${GN_BIND_PORT:-8787}"
+GN_ALLOWED_HOSTS="${GN_ALLOWED_HOSTS:-127.0.0.1,localhost}"
 GN_REPO_URL="${GN_REPO_URL:-https://github.com/the-vibe-dev/guardiannode}"
 GN_SRC_ZIP="${GN_SRC_ZIP:-}"     # if set, install from local zip instead of git
 GN_SRC_SHA256="${GN_SRC_SHA256:-}" # optional sha256 for GN_SRC_ZIP
@@ -346,6 +347,7 @@ Group=$GN_USER
 Environment="GUARDIANNODE_DATA_DIR=$GN_DATA"
 Environment="GUARDIANNODE_BIND_HOST=$GN_BIND_HOST"
 Environment="GUARDIANNODE_BIND_PORT=$GN_BIND_PORT"
+Environment="GUARDIANNODE_ALLOWED_HOSTS=$GN_ALLOWED_HOSTS"
 Environment="GUARDIANNODE_MDNS_ENABLED=false"
 Environment="GUARDIANNODE_LOG_LEVEL=INFO"
 Environment="GUARDIANNODE_CLASSIFIER_TIER=$GN_TIER"
@@ -402,15 +404,30 @@ print_done() {
   echo "Open the parent dashboard at:"
   echo
   echo "    http://127.0.0.1:${GN_BIND_PORT}"
+  if [ "$GN_BIND_HOST" != "127.0.0.1" ]; then
+    echo
+    echo "Child installers on your private LAN/VPN can use:"
+    echo
+    echo "    http://${ip}:${GN_BIND_PORT}"
+    echo
+    echo "Allowed dashboard/API hosts:"
+    echo
+    echo "    ${GN_ALLOWED_HOSTS}"
+  fi
   echo
   echo "One-time setup token:"
   echo
   echo "    ${GN_SETUP_TOKEN:-read $GN_DATA/keys/setup_token.json}"
   echo
-  echo "First-run setup is loopback-only. Finish setup on this server first,"
-  echo "then manually set GUARDIANNODE_BIND_HOST=0.0.0.0 plus an explicit"
-  echo "GUARDIANNODE_ALLOWED_HOSTS list for the LAN IP/hostname child agents"
-  echo "will use. Add a firewall rule only for a trusted LAN/VPN."
+  if [ "$GN_BIND_HOST" = "127.0.0.1" ]; then
+    echo "First-run setup is loopback-only. To pair child PCs later, rerun or"
+    echo "override systemd with GN_BIND_HOST=0.0.0.0 plus an explicit"
+    echo "GN_ALLOWED_HOSTS list for the LAN IP/hostname child agents will use."
+    echo "Add a firewall rule only for a trusted LAN/VPN."
+  else
+    echo "LAN/VPN access was enabled because GN_BIND_HOST=$GN_BIND_HOST."
+    echo "Keep TCP ${GN_BIND_PORT} firewalled to trusted child PCs only."
+  fi
   echo
   echo "Service:    systemctl status guardiannode-backend"
   echo "Logs:       journalctl -u guardiannode-backend"

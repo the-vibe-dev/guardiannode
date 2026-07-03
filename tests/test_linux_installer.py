@@ -222,3 +222,25 @@ def test_linux_installer_probe_values_render_verbatim(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_persists_allowed_hosts_for_lan_mode(tmp_path: Path) -> None:
+    unit_path = tmp_path / "guardiannode-backend.service"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        systemctl() {{ :; }}
+        GN_BIND_HOST="0.0.0.0"
+        GN_ALLOWED_HOSTS="127.0.0.1,localhost,192.168.1.42,guardian-server"
+        GN_TIER="text_only"
+        GN_TEXT_MODEL=""
+        GN_VISION_MODEL=""
+        GN_SYSTEMD_UNIT_PATH="{unit_path}"
+        write_systemd_unit
+        grep -F 'Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_ALLOWED_HOSTS=127.0.0.1,localhost,192.168.1.42,guardian-server"' "{unit_path}"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout

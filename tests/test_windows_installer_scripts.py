@@ -47,6 +47,25 @@ def test_server_installer_writes_config_before_backend_start() -> None:
     assert "CurStepChanged" not in text
 
 
+def test_server_installer_guides_private_lan_mode() -> None:
+    text = SERVER_INSTALLER.read_text(encoding="utf-8")
+    shared_env = (ROOT / "installer" / "shared" / "server_env_windows.iss").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Server access" in text
+    assert "Private LAN/VPN child PCs can connect" in text
+    assert "SERVERHOST" in text
+    assert "ALLOWEDHOSTS" in text
+    assert "ShouldEnableLanAccess" in text
+    assert "GUARDIANNODE_BIND_HOST=0.0.0.0" not in shared_env
+    assert "WriteGuardianNodeServerEnvForNetwork" in shared_env
+    assert "'127.0.0.1,localhost,' + HostValue" in text
+    assert "netsh.exe" in text
+    assert "profile=private" in text
+    assert "Check: ShouldEnableLanAccess" in text
+
+
 def test_windows_installers_fail_if_ollama_bootstrap_fails() -> None:
     for path in (CHILD_INSTALLER, SERVER_INSTALLER):
         text = path.read_text(encoding="utf-8")
@@ -58,6 +77,14 @@ def test_windows_installers_fail_if_ollama_bootstrap_fails() -> None:
 
     child_text = CHILD_INSTALLER.read_text(encoding="utf-8")
     assert "if IsAllInOne then begin" in child_text
+    assert "ModeParam := Lowercase(InstallerParam('MODE'))" in child_text
+    assert "ModeParam = 'child'" in child_text
+    assert "InstallerParam('SERVERURL') <> ''" in child_text
+    assert "RunTesseractOnlySetup(ExpandConstant('{tmp}\\configure_ollama_windows.ps1'))" in child_text
+    assert 'Result := \'GuardianNode OCR setup failed.' in child_text
+    assert ' -Tier "text_only"' in child_text
+    assert ' -TextModel ""' in child_text
+    assert ' -TesseractOnly' in child_text
     assert 'Source: "..\\shared\\configure_ollama_windows.ps1"; Flags: dontcopy' in child_text
 
     server_text = SERVER_INSTALLER.read_text(encoding="utf-8")
@@ -94,6 +121,24 @@ def test_windows_ollama_bootstrap_registers_persistent_task() -> None:
     assert "/Delete /TN GuardianNodeOllama /F" in child_text
 
 
+def test_windows_bootstrap_installs_tesseract_for_screenshot_text_detection() -> None:
+    text = OLLAMA_BOOTSTRAP.read_text(encoding="utf-8")
+
+    assert "Get-TesseractExecutable" in text
+    assert "Install-Tesseract" in text
+    assert "[switch]$TesseractOnly" in text
+    assert "tesseract-ocr-w64-setup-5.5.0.20241111.exe" in text
+    assert "Tesseract-OCR\\tesseract.exe" in text
+    assert "'/S /D={0}'" in text
+    assert "WaitForExit(600000)" in text
+    assert "Tesseract installer timed out" in text
+    assert "TESSDATA_PREFIX" in text
+    assert 'SetEnvironmentVariable("Path"' in text
+    assert "Tesseract-only mode requested. Skipping Ollama entirely." in text
+    assert "screenshot text detection would be unreliable" in text
+    assert text.index("Install-Tesseract") < text.index("Install-Ollama")
+
+
 def test_child_only_install_does_not_stage_backend_or_dashboard_payload() -> None:
     text = CHILD_INSTALLER.read_text(encoding="utf-8")
 
@@ -128,12 +173,16 @@ def test_child_installer_uses_single_watchdog_and_single_tray_launch_path() -> N
         encoding="utf-8"
     )
     build_script = (ROOT / "installer" / "build" / "build_all.sh").read_text(encoding="utf-8")
+    release_workflow = (ROOT / ".github" / "workflows" / "release-installers.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert "GuardianNodeWatchdog2Service.exe\"; Parameters: \"install" not in text
     assert "GuardianNodeWatchdog2Service.exe\"; Parameters: \"start" not in text
     assert "sdset GuardianNodeWatchdog2" not in text
     assert "--peer-service" not in watchdog_xml
     assert "Helper.xml" not in build_script
+    assert "Helper.xml" not in release_workflow
     assert 'GuardianNodeTray.exe"; Flags: nowait runasoriginaluser' not in text
 
 

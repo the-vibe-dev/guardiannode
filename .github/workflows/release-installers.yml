@@ -243,7 +243,6 @@ jobs:
             throw "WinSW SHA-256 mismatch: expected $env:WINSW_SHA256 got $actual"
           }
           Copy-Item installer/build/winsw_templates/Watchdog.xml installer/build/stage/winsw/
-          Copy-Item installer/build/winsw_templates/Helper.xml   installer/build/stage/winsw/
           Copy-Item installer/build/winsw_templates/Backend.xml  installer/build/stage/winsw/
           Copy-Item installer/build/winsw_templates/Broker.xml   installer/build/stage/winsw/
 

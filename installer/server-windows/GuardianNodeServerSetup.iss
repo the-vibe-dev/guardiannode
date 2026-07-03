@@ -61,6 +61,7 @@ Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntiltermi
 
 ; Restrict server data to the backend service account and administrators before startup.
 Filename: "icacls.exe"; Parameters: """{commonappdata}\GuardianNode"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F"; Flags: runhidden waituntilterminated
+Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""GuardianNode Backend (Private LAN)"" dir=in action=allow protocol=TCP localport=8787 profile=private"; Flags: runhidden waituntilterminated; Check: ShouldEnableLanAccess
 
 ; Install backend service
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."
@@ -81,10 +82,50 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags
 
 var
   HardwareSummaryPage: TOutputMsgWizardPage;
+  NetworkPage: TInputOptionWizardPage;
+  LanAddressPage: TInputQueryWizardPage;
   DetectedTier: String;
   DetectedTextModel: String;
   DetectedVisionModel: String;
   DetectedReasoning: String;
+
+function InstallerParam(Name: String): String;
+begin
+  Result := Trim(ExpandConstant('{param:' + Name + '|}'));
+end;
+
+function HasLanParam: Boolean;
+var
+  LanParam: String;
+begin
+  LanParam := Lowercase(InstallerParam('LAN'));
+  Result := (LanParam = '1') or (LanParam = 'yes') or (LanParam = 'true') or
+    (LanParam = 'private') or (LanParam = 'lan');
+end;
+
+function LanHostValue: String;
+begin
+  Result := Trim(InstallerParam('SERVERHOST'));
+  if Result = '' then
+    Result := Trim(InstallerParam('ALLOWEDHOSTS'));
+  if (Result = '') and Assigned(LanAddressPage) then
+    Result := Trim(LanAddressPage.Values[0]);
+end;
+
+function ShouldEnableLanAccess: Boolean;
+begin
+  Result := HasLanParam or (Assigned(NetworkPage) and (NetworkPage.SelectedValueIndex = 1));
+end;
+
+function EffectiveAllowedHosts: String;
+var
+  HostValue: String;
+begin
+  HostValue := LanHostValue;
+  if HostValue = '' then
+    HostValue := 'guardian-server';
+  Result := '127.0.0.1,localhost,' + HostValue;
+end;
 
 function HardwareProbeScript: String;
 begin
@@ -200,19 +241,64 @@ begin
     'Text model: ' + DetectedTextModel + #13#10 +
     'Vision model: ' + DetectedVisionModel + #13#10#13#10 +
     'Ollama and the right models will be installed automatically. This can take 5-20 minutes depending on download speed.');
+
+  NetworkPage := CreateInputOptionPage(HardwareSummaryPage.ID,
+    'Server access',
+    'Where should this parent dashboard be reachable?',
+    'Keep local-only for a one-PC install. Choose private LAN/VPN when this PC will be the parent server for child PCs.',
+    True, False);
+  NetworkPage.Add('Only this PC (safest default; dashboard opens at http://127.0.0.1:8787)');
+  NetworkPage.Add('Private LAN/VPN child PCs can connect to this server');
+  NetworkPage.SelectedValueIndex := 0;
+  if HasLanParam then
+    NetworkPage.SelectedValueIndex := 1;
+
+  LanAddressPage := CreateInputQueryPage(NetworkPage.ID,
+    'Private LAN/VPN address',
+    'Enter the exact host or IP child PCs will use.',
+    'Example: 192.168.1.42 or guardian-server.local. The installer opens TCP 8787 only for the Windows Private network profile.');
+  LanAddressPage.Add('Server host/IP for child installers:', False);
+  LanAddressPage.Values[0] := LanHostValue;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (PageID = LanAddressPage.ID) and (not ShouldEnableLanAccess) then
+    Result := True;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if WizardSilent() then
+    Exit;
+  if (CurPageID = LanAddressPage.ID) and (LanHostValue = '') then begin
+    MsgBox('Enter the server host/IP that child PCs will use, or go back and choose local-only.', mbError, MB_OK);
+    Result := False;
+  end;
 end;
 
 procedure WriteRuntimeConfig;
 var
-  DataDir: String;
+  DataDir, BindHost, AllowedHosts: String;
 begin
   DataDir := ExpandConstant('{commonappdata}\GuardianNode');
-  WriteGuardianNodeServerEnv(
+  BindHost := '127.0.0.1';
+  AllowedHosts := '127.0.0.1,localhost';
+  if ShouldEnableLanAccess then begin
+    BindHost := '0.0.0.0';
+    AllowedHosts := EffectiveAllowedHosts;
+  end;
+
+  WriteGuardianNodeServerEnvForNetwork(
     DataDir,
     DetectedTier,
     DetectedTextModel,
     DetectedVisionModel,
-    'http://127.0.0.1:11434'
+    'http://127.0.0.1:11434',
+    BindHost,
+    AllowedHosts
   );
 end;
 

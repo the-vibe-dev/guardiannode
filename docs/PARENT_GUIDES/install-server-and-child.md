@@ -20,22 +20,20 @@ You'll need:
 
 1. Build the server installer from source or use a maintainer-provided alpha test artifact.
 2. Run the installer.
-3. The installer detects hardware, installs/pulls the AI model, starts the backend on `127.0.0.1`, and opens the local setup page.
-4. Use the Start Menu **Show Setup Token** shortcut, enter that token in the setup page, then create the parent account and recovery code.
-5. To use a child PC during this alpha, place the server behind a trusted VPN/TLS path first. If you are deliberately running a private lab LAN test, manually edit `%ProgramData%\GuardianNode\server.env` as an administrator:
-   ```text
-   GUARDIANNODE_BIND_HOST=0.0.0.0
-   GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
-   GUARDIANNODE_MDNS_ENABLED=false
-   ```
-   Replace `192.168.1.42` and `guardian-server` with the actual server LAN IP
-   or hostname that the child PC will use.
-6. Restart the backend service and add a private-network firewall rule:
-   ```powershell
-   Restart-Service GuardianNodeBackend
-   New-NetFirewallRule -DisplayName "GuardianNode Backend (LAN)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private
-   ```
-7. Find the server's LAN IP and write down the dashboard URL, for example `http://192.168.1.42:8787`.
+3. On **Server access**, choose one:
+   - **Only this PC** for an all-local parent dashboard.
+   - **Private LAN/VPN child PCs can connect** when this PC will pair child PCs.
+4. If you choose private LAN/VPN, enter the exact host or IP the child installer will use, such as `192.168.1.42` or `guardian-server.local`. The installer writes the allowed-hosts setting and opens TCP 8787 for the Windows **Private** firewall profile.
+5. The installer detects hardware, installs/pulls the AI model, starts the backend, and opens the local setup page.
+6. Use the Start Menu **Show Setup Token** shortcut, enter that token in the setup page, then create the parent account and recovery code.
+7. Write down the child installer URL, for example `http://192.168.1.42:8787`.
+
+Power users doing a silent Windows server install can enable the same private
+LAN/VPN mode with:
+
+```powershell
+GuardianNodeServerSetup-0.1.0-alpha.1.exe /VERYSILENT /LAN=1 /SERVERHOST=192.168.1.42
+```
 
 ### If your server is Linux
 
@@ -55,37 +53,23 @@ cd guardiannode/installer/server-linux
 docker compose up -d
 ```
 
+For a native Linux server that child PCs will reach on a trusted private
+LAN/VPN, set the bind address and allowed host list during install:
+
+```bash
+sudo GN_BIND_HOST=0.0.0.0 \
+  GN_ALLOWED_HOSTS=127.0.0.1,localhost,192.168.1.42,guardian-server \
+  bash install.sh
+```
+
+Replace `192.168.1.42` and `guardian-server` with the exact server LAN IP or
+hostname the child installer will use. Keep TCP 8787 firewalled to trusted child
+PCs only.
+
 For the native installer, open `http://127.0.0.1:8787/setup` on the server and
 enter the printed one-time setup token. For Docker, open
 `http://127.0.0.1:8787/setup` on the Docker host and read the token from the
 container logs or data volume.
-
-To use a child PC on your LAN during this alpha, manually bind the backend to
-the LAN after first-run setup:
-
-Native systemd:
-
-```bash
-sudo systemctl edit guardiannode-backend
-```
-
-Add:
-
-```ini
-[Service]
-Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"
-Environment="GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost"
-Environment="GUARDIANNODE_MDNS_ENABLED=false"
-```
-
-Replace the example IP/hostname with your server's actual LAN address/name.
-
-Then run:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart guardiannode-backend
-```
 
 Docker Compose keeps the host port bound to loopback by default. Change the
 backend port mapping to `8787:8787`, then run `docker compose up -d` again.
