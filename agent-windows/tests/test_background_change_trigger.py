@@ -1,6 +1,7 @@
 """A background window changing content must trigger a frame even when the
 foreground window (and its region hash) is completely unchanged."""
 import asyncio
+from itertools import chain, repeat
 
 import pytest
 
@@ -101,7 +102,7 @@ async def test_unchanged_screen_resends_after_max_capture_interval(monkeypatch):
     )
 
     shot = Screenshot(width=800, height=600, jpeg_bytes=b"same", phash=0, full_phash=0)
-    times = iter([1000.0, 1000.0, 1005.0, 1005.0, 1061.0, 1061.0, 1061.0])
+    times = chain([1000.0, 1000.0, 1005.0, 1005.0, 1061.0, 1061.0, 1061.0], repeat(1061.0))
 
     monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
     monkeypatch.setattr(
