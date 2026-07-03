@@ -49,11 +49,31 @@ def test_global_floor_suppresses_low_severity():
     assert pp.decide(pol, "high", ["scam"]).create_alert
 
 
+def test_category_floor_cannot_lower_global_floor():
+    pol = {
+        "min_severity": "critical",
+        "categories": {
+            "scam": {"mode": "alert", "min_severity": "low"},
+            "drugs": {"mode": "monitor", "min_severity": "medium"},
+        },
+    }
+
+    assert not pp.decide(pol, "high", ["scam"]).create_alert
+    assert not pp.decide(pol, "high", ["drugs"]).create_alert
+    assert pp.decide(pol, "critical", ["scam"]).create_alert
+
+
 def test_capture_settings_by_level():
     tight = pp.capture_settings({"capture": {"level": "tight"}})
     leeway = pp.capture_settings({"capture": {"level": "leeway"}})
     assert tight["cadence_seconds"] < leeway["cadence_seconds"]
     assert tight["phash_threshold"] <= leeway["phash_threshold"]
+    assert tight["max_capture_interval_seconds"] < leeway["max_capture_interval_seconds"]
+
+
+def test_capture_settings_can_override_max_interval():
+    cfg = pp.capture_settings({"capture": {"level": "balanced", "max_capture_interval_seconds": 45}})
+    assert cfg["max_capture_interval_seconds"] == 45
 
 
 def test_normalize_fills_age_defaults():

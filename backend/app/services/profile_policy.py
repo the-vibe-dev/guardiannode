@@ -53,10 +53,26 @@ TUNABLE_CATEGORIES = [
 ]
 
 CAPTURE_LEVELS = {
-    # level: (cadence_seconds, phash_threshold, full_screen_change_threshold)
-    "tight":    {"cadence_seconds": 4,  "phash_threshold": 2, "full_screen_change_threshold": 8},
-    "balanced": {"cadence_seconds": 8,  "phash_threshold": 3, "full_screen_change_threshold": 12},
-    "leeway":   {"cadence_seconds": 15, "phash_threshold": 5, "full_screen_change_threshold": 18},
+    # max_capture_interval_seconds is the unchanged-screen safety resend; keep
+    # it slower than backend vision classification on standalone GPUs.
+    "tight": {
+        "cadence_seconds": 4,
+        "phash_threshold": 2,
+        "full_screen_change_threshold": 8,
+        "max_capture_interval_seconds": 60,
+    },
+    "balanced": {
+        "cadence_seconds": 8,
+        "phash_threshold": 3,
+        "full_screen_change_threshold": 12,
+        "max_capture_interval_seconds": 120,
+    },
+    "leeway": {
+        "cadence_seconds": 15,
+        "phash_threshold": 5,
+        "full_screen_change_threshold": 18,
+        "max_capture_interval_seconds": 300,
+    },
 }
 
 VALID_MODES = {"alert", "monitor", "allow"}
@@ -161,10 +177,8 @@ def decide(policy: dict, severity: str, categories: list[str]) -> Decision:
         if mode == "allow":
             continue
         floor = SEVERITY_ORDER.get(cs.get("min_severity") or policy.get("min_severity", "medium"), global_floor)
-        if sev < max(floor, global_floor) and sev < floor:
-            # below this category's bar
-            continue
-        if sev < floor:
+        effective_floor = max(floor, global_floor)
+        if sev < effective_floor:
             continue
         if mode == "monitor":
             want_monitor = True
@@ -185,7 +199,12 @@ def capture_settings(policy: dict, age_group: str = "10_13") -> dict:
     level = cap.get("level", "balanced")
     base = dict(CAPTURE_LEVELS.get(level, CAPTURE_LEVELS["balanced"]))
     # Explicit overrides win over the level preset.
-    for k in ("cadence_seconds", "phash_threshold", "full_screen_change_threshold"):
+    for k in (
+        "cadence_seconds",
+        "phash_threshold",
+        "full_screen_change_threshold",
+        "max_capture_interval_seconds",
+    ):
         if isinstance(cap.get(k), (int, float)):
             base[k] = int(cap[k])
     base["level"] = level

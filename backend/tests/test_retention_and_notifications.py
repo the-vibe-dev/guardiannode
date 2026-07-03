@@ -6,11 +6,15 @@ Covers two items from the open-source readiness Test Plan:
 """
 from __future__ import annotations
 
+import base64
+import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from app import settings as settings_mod
-from app.db.models import Alert, AuditLog, Device, Event, EvidenceBlob, NotificationLog, RiskResult
-from app.services import notifications, retention
+from app.api import settings as settings_api
+from app.db.models import Alert, AuditLog, Device, Event, EvidenceBlob, NotificationLog, RiskResult, Setting, User
+from app.services import encryption, notifications, retention
 
 
 def _old(days: int) -> datetime:
@@ -92,15 +96,32 @@ def test_run_cleanup_removes_expired_rows(db_session):
     assert deleted["audit"] == 1
 
 
-def test_run_cleanup_zero_retention_keeps_severity(db_session):
-    """A severity configured with 0 days is skipped (never auto-deleted)."""
+def test_run_cleanup_zero_retention_deletes_severity(db_session):
+    """A severity configured with 0 days is deleted as soon as cleanup runs."""
     s = db_session
     s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
     _add_alert_chain(s, alert_id="keep", risk_id="r", severity="low", age_days=999)
     s.commit()
     cfg = {**retention.DEFAULT_RETENTION_DAYS, "low": 0}
     retention.run_cleanup(s, cfg)
-    assert s.query(Alert).filter_by(alert_id="keep").first() is not None
+    assert s.query(Alert).filter_by(alert_id="keep").first() is None
+
+
+def test_run_cleanup_none_retention_does_not_delete_low_risks(db_session):
+    s = db_session
+    s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
+    s.add(Event(event_id="e-none", device_id="d1", source_type="browser", timestamp=_old(1)))
+    s.add(Event(event_id="e-low", device_id="d1", source_type="browser", timestamp=_old(1)))
+    s.add(RiskResult(risk_id="r-none", event_id="e-none", risk_level="none", score=0, created_at=_old(1)))
+    s.add(RiskResult(risk_id="r-low", event_id="e-low", risk_level="low", score=20, created_at=_old(1)))
+    s.commit()
+
+    retention.run_cleanup(s, {**retention.DEFAULT_RETENTION_DAYS, "none": 0, "low": 30})
+
+    assert s.get(Event, "e-none") is None
+    assert s.get(RiskResult, "r-none") is None
+    assert s.get(Event, "e-low") is not None
+    assert s.get(RiskResult, "r-low") is not None
 
 
 def test_run_test_records_per_channel_without_leaking_secret(monkeypatch):
@@ -258,6 +279,52 @@ def test_send_webhook_does_not_follow_redirects(monkeypatch):
     ok, detail = notifications._send_webhook("http://notify.example.test/hook", {"title": "GuardianNode"})
     assert ok is False
     assert "redirects are not followed" in detail
+def test_update_notifications_preserves_password_on_blank_save(db_session):
+    s = db_session
+    password_enc = base64.b64encode(encryption.encrypt_text("s3cr3t")).decode("ascii")
+    s.add(Setting(key="notification_settings", value=json.dumps({
+        "enabled": True,
+        "host": "smtp.old.invalid",
+        "port": 587,
+        "tls_mode": "starttls",
+        "username": "parent",
+        "password_enc": password_enc,
+        "from_address": "from@example.test",
+        "to_address": "to@example.test",
+        "webhook_url": "",
+        "immediate_min_severity": "high",
+        "daily_digest_enabled": True,
+        "daily_digest_time": "08:00",
+    })))
+    user = User(display_name="Parent", role="admin", password_hash="x", recovery_hash="y")
+    s.add(user)
+    s.commit()
+
+    req = settings_api.NotificationSettings(
+        enabled=True,
+        host="smtp.new.invalid",
+        port=587,
+        tls_mode="starttls",
+        username="parent",
+        password="",
+        from_address="from@example.test",
+        to_address="to@example.test",
+        webhook_url="",
+        immediate_min_severity="high",
+        daily_digest_enabled=True,
+        daily_digest_time="08:00",
+    )
+    out = settings_api.update_notifications(
+        req,
+        SimpleNamespace(client=SimpleNamespace(host="127.0.0.1")),
+        s,
+        user,
+    )
+
+    stored = json.loads(s.get(Setting, "notification_settings").value)
+    assert stored["host"] == "smtp.new.invalid"
+    assert stored["password_enc"] == password_enc
+    assert out["password_configured"] is True
 
 
 def test_dispatch_records_dashboard_email_and_webhook(db_session, monkeypatch):

@@ -26,6 +26,7 @@ monitored_domains:
   - tiktok.com
 
 ocr_cadence_seconds: 5
+max_capture_interval_seconds: 120
 image_safety_enabled: true
 clipboard_monitoring_enabled: false
 full_screen_capture_enabled: true

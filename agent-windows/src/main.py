@@ -392,13 +392,60 @@ async def capture_config_loop(client: BackendClient, cfg: AgentConfig) -> None:
                     cfg.full_screen_change_threshold = int(cc["full_screen_change_threshold"])
                 if isinstance(cc.get("full_screen_capture_enabled"), bool):
                     cfg.full_screen_capture_enabled = cc["full_screen_capture_enabled"]
+                if isinstance(cc.get("max_capture_interval_seconds"), (int, float)):
+                    cfg.max_capture_interval_seconds = max(
+                        cfg.ocr_cadence_seconds,
+                        int(cc["max_capture_interval_seconds"]),
+                    )
                 log.info(
-                    "capture policy: level=%s cadence=%ds phash=%d",
+                    "capture policy: level=%s cadence=%ds phash=%d max_interval=%ds",
                     cc.get("level"), cfg.ocr_cadence_seconds, cfg.phash_threshold,
+                    cfg.max_capture_interval_seconds,
                 )
         except Exception as e:
             log.debug("capture-config poll error: %s", e)
         await asyncio.sleep(120)
+
+
+async def refresh_pairing_credentials(
+    client: BackendClient,
+    cfg: AgentConfig,
+    *,
+    hostname: str | None = None,
+) -> bool:
+    """Try one pending pairing bootstrap and update the live client on success."""
+    if client.token:
+        return False
+    try:
+        creds = await asyncio.to_thread(
+            bootstrap_pairing,
+            hostname or socket.gethostname(),
+            __version__,
+            attempts=1,
+            retry_delay=0.0,
+        )
+    except Exception as e:
+        log.warning("pairing bootstrap failed: %s", e)
+        return False
+    if not creds or not creds.get("device_token"):
+        return False
+
+    backend_url = str(creds.get("backend_url") or client.base_url).rstrip("/")
+    client.base_url = backend_url
+    client.token = str(creds["device_token"])
+    cfg.backend_url = backend_url
+    cfg.device_id = str(creds.get("device_id") or cfg.device_id)
+    cfg.device_token = client.token
+    log.info("pairing bootstrap completed; uploads enabled for device %s", cfg.device_id or "unknown")
+    return True
+
+
+async def pairing_monitor_loop(client: BackendClient, cfg: AgentConfig) -> None:
+    """Keep trying installer bootstrap after startup until the agent is paired."""
+    while True:
+        if not client.token:
+            await refresh_pairing_credentials(client, cfg)
+        await asyncio.sleep(30)
 
 
 async def main_async(cfg: AgentConfig) -> None:
@@ -445,6 +492,7 @@ async def main_async(cfg: AgentConfig) -> None:
         screenshot_sender_loop(client, screenshot_queue),
         heartbeat_loop(client, screenshot_queue),
         capture_config_loop(client, cfg),
+        pairing_monitor_loop(client, cfg),
     )
 
 

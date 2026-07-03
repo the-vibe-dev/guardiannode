@@ -26,8 +26,8 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
-      - run: pip install mkdocs-material
-      - run: mkdocs build --site-dir _site
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict --site-dir _site
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

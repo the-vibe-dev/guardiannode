@@ -4,8 +4,12 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 
+from src import main as agent_main
 from src import pairing_client
+from src.backend_client import BackendClient
+from src.config import AgentConfig
 
 
 def test_bootstrap_noop_without_pending_file(tmp_path):
@@ -28,6 +32,24 @@ def test_bootstrap_returns_existing_credentials(tmp_path):
         device_path=device,
     )
     assert result["device_token"] == "tok1"
+
+
+def test_bootstrap_removes_stale_pending_when_already_paired(tmp_path):
+    device = tmp_path / "device.json"
+    device.write_text(json.dumps({
+        "device_id": "dev1", "device_token": "tok1", "backend_url": "http://srv:8787",
+    }))
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({"backend_url": "http://srv:8787", "local_bootstrap": True}))
+
+    result = pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.1",
+        pending_path=pending,
+        device_path=device,
+    )
+
+    assert result["device_token"] == "tok1"
+    assert not pending.exists()
 
 
 def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
@@ -194,3 +216,46 @@ def test_bootstrap_refuses_mdns_discovery_without_explicit_url(tmp_path, monkeyp
     )
     assert result is None
     assert pending.exists(), "pending pairing should remain for explicit retry"
+
+
+@pytest.mark.asyncio
+async def test_refresh_pairing_credentials_updates_live_client(monkeypatch):
+    client = BackendClient("http://old:8787", "")
+    cfg = AgentConfig(backend_url="http://old:8787")
+
+    def fake_bootstrap(hostname, agent_version, *, attempts=5, retry_delay=10.0):
+        assert hostname == "kid-pc"
+        assert attempts == 1
+        assert retry_delay == 0.0
+        return {
+            "device_id": "dev-live",
+            "device_token": "tok-live",
+            "backend_url": "http://new:8787/",
+        }
+
+    monkeypatch.setattr(agent_main, "bootstrap_pairing", fake_bootstrap)
+
+    changed = await agent_main.refresh_pairing_credentials(client, cfg, hostname="kid-pc")
+
+    assert changed is True
+    assert client.base_url == "http://new:8787"
+    assert client.token == "tok-live"
+    assert cfg.backend_url == "http://new:8787"
+    assert cfg.device_id == "dev-live"
+    assert cfg.device_token == "tok-live"
+
+
+@pytest.mark.asyncio
+async def test_refresh_pairing_credentials_skips_already_paired(monkeypatch):
+    client = BackendClient("http://old:8787", "already-token")
+    cfg = AgentConfig(backend_url="http://old:8787", device_token="already-token")
+
+    def fail_bootstrap(*args, **kwargs):
+        raise AssertionError("bootstrap should not run when a token is already loaded")
+
+    monkeypatch.setattr(agent_main, "bootstrap_pairing", fail_bootstrap)
+
+    changed = await agent_main.refresh_pairing_credentials(client, cfg, hostname="kid-pc")
+
+    assert changed is False
+    assert client.token == "already-token"

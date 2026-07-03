@@ -38,13 +38,11 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
     deleted = {"alerts": 0, "risk_results": 0, "events": 0, "blobs": 0, "audit": 0}
 
     # 1) Per severity tier: expire the full event chain past its window.
-    #    ("none"-level results share the "low" tier — they're the bulk noise.)
-    for sev_group, days in (("low", r["low"]), ("medium", r["medium"]),
+    #    A 0-day window means delete as soon as cleanup runs.
+    for sev_group, days in (("none", r["none"]), ("low", r["low"]), ("medium", r["medium"]),
                             ("high", r["high"]), ("critical", r["critical"])):
-        if days <= 0:
-            continue
         cutoff = _cutoff(days)
-        levels = ["none", "low"] if sev_group == "low" else [sev_group]
+        levels = [sev_group]
         event_ids = [
             row[0]
             for row in session.query(RiskResult.event_id)
@@ -57,7 +55,7 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
 
         # Defensive: also expire alert rows of this severity whose chain is
         # already gone (e.g. rows from before cascade deletion existed).
-        sev_levels = ["low"] if sev_group == "low" else [sev_group]
+        sev_levels = [sev_group]
         deleted["alerts"] += (
             session.query(Alert)
             .filter(Alert.severity.in_(sev_levels), Alert.created_at < cutoff)

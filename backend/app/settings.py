@@ -88,10 +88,22 @@ class Settings(BaseSettings):
     # untouched; this only shrinks enormous 4K+ frames. Downscaling degrades OCR
     # of small text (usernames, handles, addresses) — measured. 0 disables it.
     vision_max_image_edge: int = 2560
+    # Guardrails for the disk-backed screenshot classifier queue. Stale replay
+    # must not block current safety events after upgrades/restarts.
+    # Cold qwen3-vl startup on a 12 GB GPU can exceed a minute after a clean
+    # install. Keep this above warm latency so first-run safety checks do not
+    # spin in repeated Ollama timeouts.
+    vision_timeout_seconds: int = 240
+    pending_frame_max_age_seconds: int = 600
+    pending_replay_max_frames: int = 50
 
     @property
     def keys_dir(self) -> Path:
         return self.data_dir / "keys"
+
+    @property
+    def setup_token_path(self) -> Path:
+        return self.keys_dir / "setup_token"
 
     @property
     def evidence_dir(self) -> Path:

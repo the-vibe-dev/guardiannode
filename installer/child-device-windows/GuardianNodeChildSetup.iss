@@ -33,6 +33,8 @@ WizardStyle=modern
 DisableWelcomePage=no
 UninstallDisplayIcon={app}\agent\{#MyAppExeName}
 UninstallFilesDir={app}
+CloseApplications=no
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -165,6 +167,8 @@ Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeAgent"; Flags: runhi
 Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeAgent /F"; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeTray"; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeTray /F"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeOllama"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeOllama /F"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeAgent.exe /F"; Flags: runhidden waituntilterminated
 Filename: "taskkill.exe"; Parameters: "/IM GuardianNodeTray.exe /F"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
@@ -342,8 +346,11 @@ begin
   RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog');
   RunHidden('{sys}\sc.exe', 'stop GuardianNodeAgent');
   RunHidden('{sys}\sc.exe', 'delete GuardianNodeAgent');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeBackend');
   RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeAgent');
   RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeTray');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeOllama');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeWatchdog.exe /F');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeAgent.exe /F');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeTray.exe /F');

@@ -82,7 +82,10 @@ async def classify_image(
     model: str | None = None,
 ) -> dict[str, Any]:
     chosen = model or settings.vision_model
-    client = OllamaClient(base_url=settings.vision_ollama_url_resolved, timeout=120.0)
+    client = OllamaClient(
+        base_url=settings.vision_ollama_url_resolved,
+        timeout=max(5.0, float(settings.vision_timeout_seconds)),
+    )
     phrases = [p.strip() for p in (watch_phrases or []) if p and p.strip()]
     watch_str = "; ".join(f'"{p}"' for p in phrases) if phrases else "none"
     prompt = _prompt().format(

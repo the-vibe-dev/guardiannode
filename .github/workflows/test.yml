@@ -43,6 +43,9 @@ jobs:
       - name: Run backend tests
         working-directory: backend
         run: pytest -v
+      - name: Run synthetic E2E
+        working-directory: backend
+        run: pytest -v ../tests/e2e
       - name: Lint (ruff, non-blocking until baseline is clean)
         working-directory: backend
         continue-on-error: true

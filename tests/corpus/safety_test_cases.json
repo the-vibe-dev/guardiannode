@@ -1,0 +1,52 @@
+[
+  {
+    "id": "safe_gaming_chat",
+    "text": "GG that was a close round. Want to trade blocks after homework?",
+    "risk_level": "none",
+    "score": 0,
+    "categories": [],
+    "summary": "Benign gaming chat.",
+    "evidence": [],
+    "recommended_action": "none"
+  },
+  {
+    "id": "off_platform_contact",
+    "text": "Do not tell your parents. Add me on SecretChat and send a selfie.",
+    "risk_level": "high",
+    "score": 85,
+    "categories": ["grooming", "off_platform_contact"],
+    "summary": "Secrecy plus off-platform contact request.",
+    "evidence": ["Do not tell your parents", "Add me on SecretChat"],
+    "recommended_action": "alert_parent"
+  },
+  {
+    "id": "scam_robux",
+    "text": "Free robux generator, login here with your password to claim.",
+    "risk_level": "medium",
+    "score": 65,
+    "categories": ["scam", "phishing"],
+    "summary": "Robux scam asks for credentials.",
+    "evidence": ["Free robux", "password"],
+    "recommended_action": "review"
+  },
+  {
+    "id": "bullying_escalation",
+    "text": "Everyone hates you and you should disappear from the server.",
+    "risk_level": "medium",
+    "score": 60,
+    "categories": ["bullying"],
+    "summary": "Bullying and social exclusion language.",
+    "evidence": ["Everyone hates you"],
+    "recommended_action": "review"
+  },
+  {
+    "id": "self_harm_language",
+    "text": "I want to hurt myself tonight and I do not feel safe.",
+    "risk_level": "critical",
+    "score": 95,
+    "categories": ["self_harm"],
+    "summary": "Imminent self-harm language.",
+    "evidence": ["hurt myself tonight"],
+    "recommended_action": "emergency_review"
+  }
+]

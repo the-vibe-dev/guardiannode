@@ -154,13 +154,7 @@ function Install-Ollama {
         return $false
     }
 
-    # Wait for it to come online
-    for ($i = 0; $i -lt 30; $i++) {
-        if (Test-OllamaReachable) { Write-Log "Ollama is now reachable."; return $true }
-        Start-Sleep -Seconds 2
-    }
-    Write-Log "Ollama did not become reachable after install."
-    return $false
+    return (Start-OllamaServer -OllamaExe (Find-OllamaExe))
 }
 
 function Get-InstalledModels {
@@ -169,7 +163,8 @@ function Get-InstalledModels {
         $j = $r.Content | ConvertFrom-Json
         return @($j.models | ForEach-Object { $_.name })
     } catch {
-        return @()
+        Write-Log "WARN could not list installed Ollama models: $_"
+        return $null
     }
 }
 
@@ -178,9 +173,22 @@ function Pull-Model {
     if (-not $Model) { return $true }
 
     $installed = Get-InstalledModels
-    if ($installed -contains $Model) {
+    if ($null -eq $installed) {
+        Write-Log "Ollama model list failed before pulling '$Model'. Restarting Ollama once."
+        Stop-OllamaProcesses -Reason "failed model list"
+        if (-not (Start-OllamaServer -OllamaExe (Find-OllamaExe))) {
+            return $false
+        }
+        $installed = Get-InstalledModels
+    }
+
+    if (($null -ne $installed) -and (@($installed) -contains $Model)) {
         Write-Log "Model '$Model' already installed."
         return $true
+    }
+    if ($null -eq $installed) {
+        Write-Log "ERROR unable to list Ollama models after restart; refusing to start a long pull against an unhealthy server."
+        return $false
     }
 
     Write-Log "Pulling model '$Model' from Ollama registry. This can take several minutes ..."
@@ -206,8 +214,15 @@ if ($Tier -eq "text_only" -and -not $TextModel) {
 # Skip Ollama setup if URL is remote; assume the parent's server already has it.
 $isLocal = $OllamaUrl -match "://(127\.0\.0\.1|localhost)"
 if ($isLocal) {
+    Set-OllamaEnvironment
     if (-not (Test-OllamaReachable)) {
-        if (-not (Install-Ollama)) {
+        $ollamaExe = Find-OllamaExe
+        if ($ollamaExe) {
+            if (-not (Start-OllamaServer -OllamaExe $ollamaExe)) {
+                Write-Log "Ollama start failed. Aborting model pulls."
+                exit 2
+            }
+        } elseif (-not (Install-Ollama)) {
             Write-Log "Ollama install/start failed. Aborting model pulls."
             exit 2
         }

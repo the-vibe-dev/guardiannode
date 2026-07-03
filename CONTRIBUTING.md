@@ -58,6 +58,15 @@ pytest
 python -m src.main --dry-run
 ```
 
+### Docs
+
+```bash
+python3 -m venv .venv-docs
+source .venv-docs/bin/activate
+pip install -r docs/requirements.txt
+mkdocs build --strict
+```
+
 ### Docker Server
 
 ```bash
