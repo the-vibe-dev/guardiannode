@@ -175,11 +175,16 @@ def bootstrap_pairing(
     code is pointless). Transient errors (server still booting, network)
     are retried a few times, then left pending for the next agent start.
     """
+    pending_path = pending_path or pending_pairing_path()
     creds = load_credentials(device_path)
     if creds and creds.get("device_token"):
+        if pending_path.exists():
+            try:
+                pending_path.unlink()
+            except Exception as e:
+                log.warning("could not remove stale pending_pairing.json: %s", e)
         return creds
 
-    pending_path = pending_path or pending_pairing_path()
     if not pending_path.exists():
         return None
     try:

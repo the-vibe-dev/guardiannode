@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import ChildProfile, Device
+from app.db.models import Alert, ChildProfile, Device, Event, RiskResult
 from app.services import event_ingest
 
 
@@ -152,6 +154,47 @@ def test_profile_delete_refuses_referenced_profile(monkeypatch, tmp_path):
     r = client.delete(f"/api/profiles/{profile_id}")
     assert r.status_code == 409
     assert r.json()["detail"]["references"]["devices"] == 1
+def test_alert_detail_includes_feed_context(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        db.add(Device(device_id="dev-1", hostname="kid-pc", paired=True))
+        db.add(
+            Event(
+                event_id="event-1",
+                device_id="dev-1",
+                source_type="image",
+                app_name="notepad.exe",
+                window_title="trigger - Notepad",
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+        db.add(
+            RiskResult(
+                risk_id="risk-1",
+                event_id="event-1",
+                risk_level="critical",
+                score=95,
+                categories=["grooming", "scam"],
+                summary="Trigger text detected.",
+                evidence=[],
+                recommended_action="emergency_review",
+                confidence=0.9,
+            )
+        )
+        db.flush()
+        db.add(Alert(alert_id="alert-1", risk_id="risk-1", device_id="dev-1", severity="critical"))
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.get("/api/alerts/alert-1").json()
+    assert body["alert"]["categories"] == ["grooming", "scam"]
+    assert body["alert"]["summary"] == "Trigger text detected."
+    assert body["alert"]["app_name"] == "notepad.exe"
 
 
 @pytest.mark.asyncio

@@ -122,7 +122,7 @@ def get_alert(
     log_action(db, actor=str(user.id), action="alert.view", target=alert_id)
     db.commit()
     return AlertDetail(
-        alert=_to_dto(a),
+        alert=_to_dto(a, r, e),
         risk={
             "risk_id": r.risk_id if r else None,
             "risk_level": r.risk_level if r else None,

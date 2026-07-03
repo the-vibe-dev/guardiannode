@@ -8,6 +8,18 @@ from pathlib import Path
 import yaml
 
 
+def normalize_age_group(value: object) -> str:
+    text = str(value).strip()
+    aliases = {
+        "under_10": "under_10",
+        "10_13": "10_13",
+        "1013": "10_13",
+        "14_17": "14_17",
+        "1417": "14_17",
+    }
+    return aliases.get(text, "10_13")
+
+
 def default_config_path() -> Path:
     if os.name == "nt":
         return Path(os.environ.get("PROGRAMDATA", "C:/ProgramData")) / "GuardianNode" / "agent.yaml"
@@ -45,10 +57,10 @@ class AgentConfig:
     # window is unchanged (e.g. a browser behind Notepad). Keep above the
     # duplicate threshold so clock ticks / cursor noise don't trigger.
     full_screen_change_threshold: int = 10
-    # Force a fresh frame even when perceptual hashing misses tiny text
-    # edits. The live capture policy may shorten the normal cadence, while this
-    # bounds the longest period without a frame from the visible desktop.
-    max_capture_interval_seconds: int = 15
+    # Force an occasional fresh frame even when perceptual hashing misses tiny
+    # text edits. Keep this slower than the capture cadence so unchanged
+    # desktops do not outrun single-GPU backend classification.
+    max_capture_interval_seconds: int = 120
     # Default to the visible desktop so typed risk in simple apps such as
     # Notepad is still reviewed. App names remain useful context, not a gate.
     full_screen_capture_enabled: bool = True
@@ -65,6 +77,11 @@ class AgentConfig:
     durable_queue_max_bytes: int = 256 * 1024 * 1024
     durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
     broker_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        # PyYAML treats unquoted values like 10_13 as numeric 1013. Normalize
+        # so older installer-written configs keep the intended age policy.
+        self.age_group = normalize_age_group(self.age_group)
 
     @classmethod
     def from_path(cls, path: Path) -> "AgentConfig":

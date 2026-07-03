@@ -89,3 +89,34 @@ async def test_unchanged_screen_does_not_resend(monkeypatch):
         await capture_loop(cfg, q)
 
     assert q.qsize() == 1, "identical frames after the first must be deduped"
+
+
+@pytest.mark.asyncio
+async def test_unchanged_screen_resends_after_max_capture_interval(monkeypatch):
+    q: asyncio.Queue = asyncio.Queue(maxsize=4)
+    cfg = AgentConfig(
+        full_screen_capture_enabled=True,
+        ocr_cadence_seconds=5,
+        max_capture_interval_seconds=60,
+    )
+
+    shot = Screenshot(width=800, height=600, jpeg_bytes=b"same", phash=0, full_phash=0)
+    times = iter([1000.0, 1000.0, 1005.0, 1005.0, 1061.0, 1061.0, 1061.0])
+
+    monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
+    monkeypatch.setattr(
+        "src.main.get_active_process",
+        lambda: ActiveProcess(pid=1, name="notepad.exe", exe=None),
+    )
+    monkeypatch.setattr(
+        "src.main.get_active_window",
+        lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200)),
+    )
+    monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: shot)
+    monkeypatch.setattr("src.main.time.time", lambda: next(times))
+    monkeypatch.setattr("src.main.asyncio.sleep", _stop_after(3))
+
+    with pytest.raises(StopLoop):
+        await capture_loop(cfg, q)
+
+    assert q.qsize() == 2, "first frame + max-interval refresh must send"

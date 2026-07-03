@@ -16,6 +16,7 @@ services:
       - GUARDIANNODE_BIND_HOST=0.0.0.0
       - GUARDIANNODE_ALLOWED_HOSTS=${GUARDIANNODE_ALLOWED_HOSTS:?Set explicit LAN allowed hosts before using host-network mode}
       - GUARDIANNODE_MDNS_ENABLED=true
+      - GUARDIANNODE_VISION_TIMEOUT_SECONDS=240
     ports: !reset []
 
   ollama:

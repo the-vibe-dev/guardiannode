@@ -72,7 +72,7 @@ data/
 evidence/
 keys/
 local_config/
-
+plans/
 # Logs
 *.log
 logs/

@@ -57,7 +57,13 @@ def authenticate(db: Session, token: str) -> Device | None:
             device is not None
             and device.paired
             and device.token_hash
-            and verify_password(secret, device.token_hash)
+            and (
+                verify_password(secret, device.token_hash)
+                # Alpha upgrade safety: an early structured-token verifier
+                # could leave rows hashed with the full bearer token. Accept
+                # both forms so already-paired children do not go dark.
+                or verify_password(token, device.token_hash)
+            )
         ):
             return device
         return None

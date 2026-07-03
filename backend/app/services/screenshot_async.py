@@ -115,6 +115,28 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except Exception:
+        return None
+
+
+def _is_stale(meta: dict[str, Any], *, now: datetime | None = None) -> bool:
+    max_age = int(getattr(settings_mod.settings, "pending_frame_max_age_seconds", 0) or 0)
+    if max_age <= 0:
+        return False
+    stored_at = _parse_timestamp(meta.get("stored_at")) or _parse_timestamp(meta.get("timestamp"))
+    if stored_at is None:
+        return False
+    return ((now or datetime.now(UTC)) - stored_at).total_seconds() > max_age
+
+
 def store_pending(image_bytes: bytes, meta: dict[str, Any]) -> str:
     """Persist a frame (encrypted) + its metadata, return its token. Fast."""
     token = str(ULID())
@@ -249,12 +271,47 @@ def _ready_tokens() -> list[str]:
     return tokens
 
 
+def requeue_pending(q: asyncio.Queue | None = None) -> int:
+    """Requeue viable pending frames newest-first and discard stale backlog."""
+    queue = q or get_queue()
+    replay_limit = int(
+        getattr(settings_mod.settings, "pending_replay_max_frames", _MAX_PENDING) or _MAX_PENDING
+    )
+
+    def _mtime(token: str) -> float:
+        try:
+            return (_pending_dir() / f"{token}.json").stat().st_mtime
+        except OSError:
+            return 0.0
+
+    replayed = 0
+    for token in sorted(_ready_tokens(), key=_mtime, reverse=True):
+        meta = _load_meta(token)
+        if meta is None or _is_stale(meta):
+            _discard(token)
+            continue
+        if replayed >= replay_limit:
+            log.info("pending replay limit reached; discarding backlog frame %s", token)
+            _discard(token)
+            continue
+        try:
+            queue.put_nowait(token)
+            replayed += 1
+        except asyncio.QueueFull:
+            break
+    return replayed
+
+
 async def _classify_token(token: str) -> None:
     from app.db.session import get_sessionmaker
 
     meta = _load_meta(token)
     if meta is None:
         _quarantine(token, "missing pending metadata")
+        return
+    if _is_stale(meta):
+        log.info("pending frame %s is stale; discarding before classification", token)
+        _discard(token)
         return
     try:
         image_bytes = encryption.decrypt_blob_from_disk(
@@ -265,11 +322,7 @@ async def _classify_token(token: str) -> None:
         _record_failure(token, e)
         return
 
-    ts = meta.get("timestamp")
-    try:
-        timestamp = datetime.fromisoformat(ts) if ts else datetime.now(UTC)
-    except Exception:
-        timestamp = datetime.now(UTC)
+    timestamp = _parse_timestamp(meta.get("timestamp")) or datetime.now(UTC)
 
     session = get_sessionmaker()()
     try:
@@ -299,15 +352,12 @@ async def _classify_token(token: str) -> None:
         session.close()
 
 
+
 async def loop() -> None:
     """Single-consumer worker: classify pending frames one at a time."""
     q = get_queue()
     # Re-enqueue frames left on disk by a previous run (crash / restart / power-off).
-    for token in _ready_tokens():
-        try:
-            q.put_nowait(token)
-        except asyncio.QueueFull:
-            break
+    requeue_pending(q)
     if q.qsize():
         log.info("re-enqueued %d pending frame(s) from disk", q.qsize())
     while True:

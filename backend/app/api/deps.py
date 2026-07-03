@@ -92,20 +92,28 @@ def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Devic
     repeatedly for free.
     """
     client_ip = request.client.host if request.client else "unknown"
-    blocked, retry_after = rate_limit.is_blocked("device_auth", client_ip)
-    if blocked:
-        raise HTTPException(
-            status_code=429,
-            detail="Too many failed device authentication attempts.",
-            headers={"Retry-After": str(retry_after)},
-        )
-
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = auth[7:].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Empty token")
+
+    blocked, retry_after = rate_limit.is_blocked("device_auth", client_ip)
+    if blocked:
+        # A child can legitimately recover from stale bad credentials by
+        # re-pairing. Let a valid structured token clear its own IP's failure
+        # window; keep blocked legacy/garbage tokens cheap.
+        if device_tokens.parse_token(token) is not None:
+            device = device_tokens.authenticate(db, token)
+            if device is not None:
+                rate_limit.reset("device_auth", client_ip)
+                return device
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed device authentication attempts.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     device = device_tokens.authenticate(db, token)
     if device is not None:

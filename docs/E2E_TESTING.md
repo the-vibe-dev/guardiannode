@@ -2,7 +2,7 @@
 
 ## Synthetic-events harness
 
-`tests/e2e/test_synthetic_events.py` runs an end-to-end test:
+`tests/e2e/test_synthetic_events.py` runs a CI-safe end-to-end test:
 
 1. Spin up backend with a temp data dir
 2. Generate synthetic events from `tests/corpus/safety_test_cases.json`:
@@ -14,27 +14,32 @@
    - Self-harm language
    - Phishing link
    - Plus deliberate false-positive borderline cases
-3. POST each event to `/api/events`
-4. Wait for classification (with mock Ollama if real Ollama isn't running)
-5. Assert risk levels match expected, categories match expected
-6. Verify alerts are created for severity ≥ medium
-7. Verify dashboard API returns expected alert feed
-8. Verify retained evidence is local/encrypted and review text filtering behavior
-9. Verify encrypted blobs cannot be read without decrypt path
+3. Complete first-run setup with the one-time setup token
+4. Pair a synthetic child device and assign it to a child profile
+5. POST each event to `/api/events`
+6. Classify with a canned local classifier fixture (no Ollama required)
+7. Assert risk levels and categories match expected
+8. Verify alerts are created according to policy
+9. Verify dashboard APIs return the expected event/alert feeds
+10. Review an alert, export encrypted storage, and run retention cleanup
 
-## Mock Ollama
+## Classifier mode
 
-`backend/tests/fixtures/mock_ollama.py` provides a FastAPI app that emulates the Ollama API and returns canned responses for known prompts. Used when CI doesn't have an Ollama daemon.
+The default E2E path does not call Ollama. It monkeypatches the backend text
+classifier with responses from `tests/corpus/safety_test_cases.json`, which keeps
+CI deterministic and fast. Live Ollama/GPU behavior is validated as a manual
+release acceptance pass on a GPU node.
 
 ## Running
 
 ```bash
-pytest tests/e2e/
+cd backend
+pytest ../tests/e2e/
 ```
 
 With real Ollama:
 ```bash
-GUARDIANNODE_E2E_REAL_OLLAMA=1 pytest tests/e2e/
+GUARDIANNODE_E2E_REAL_OLLAMA=1 pytest ../tests/e2e/
 ```
 
 ## Manual acceptance test (release gate)

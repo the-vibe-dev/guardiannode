@@ -81,6 +81,18 @@ def test_structured_token_with_wrong_secret_fails(db_session):
     assert device_tokens.authenticate(db_session, "gn_dev_otherdev_whatever") is None
 
 
+def test_structured_token_full_hash_upgrade_fallback(db_session):
+    token, _token_hash = device_tokens.issue_token("dev1")
+    db_session.add(Device(
+        device_id="dev1",
+        hostname="pc",
+        paired=True,
+        token_hash=hash_password(token),
+    ))
+    db_session.commit()
+    assert device_tokens.authenticate(db_session, token) is not None
+
+
 def test_revoked_device_token_fails(db_session):
     token, token_hash = device_tokens.issue_token("dev1")
     db_session.add(Device(device_id="dev1", hostname="pc", paired=False, token_hash=token_hash))
@@ -102,6 +114,32 @@ def test_repeated_invalid_device_auth_is_rate_limited(monkeypatch, tmp_path):
     )
     assert r.status_code == 429
     assert "Retry-After" in r.headers
+
+
+def test_valid_structured_token_clears_existing_ip_block(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from app.services.device_bootstrap_token import ensure_device_bootstrap_token
+    pair = client.post(
+        "/api/devices/bootstrap-local",
+        json={"hostname": "kid-pc", "device_bootstrap_token": ensure_device_bootstrap_token()},
+    )
+    assert pair.status_code == 200
+    token = pair.json()["device_token"]
+
+    for _ in range(rate_limit.MAX_FAILURES):
+        r = client.post(
+            "/api/devices/heartbeat",
+            json={"queued_frames": 0},
+            headers={"Authorization": "Bearer gn_dev_bogus_bogus"},
+        )
+        assert r.status_code == 401
+
+    r = client.post(
+        "/api/devices/heartbeat",
+        json={"queued_frames": 0},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
 
 
 def test_valid_auth_resets_failure_count(monkeypatch, tmp_path):
