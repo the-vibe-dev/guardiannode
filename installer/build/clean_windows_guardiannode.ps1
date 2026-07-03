@@ -31,7 +31,7 @@ foreach ($task in @("GuardianNodeAgent", "GuardianNodeTray", "GuardianNodeOllama
   schtasks.exe /Delete /TN $task /F | Out-File -Append -Encoding utf8 $LogPath
 }
 
-foreach ($proc in @("GuardianNodeAgent", "GuardianNodeTray", "GuardianNodeWatchdog", "GuardianNodeBackend", "ollama")) {
+foreach ($proc in @("GuardianNodeAgent", "GuardianNodeTray", "GuardianNodeWatchdog", "GuardianNodeBackend", "ollama", "llama-server")) {
   taskkill.exe /IM "$proc.exe" /F | Out-File -Append -Encoding utf8 $LogPath
 }
 

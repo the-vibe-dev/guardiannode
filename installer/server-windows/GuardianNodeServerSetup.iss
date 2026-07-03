@@ -39,6 +39,7 @@ Source: "..\build\stage\winsw\Backend.xml"; DestDir: "{app}"; DestName: "Guardia
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\PRIVACY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\shared\configure_ollama_windows.ps1"; Flags: dontcopy
 Source: "..\shared\configure_ollama_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "show_setup_token.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -61,9 +62,6 @@ Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntiltermi
 ; Restrict server data to the backend service account and administrators before startup.
 Filename: "icacls.exe"; Parameters: """{commonappdata}\GuardianNode"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F"; Flags: runhidden waituntilterminated
 
-; Install Ollama + pull models for detected tier (this is a SERVER install — always set up Ollama)
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configure_ollama_windows.ps1"" -Tier ""{code:GetTier}"" -TextModel ""{code:GetTextModel}"" -VisionModel ""{code:GetVisionModel}"" -OllamaUrl ""http://127.0.0.1:11434"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing Ollama and pulling AI models (this may take 5-20 minutes)..."
-
 ; Install backend service
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; AfterInstall: RequireBackendHealth
@@ -72,6 +70,8 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: ru
 Filename: "http://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsilent; Description: "Open Setup Wizard"
 
 [UninstallRun]
+Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeOllama"; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeOllama /F"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
 
@@ -165,6 +165,29 @@ end;
 function GetTier(Param: String): String;        begin Result := DetectedTier;        end;
 function GetTextModel(Param: String): String;   begin Result := DetectedTextModel;   end;
 function GetVisionModel(Param: String): String; begin Result := DetectedVisionModel; end;
+
+function RunOllamaSetup(ScriptPath: String): Boolean;
+var
+  ResultCode: Integer;
+  Params: String;
+begin
+  Params :=
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"' +
+    ' -Tier "' + GetTier('') + '"' +
+    ' -TextModel "' + GetTextModel('') + '"' +
+    ' -VisionModel "' + GetVisionModel('') + '"' +
+    ' -OllamaUrl "http://127.0.0.1:11434"';
+  Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := ResultCode = 0;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  ExtractTemporaryFile('configure_ollama_windows.ps1');
+  if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then
+    Result := 'GuardianNode Ollama/model setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
+end;
 
 procedure InitializeWizard;
 begin

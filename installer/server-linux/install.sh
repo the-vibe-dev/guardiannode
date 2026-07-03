@@ -91,7 +91,7 @@ create_user() {
     blue "Creating system user '$GN_USER'..."
     useradd --system --shell /usr/sbin/nologin --home-dir "$GN_HOME" --create-home "$GN_USER"
   fi
-  mkdir -p "$GN_DATA" "$GN_LOG" "$GN_HOME"
+  mkdir -p "$GN_DATA" "$GN_LOG" "$GN_HOME" "$GN_HOME/staging" "$GN_HOME/archived-src" "$GN_HOME/archived-venv"
   chown -R "$GN_USER:$GN_USER" "$GN_DATA" "$GN_LOG" "$GN_HOME"
   chmod 700 "$GN_DATA"
 }
@@ -100,6 +100,8 @@ create_setup_token() {
   blue "Creating one-time setup token..."
   local token_path="$GN_DATA/keys/setup_token.json"
   mkdir -p "$GN_DATA/keys"
+  chown "$GN_USER:$GN_USER" "$GN_DATA/keys"
+  chmod 700 "$GN_DATA/keys"
   local token
   token="$(python3 - <<'PY'
 import secrets
@@ -226,10 +228,13 @@ install_backend() {
   sudo -u "$GN_USER" python3 -m venv "$GN_STAGED_VENV"
   sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/pip" install --quiet --upgrade pip
   sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/pip" install --quiet -e "$GN_STAGED_SRC/backend"
-  sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/python" - <<'PY'
+  (
+    cd "$GN_STAGED_SRC/backend"
+    sudo -u "$GN_USER" "$GN_STAGED_VENV/bin/python" - <<'PY'
 import importlib
 importlib.import_module("app.main")
 PY
+  )
 }
 
 activate_release() {
@@ -250,6 +255,7 @@ activate_release() {
 
 rollback_release() {
   yellow "Rolling back to previous source/venv, if available..."
+  systemctl stop guardiannode-backend.service 2>/dev/null || true
   local failed_id
   failed_id="$(date -u +%Y%m%dT%H%M%SZ)"
   if [ -e "$GN_HOME/src" ] || [ -L "$GN_HOME/src" ]; then

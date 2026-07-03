@@ -73,6 +73,7 @@ Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\icon.png"; DestDir: "{app}\agent"; Flags: ignoreversion
 
 ; ---- Ollama / model bootstrap helper (used in all-in-one mode) ----
+Source: "..\shared\configure_ollama_windows.ps1"; Flags: dontcopy
 Source: "..\shared\configure_ollama_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
@@ -103,9 +104,6 @@ Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntiltermi
 ; ---- Restrict install dir ACL (before anything starts) ----
 Filename: "icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F /grant:r Users:(OI)(CI)RX"; Flags: runhidden waituntilterminated
 Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; StatusMsg: "Securing GuardianNode data directories..."; BeforeInstall: HardenDataAclsBeforeStart
-
-; ---- All-in-one mode: install Ollama + pull models for the detected tier ----
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configure_ollama_windows.ps1"" -Tier ""{code:GetTier}"" -TextModel ""{code:GetTextModel}"" -VisionModel ""{code:GetVisionModel}"" -OllamaUrl ""http://127.0.0.1:11434"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing Ollama and pulling AI models (this may take 5-20 minutes)..."; Check: IsAllInOne
 
 ; ---- All-in-one mode: install + start the backend service first so the agent can pair against it ----
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Backend service..."; Check: IsAllInOne
@@ -322,6 +320,7 @@ begin
 end;
 
 function ValidateInstallInputs(var ErrorMessage: String): Boolean; forward;
+function RunOllamaSetup(ScriptPath: String): Boolean; forward;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -357,6 +356,13 @@ begin
   RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
   RunHidden('{sys}\sc.exe', 'delete GuardianNodeBroker');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
+  if IsAllInOne then begin
+    ExtractTemporaryFile('configure_ollama_windows.ps1');
+    if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then begin
+      Result := 'GuardianNode Ollama/model setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
+      Exit;
+    end;
+  end;
   Result := '';
 end;
 
@@ -373,6 +379,21 @@ end;
 function GetVisionModel(Param: String): String;
 begin
   Result := DetectedVisionModel;
+end;
+
+function RunOllamaSetup(ScriptPath: String): Boolean;
+var
+  ResultCode: Integer;
+  Params: String;
+begin
+  Params :=
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"' +
+    ' -Tier "' + GetTier('') + '"' +
+    ' -TextModel "' + GetTextModel('') + '"' +
+    ' -VisionModel "' + GetVisionModel('') + '"' +
+    ' -OllamaUrl "http://127.0.0.1:11434"';
+  Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := ResultCode = 0;
 end;
 
 function InstallerParam(Name: String): String;

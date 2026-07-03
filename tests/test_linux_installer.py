@@ -98,6 +98,72 @@ def test_linux_installer_rejects_archive_missing_backend(tmp_path: Path) -> None
     assert "Source archive is missing required path: backend/pyproject.toml" in result.stderr
 
 
+def test_linux_installer_create_user_prepares_writable_staging_dirs(tmp_path: Path) -> None:
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        id() {{ return 0; }}
+        chown() {{ :; }}
+        chmod() {{ :; }}
+        create_user
+        test -d "$GN_HOME/staging"
+        test -d "$GN_HOME/archived-src"
+        test -d "$GN_HOME/archived-venv"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_import_smoke_runs_from_staged_backend(tmp_path: Path) -> None:
+    function_dump = tmp_path / "install_backend.fn"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        declare -f install_backend > "{function_dump}"
+        grep -F 'cd "$GN_STAGED_SRC/backend"' "{function_dump}"
+        grep -F 'importlib.import_module("app.main")' "{function_dump}"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_setup_token_chowns_keys_dir(tmp_path: Path) -> None:
+    calls = tmp_path / "chown.calls"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        chown() {{ printf '%s\\n' "$*" >> "{calls}"; }}
+        chmod() {{ :; }}
+        create_setup_token
+        test -d "$GN_DATA/keys"
+        test -f "$GN_DATA/keys/setup_token.json"
+        grep -F "$GN_USER:$GN_USER $GN_DATA/keys" "{calls}"
+        grep -F "$GN_USER:$GN_USER $GN_DATA/keys/setup_token.json" "{calls}"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_rollback_stops_service_before_moving_paths(tmp_path: Path) -> None:
+    function_dump = tmp_path / "rollback_release.fn"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        declare -f rollback_release > "{function_dump}"
+        grep -F 'systemctl stop guardiannode-backend.service' "{function_dump}"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
 def test_linux_installer_probe_failure_defaults_conservatively(tmp_path: Path) -> None:
     result = _run_bash(
         f"""

@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CHILD_INSTALLER = ROOT / "installer" / "child-device-windows" / "GuardianNodeChildSetup.iss"
 SERVER_INSTALLER = ROOT / "installer" / "server-windows" / "GuardianNodeServerSetup.iss"
+OLLAMA_BOOTSTRAP = ROOT / "installer" / "shared" / "configure_ollama_windows.ps1"
+CLEAN_WINDOWS = ROOT / "installer" / "build" / "clean_windows_guardiannode.ps1"
 WATCHDOG = ROOT / "agent-windows" / "src" / "watchdog.py"
 
 
@@ -43,6 +45,53 @@ def test_server_installer_writes_config_before_backend_start() -> None:
 
     assert config_line < backend_start
     assert "CurStepChanged" not in text
+
+
+def test_windows_installers_fail_if_ollama_bootstrap_fails() -> None:
+    for path in (CHILD_INSTALLER, SERVER_INSTALLER):
+        text = path.read_text(encoding="utf-8")
+        assert "function PrepareToInstall(var NeedsRestart: Boolean): String;" in text
+        assert "ExtractTemporaryFile('configure_ollama_windows.ps1')" in text
+        assert "RunOllamaSetup(ExpandConstant('{tmp}\\configure_ollama_windows.ps1'))" in text
+        assert "Result := 'GuardianNode Ollama/model setup failed." in text
+        assert "BeforeInstall: RequireOllamaSetup" not in text
+
+    child_text = CHILD_INSTALLER.read_text(encoding="utf-8")
+    assert "if IsAllInOne then begin" in child_text
+    assert 'Source: "..\\shared\\configure_ollama_windows.ps1"; Flags: dontcopy' in child_text
+
+    server_text = SERVER_INSTALLER.read_text(encoding="utf-8")
+    assert 'Source: "..\\shared\\configure_ollama_windows.ps1"; Flags: dontcopy' in server_text
+
+
+def test_windows_ollama_bootstrap_registers_persistent_task() -> None:
+    text = OLLAMA_BOOTSTRAP.read_text(encoding="utf-8")
+    clean_text = CLEAN_WINDOWS.read_text(encoding="utf-8")
+    server_text = SERVER_INSTALLER.read_text(encoding="utf-8")
+    child_text = CHILD_INSTALLER.read_text(encoding="utf-8")
+
+    assert "GuardianNodeOllama" in text
+    assert "Register-ScheduledTask" in text
+    assert "ollama_serve_hidden.vbs" in text
+    assert "[char]10" in text
+    assert "[char]13" in text
+    assert 'CreateObject("Scripting.FileSystemObject")' in text
+    assert 'ExpandEnvironmentStrings("%LOCALAPPDATA%")' in text
+    assert '[System.IO.File]::WriteAllText' in text
+    assert '-Execute "wscript.exe"' in text
+    assert 'cmd = Chr(34)' in text
+    assert "shell.Run cmd, 0, True" in text
+    assert "Start-ScheduledTask -TaskName \"GuardianNodeOllama\"" in text
+    assert "New-ScheduledTaskTrigger -AtLogOn" in text
+    assert "OLLAMA_MODELS" in text
+    assert 'Join-Path $userProfile ".ollama\\models"' in text
+    assert "return ,$names" in text
+    assert "Ollama was not reachable after model setup" in text
+    assert "Stop-OllamaProcesses -Reason \"post-pull reachability check\"" in text
+    assert '"llama-server"' in clean_text
+
+    assert "/Delete /TN GuardianNodeOllama /F" in server_text
+    assert "/Delete /TN GuardianNodeOllama /F" in child_text
 
 
 def test_child_only_install_does_not_stage_backend_or_dashboard_payload() -> None:

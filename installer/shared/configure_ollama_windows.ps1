@@ -95,21 +95,120 @@ function Get-OllamaExecutable {
     if ($ollama) {
         return $ollama.Source
     }
-    $candidate = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
-    if (Test-Path $candidate) {
-        return $candidate
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
+        (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
+    )
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} "Ollama\ollama.exe")
+    }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return $candidate
+        }
     }
     return $null
 }
 
+function Find-OllamaExe {
+    return Get-OllamaExecutable
+}
+
+function Set-OllamaEnvironment {
+    $userProfile = $env:USERPROFILE
+    if (-not $userProfile) {
+        $userProfile = [Environment]::GetFolderPath("UserProfile")
+    }
+    $modelsDir = Join-Path $userProfile ".ollama\models"
+    New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
+    [System.Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "24h", "Machine")
+    [System.Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "3", "Machine")
+    [System.Environment]::SetEnvironmentVariable("OLLAMA_MODELS", $modelsDir, "Machine")
+    $env:OLLAMA_KEEP_ALIVE = "24h"
+    $env:OLLAMA_MAX_LOADED_MODELS = "3"
+    $env:OLLAMA_MODELS = $modelsDir
+    Write-Log "Set OLLAMA_KEEP_ALIVE=24h, OLLAMA_MAX_LOADED_MODELS=3, and OLLAMA_MODELS=$modelsDir (Machine scope)"
+}
+
+function Stop-OllamaProcesses {
+    param([string]$Reason = "restart requested")
+
+    Write-Log "Stopping Ollama processes: $Reason"
+    Stop-ScheduledTask -TaskName "GuardianNodeOllama" -ErrorAction SilentlyContinue
+    Get-Process -Name "ollama" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name "llama-server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
+function Register-OllamaTask {
+    param([Parameter(Mandatory=$true)][string]$OllamaExe)
+
+    $taskName = "GuardianNodeOllama"
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $ollamaExeValue = [string]::Join("", @($OllamaExe))
+    $OllamaExe = -join ($ollamaExeValue.ToCharArray() | Where-Object { $_ -ne [char]10 -and $_ -ne [char]13 })
+    $OllamaExe = $OllamaExe.Trim()
+    if (-not $OllamaExe -or -not (Test-Path $OllamaExe)) {
+        throw "Ollama executable path is invalid: '$OllamaExe'"
+    }
+    $wrapperDir = Join-Path $env:ProgramData "GuardianNode"
+    New-Item -ItemType Directory -Force -Path $wrapperDir | Out-Null
+    $wrapperPath = Join-Path $wrapperDir "ollama_serve_hidden.vbs"
+    $wrapperScript = @'
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+ollamaPath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Ollama\ollama.exe"
+If Not fso.FileExists(ollamaPath) Then ollamaPath = shell.ExpandEnvironmentStrings("%ProgramFiles%") & "\Ollama\ollama.exe"
+If Not fso.FileExists(ollamaPath) Then ollamaPath = shell.ExpandEnvironmentStrings("%ProgramFiles(x86)%") & "\Ollama\ollama.exe"
+cmd = Chr(34) & ollamaPath & Chr(34) & " serve"
+shell.Run cmd, 0, True
+'@
+    [System.IO.File]::WriteAllText($wrapperPath, $wrapperScript + "`r`n", [System.Text.Encoding]::ASCII)
+    $action = New-ScheduledTaskAction `
+        -Execute "wscript.exe" `
+        -Argument "`"$wrapperPath`"" `
+        -WorkingDirectory (Split-Path -Parent $OllamaExe)
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet `
+        -MultipleInstances IgnoreNew `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -RestartCount 99 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+
+    Register-ScheduledTask -TaskName $taskName `
+        -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
+        -Description "GuardianNode local Ollama server for on-device classification" `
+        -Force | Out-Null
+    Write-Log "Registered scheduled task '$taskName' for $identity."
+}
+
 function Start-OllamaServer {
-    $ollamaPath = Get-OllamaExecutable
+    param([string]$OllamaExe = "")
+
+    if (Test-OllamaReachable) {
+        return $true
+    }
+    $ollamaPath = $OllamaExe
+    if (-not $ollamaPath) {
+        $ollamaPath = Find-OllamaExe
+    }
     if (-not $ollamaPath) {
         Write-Log "Ollama executable was not found."
         return $false
     }
     Write-Log "Starting Ollama server from $ollamaPath ..."
-    Start-Process -FilePath $ollamaPath -ArgumentList "serve" -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    try {
+        Register-OllamaTask -OllamaExe $ollamaPath
+        Start-ScheduledTask -TaskName "GuardianNodeOllama" -ErrorAction Stop
+        Write-Log "Started scheduled task 'GuardianNodeOllama'."
+    } catch {
+        Write-Log "WARN could not start GuardianNodeOllama scheduled task: $_"
+        Start-Process -FilePath $ollamaPath -ArgumentList "serve" -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    }
     for ($i = 0; $i -lt 30; $i++) {
         if (Test-OllamaReachable) {
             return $true
@@ -143,9 +242,7 @@ function Install-Ollama {
         # Give the service a moment to come up
         Start-Sleep -Seconds 8
         # Set persistent env vars for the Ollama service so models stay hot
-        [System.Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "24h", "Machine")
-        [System.Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "3", "Machine")
-        Write-Log "Set OLLAMA_KEEP_ALIVE=24h and OLLAMA_MAX_LOADED_MODELS=3 (Machine scope)"
+        Set-OllamaEnvironment
         if (-not (Test-OllamaReachable)) {
             [void](Start-OllamaServer)
         }
@@ -161,7 +258,11 @@ function Get-InstalledModels {
     try {
         $r = Invoke-WebRequest -UseBasicParsing -Uri "$OllamaUrl/api/tags" -TimeoutSec 10
         $j = $r.Content | ConvertFrom-Json
-        return @($j.models | ForEach-Object { $_.name })
+        $names = @()
+        if ($j.models) {
+            $names = @($j.models | ForEach-Object { $_.name })
+        }
+        return ,$names
     } catch {
         Write-Log "WARN could not list installed Ollama models: $_"
         return $null
@@ -240,6 +341,13 @@ if ($isLocal) {
 $ok = $true
 if ($TextModel)   { if (-not (Pull-Model -Model $TextModel))   { $ok = $false } }
 if ($VisionModel) { if (-not (Pull-Model -Model $VisionModel)) { $ok = $false } }
+if ($isLocal -and $ok -and -not (Test-OllamaReachable)) {
+    Write-Log "Ollama was not reachable after model setup. Restarting persistent task once."
+    Stop-OllamaProcesses -Reason "post-pull reachability check"
+    if (-not (Start-OllamaServer -OllamaExe (Find-OllamaExe))) {
+        $ok = $false
+    }
+}
 
 if ($ok) {
     Write-Log "All required models installed for tier=$Tier."
