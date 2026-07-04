@@ -28,7 +28,7 @@ windows = [
   "pystray>=0.19,<1.0",
 ]
 ocr = [
-  "opencv-python>=4.8,<5.0",
+  "opencv-python>=4.8,<6.0",
   "pytesseract>=0.3.10",
   # paddleocr is heavy and optional; users install via the OCR setup wizard
 ]
