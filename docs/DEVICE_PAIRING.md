@@ -85,9 +85,11 @@ Parent dashboard          Backend                    Child PC
 - Format: `gn_dev_<device_id>_<random_secret>` (the embedded device id lets the
   backend verify exactly one Argon2 hash per request instead of scanning all
   devices; legacy opaque tokens from older pairings keep working)
-- Stored on child device at `C:\ProgramData\GuardianNode\device.json`. The
-  current ProgramData ACL model must be validated on clean standard-user
-  Windows installs before public installer distribution.
+- Stored on child device at `C:\ProgramData\GuardianNode\device.json` in legacy
+  source-agent mode, or broker-owned secure storage in current public-alpha
+  installer mode. The ProgramData ACL model was validated for the Windows 11
+  public alpha installers and must be revalidated before each public installer
+  release.
 - Used in `Authorization: Bearer <token>` header for all subsequent API calls
 - Backend stores only the Argon2 hash of the secret
 - Invalid-token requests are rate-limited per source IP

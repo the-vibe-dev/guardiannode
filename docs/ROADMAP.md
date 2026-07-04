@@ -1,6 +1,6 @@
 # Roadmap
 
-## v0.1.0-alpha.1 — current developer preview
+## v0.1.0-alpha.1 — current public alpha
 
 - ✅ Repo scaffold, license, docs
 - ✅ Shared schemas (JSON Schema + Pydantic)
@@ -10,11 +10,11 @@
 - ✅ Screenshot-based collection with server-side OCR (replaced the earlier MV3 browser extension, now removed)
 - ✅ Dashboard (React + Vite + Tailwind) — login, dashboard, devices, risk feed, alert detail, settings
 - ✅ Linux server installer: `install.sh` + systemd + Docker Compose
-- ⚠️ Windows server installer (Inno Setup; maintainer qualification only)
-- ⚠️ Windows child-device installer (Inno Setup; broker/ACL/matrix qualification still required)
+- ✅ Windows server installer (Inno Setup; public alpha for technical parents)
+- ✅ Windows child-device/all-in-one installer (Inno Setup; public alpha for technical parents)
 - ⚠️ Authenticated server discovery/pinning for separated mode
 - ⚠️ Wine-based cross-build for Windows installers on Linux
-- ✅ Source-only GitHub release workflow
+- ✅ GitHub release workflow with source archive and public alpha installer artifacts
 
 ## v0.2 — Hardening + real-world alpha testing
 

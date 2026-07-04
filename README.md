@@ -59,8 +59,9 @@ visible through its tray/status UI and the backend is operated by the parent.
 ### All-in-one
 
 Run the Windows agent, backend, dashboard, and Ollama on one family PC. In this
-alpha, this is the only recommended source-code test shape and the backend
-should stay bound to loopback.
+alpha, the Windows 11 all-in-one installer is a supported public-alpha path for
+technical parents. For source-code testing, this is the simplest recommended
+shape. The backend should stay bound to loopback.
 
 ### Separated
 
@@ -256,15 +257,17 @@ python -m src.main
 Create and assign the child profile in the dashboard before relying on age
 policy behavior. Do not send parent passwords over plaintext LAN HTTP.
 
-### Experimental Maintainer Installer Testing
+### Public Alpha Installer Paths
 
-Windows and Linux installer paths are for maintainer qualification only in this
-alpha. They are not the supported public installation method.
+Windows 11 child/all-in-one and parent-server installers are supported
+public-alpha artifacts for technical parents and early evaluators. They remain
+unsigned alpha installers, so verify the release checksums before running them
+and expect SmartScreen/Defender reputation warnings.
 
-For Linux script testing, prefer downloading a tagged script, verifying the
-published checksum or signature, reviewing it locally, then executing it with
-`sudo`. Do not pipe an unverified network response directly into a privileged
-shell.
+For Linux server installs, prefer downloading the tagged installer bundle or
+script, verifying the published checksum or signature, reviewing it locally,
+then executing it with `sudo`. Do not pipe an unverified network response
+directly into a privileged shell.
 
 For Docker testing, clone the tagged source, review the Compose files, and run
 the deployment only on a trusted host. Do not expose the backend directly to the

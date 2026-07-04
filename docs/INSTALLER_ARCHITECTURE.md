@@ -61,9 +61,10 @@ Target ACLs for clean-machine testing:
 
 The current architecture introduces the `GuardianNodeBroker` service so the
 interactive capture helper no longer needs to own the backend bearer token or
-durable queue. This remains an installer no-go until clean Windows 10/11 tests
-confirm the named-pipe ACLs, ProgramData ACLs, standard-user behavior,
-upgrade/repair/uninstall, and multi-session operation.
+durable queue. Clean Windows 11 alpha validation has qualified the installer
+path for technical-parent public alpha use. Re-run named-pipe ACL, ProgramData
+ACL, standard-user, upgrade/repair/uninstall, and multi-session checks before
+each public installer release.
 
 After installing on a Windows qualification machine, run the bundled ACL
 collector from an elevated PowerShell prompt:

@@ -88,3 +88,35 @@ def test_alpha_release_docs_match_public_installer_scope() -> None:
     assert "not a replacement for parental involvement" in normalized
     assert "Public Windows installer | Not supported" not in combined
     assert "Windows installers are intentionally not attached" not in combined
+
+
+def test_public_installer_docs_do_not_contradict_alpha_scope() -> None:
+    combined = (
+        read("README.md")
+        + "\n"
+        + read("docs/ROADMAP.md")
+        + "\n"
+        + read("docs/INSTALLER_ARCHITECTURE.md")
+        + "\n"
+        + read("docs/DEVICE_PAIRING.md")
+    )
+
+    forbidden = [
+        "installer paths are for maintainer qualification only",
+        "not the supported public installation method",
+        "maintainer qualification only",
+        "installer no-go",
+        "before public installer distribution",
+        "public Windows installers are not supported",
+        "Windows installers are intentionally not attached",
+        "Source-only GitHub release workflow",
+    ]
+
+    lowered = combined.lower()
+    for phrase in forbidden:
+        assert phrase.lower() not in lowered
+
+    assert "Windows 11 all-in-one installer is a supported public-alpha path" in combined
+    assert "Windows server installer" in combined
+    assert "Windows child-device/all-in-one installer" in combined
+    assert "public alpha installer artifacts" in combined
