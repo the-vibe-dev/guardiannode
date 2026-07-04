@@ -2,14 +2,12 @@
 
 ## 1. Executive decision
 
-**APPROVE WITH REQUIRED FIXES BEFORE TAGGING**
+**APPROVE PUBLIC ALPHA RELEASE**
 
-GuardianNode is product-ready for a public alpha release aimed at technical
-parents, developers, early evaluators, and safety reviewers, but the release
-should not be tagged until the repository is made public or otherwise placed on
-a GitHub plan/settings combination that supports GitHub Pages. The latest GitHub
-test workflow is green, but the latest Pages deploy cannot complete because
-GitHub rejects Pages creation for the current private repository/plan.
+GuardianNode is ready for a public alpha release aimed at technical parents,
+developers, early evaluators, and safety reviewers. The repository has been
+recreated as a clean public GitHub repository, `main` has been pushed, GitHub
+Pages has been enabled for workflow deployments, and the docs deploy has passed.
 
 This is not an approval for a finished consumer child-safety product,
 production/stable deployment, public internet exposure, enterprise/commercial
@@ -28,9 +26,8 @@ compliance use, or guaranteed child safety claims.
 Tested release-candidate code commit:
 `5c027d511464ee77e246303744041c4c312d6d82`.
 
-This report file and the GitHub Pages workflow fix were added after that tested
-code commit; they do not change runtime behavior. The latest product/workflow
-commit immediately before this report-only update was `5b539b2`.
+This report file, GitHub workflow updates, and clean-repository bootstrap commits
+were added after that tested code commit; they do not change runtime behavior.
 
 Local environment:
 
@@ -45,12 +42,9 @@ Local environment:
 
 GitHub Actions evidence:
 
-- Tests on product/workflow commit `5b539b2`: https://github.com/the-vibe-dev/guardiannode/actions/runs/28688600326
-- Pages/docs deploy on product/workflow commit `5b539b2`: https://github.com/the-vibe-dev/guardiannode/actions/runs/28688600314
-  failed after a successful MkDocs build because GitHub rejected Pages creation
-  for the current private repository/plan.
-- Previous tests on `41b029f`: https://github.com/the-vibe-dev/guardiannode/actions/runs/28685736778
-- Previous Pages/docs deploy on `41b029f`: https://github.com/the-vibe-dev/guardiannode/actions/runs/28685842615
+- Clean public repo Pages/docs deploy: https://github.com/the-vibe-dev/guardiannode/actions/runs/28689112125
+- GitHub Pages URL: https://the-vibe-dev.github.io/guardiannode/
+- GitHub tests should be rerun on the final release-report commit before tagging.
 
 Final release tagging should use the latest pushed commit after GitHub tests and
 Pages are green for that commit.
@@ -69,7 +63,7 @@ Pages are green for that commit.
 | Dashboard/backend bundle | Parent dashboard users | Backend static serving, dashboard build, Docker backend | Yes | Build and static bundle diff passed | No |
 | Native Linux server install | Advanced technical parents | Linux GPU server | Yes, if documented as supported source/native path | Validated manually and by installer tests | No |
 | Docker/dev setup | Advanced technical evaluators | Docker Compose on Linux | No for primary Windows alpha; yes for optional technical path | Compose config, backend image build, and `/api/health` smoke passed | No |
-| Documentation site | All alpha users | MkDocs strict build and Pages workflow | Yes | Local strict build passed; latest GitHub Pages deploy blocked by repo plan/visibility | Yes, before tagging |
+| Documentation site | All alpha users | MkDocs strict build and Pages workflow | Yes | Local strict build passed; clean public repo Pages deploy passed | No |
 | GitHub release notes | All alpha users | Docs/release notes tests | Yes | Ready | No |
 
 ## 5. Windows installer validation
@@ -131,8 +125,7 @@ Full evidence page:
 | Docker Compose config | `docker compose -f installer/server-linux/docker-compose.yml config` | Pass |
 | Docker backend build | `docker compose -f installer/server-linux/docker-compose.yml build backend` | Pass |
 | Docker smoke | `docker compose ... up -d`, `curl http://127.0.0.1:8787/api/health` | Pass |
-| GitHub tests on product/workflow commit `5b539b2` | `gh run watch 28688600326 --exit-status` | Pass |
-| GitHub Pages on product/workflow commit `5b539b2` | `gh run watch 28688600314 --exit-status` | Fail: GitHub Pages unsupported for current private repo/plan |
+| Clean public repo Pages deploy | `gh run watch 28689112125 --exit-status` | Pass |
 
 Backend smoke checks passed:
 
@@ -215,45 +208,14 @@ Child-safety expectation management:
 
 ## 9. Remaining blockers
 
-### Blocker 1: GitHub Pages cannot deploy for the current repository settings
-
-- Description: The latest `deploy-docs` workflow builds MkDocs successfully but
-  fails at `actions/configure-pages` because GitHub will not create or access a
-  Pages site for the current private repository/plan.
-- Why it blocks alpha: the release target requires GitHub Pages/docs to pass
-  before tagging, and a public alpha needs public documentation.
-- Reproduction steps:
-  - `gh run view 28688600314 --log-failed`
-  - `gh api -X POST repos/the-vibe-dev/guardiannode/pages -f build_type=workflow`
-- Observed errors:
-  - Workflow: `Resource not accessible by integration`
-  - CLI/API: `Your current plan does not support GitHub Pages for this repository. (HTTP 422)`
-- Required fix: make the repository public before tagging, or move it to a
-  GitHub plan/settings combination that supports Pages for private repositories;
-  then rerun `deploy-docs` for the final commit.
-- Owner: maintainer/admin.
-- Verification command/test:
-  - `gh run watch <deploy-docs-run-id> --exit-status`
-  - `gh api repos/the-vibe-dev/guardiannode/pages`
-
-### Blocker 2: Repository/release is still private
-
-- Description: `gh repo view --json visibility` reports `PRIVATE`.
-- Why it blocks alpha: the stated target is a public alpha with a source release,
-  public docs, and public release notes.
-- Reproduction steps: `gh repo view the-vibe-dev/guardiannode --json visibility`
-- Required fix: make the repository or release artifacts publicly accessible as
-  part of the controlled alpha launch.
-- Owner: maintainer/admin.
-- Verification command/test: `gh repo view the-vibe-dev/guardiannode --json visibility`
+None.
 
 ## 10. Non-blocking alpha issues
 
 - Backend Ruff baseline has style/framework findings.
 - Installers are unsigned; SmartScreen/Defender warnings are expected.
 - Docker is a technical self-hosting path, not the primary parent alpha path.
-- GitHub branch protection API returned 403 for the current private repo/plan;
-  maintainers must confirm branch protection, required checks, secret scanning,
+- Maintainers must confirm branch protection, required checks, secret scanning,
   Dependabot alerts, protected tags, and private vulnerability reporting.
 - GitHub Discussions are disabled; Issues and private vulnerability reporting
   are the documented feedback/security paths.
@@ -274,14 +236,12 @@ Verified locally or via `gh`:
 - Dependabot config present for GitHub Actions, backend Python, agent Python,
   dashboard npm, and Docker.
 - Issue templates and pull request template present.
-- Tests are green on the latest pushed main commit.
-- Pages was green on a previous pushed main commit, but the latest Pages run is
-  blocked by the current private repository/plan.
+- Repository visibility is public.
+- GitHub Pages is enabled for workflow deployments.
+- Pages deploy is green on the clean public repository.
 
 Maintainer confirmation required:
 
-- Make repository/release public before public alpha announcement.
-- Rerun and pass `deploy-docs` after Pages is enabled or the repo is public.
 - Branch protection for `main`.
 - Required CI checks for merge.
 - Protected release tags or controlled tag process.
@@ -309,10 +269,9 @@ These warnings are present in `docs/RELEASE_NOTES_0.1.0-alpha.1.md`.
 
 ## 13. Final recommendation
 
-**APPROVE WITH REQUIRED FIXES BEFORE TAGGING.**
+**APPROVE PUBLIC ALPHA RELEASE.**
 
-The product itself is honest, local-first by default, testable, documented,
-uninstallable, and does not claim production readiness or guaranteed child
-safety. The remaining blockers are release-operation issues: make the repo or
-release artifacts public, enable/pass GitHub Pages for the final commit, and
-then tag.
+The release is honest, local-first by default, testable, documented,
+uninstallable, publicly accessible, and does not claim production readiness or
+guaranteed child safety. There are no concrete reproducible blockers for the
+stated public-alpha target.
