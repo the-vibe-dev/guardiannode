@@ -309,8 +309,9 @@ end;
 
 function IsExistingInstall: Boolean;
 begin
-  Result := FileExists(ExpandConstant('{app}\agent\GuardianNodeAgent.exe')) or
-    FileExists(ExpandConstant('{commonappdata}\GuardianNode\agent.yaml')) or
+  // InitializeWizard runs before Inno initializes the {app} constant, so
+  // repair detection must use machine-stable ProgramData/service state.
+  Result := FileExists(ExpandConstant('{commonappdata}\GuardianNode\agent.yaml')) or
     GNServiceExists('GuardianNodeBroker');
 end;
 

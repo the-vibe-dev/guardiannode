@@ -224,6 +224,10 @@ def test_windows_repairs_preserve_state_and_restart_previous_release_on_failure(
         assert "ShouldInstallBackendService" in text
 
     assert "if IsExistingInstall then begin" in child
+    existing_install_body = child.split("function IsExistingInstall: Boolean;", 1)[1].split(
+        "end;", 1
+    )[0]
+    assert "ExpandConstant('{app}" not in existing_install_body
     assert "not FileExists(CfgPath)" in child
     assert "Secure\\device.json" in child
     assert "RestoreExistingServices" in child
