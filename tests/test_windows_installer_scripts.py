@@ -235,6 +235,26 @@ def test_windows_repairs_preserve_state_and_restart_previous_release_on_failure(
     assert "start GuardianNodeBackend" in server
     assert "guardiannode.db-wal" in helper
     assert "keys" in helper
+    assert "application" in helper
+    assert "GNRestorePreUpgradeBackup" in helper
+    assert "Secure" in helper
+    assert "AgentSecure" in helper
+
+    for text in (child, server):
+        assert "FailAndRollbackBackendHealth" in text
+        assert "ExitProcess(1)" in text
+        assert "RaiseException('GuardianNode backend did not become healthy" not in text
+        assert "PreUpgradeBackupDir" in text
+
+
+def test_server_uninstall_removes_private_lan_firewall_rule() -> None:
+    text = SERVER_INSTALLER.read_text(encoding="utf-8")
+
+    add_rule = 'firewall add rule name=""GuardianNode Backend (Private LAN)""'
+    delete_rule = 'firewall delete rule name=""GuardianNode Backend (Private LAN)""'
+    assert add_rule in text
+    assert delete_rule in text
+    assert text.index(delete_rule) > text.index("[UninstallRun]")
 
 
 def test_child_installer_precreates_broker_secure_directories() -> None:

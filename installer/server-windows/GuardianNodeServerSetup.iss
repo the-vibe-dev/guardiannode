@@ -71,6 +71,7 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: ru
 Filename: "http://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsilent; Description: "Open Setup Wizard"
 
 [UninstallRun]
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""GuardianNode Backend (Private LAN)"""; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/End /TN GuardianNodeOllama"; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeOllama /F"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
@@ -90,6 +91,13 @@ var
   DetectedVisionModel: String;
   DetectedReasoning: String;
   UpgradeInProgress: Boolean;
+  WasExistingInstall: Boolean;
+  PreUpgradeBackupDir: String;
+
+procedure ExitProcess(ExitCode: Integer);
+  external 'ExitProcess@kernel32.dll stdcall';
+function GetCurrentProcessId: Integer;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
 
 function InstallerParam(Name: String): String;
 begin
@@ -255,16 +263,21 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  WasExistingInstall := IsExistingInstall;
+  PreUpgradeBackupDir := '';
   ExtractTemporaryFile('configure_ollama_windows.ps1');
   if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then begin
     Result := 'GuardianNode Ollama/model setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
     Exit;
   end;
 
-  if IsExistingInstall then begin
+  if WasExistingInstall then begin
     UpgradeInProgress := True;
     RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
-    if not GNCreatePreUpgradeBackup(ExpandConstant('{commonappdata}\GuardianNode')) then begin
+    if not GNCreatePreUpgradeBackup(
+      ExpandConstant('{commonappdata}\GuardianNode'),
+      ExpandConstant('{app}'),
+      PreUpgradeBackupDir) then begin
       RunHidden('{sys}\sc.exe', 'start GuardianNodeBackend');
       UpgradeInProgress := False;
       Result := 'GuardianNode could not create a pre-upgrade database/key backup. The existing server was restarted.';
@@ -357,6 +370,49 @@ begin
   WriteRuntimeConfig;
 end;
 
+procedure ScheduleFreshInstallCleanup;
+var
+  CleanupPath, Script: String;
+  ResultCode: Integer;
+begin
+  CleanupPath := ExpandConstant('{tmp}\guardiannode_failed_server_cleanup.ps1');
+  Script :=
+    'param([int]$SetupPid,[string]$AppDir,[string]$DataDir)' + #13#10 +
+    'Wait-Process -Id $SetupPid -ErrorAction SilentlyContinue' + #13#10 +
+    '$uninstaller = Join-Path $AppDir ''unins000.exe''' + #13#10 +
+    'if (Test-Path $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList ''/VERYSILENT'',''/SUPPRESSMSGBOXES'',''/NORESTART'' -Wait }' + #13#10 +
+    'Remove-Item -LiteralPath $DataDir -Recurse -Force -ErrorAction SilentlyContinue' + #13#10;
+  SaveStringToFile(CleanupPath, Script, False);
+  Exec('powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + CleanupPath + '" -SetupPid ' +
+    IntToStr(GetCurrentProcessId) + ' -AppDir "' + ExpandConstant('{app}') +
+    '" -DataDir "' + ExpandConstant('{commonappdata}\GuardianNode') + '"',
+    '', SW_HIDE, ewNoWait, ResultCode);
+end;
+
+procedure FailAndRollbackBackendHealth;
+var
+  MarkerPath: String;
+begin
+  Log('Backend readiness gate failed; restoring the pre-install state.');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
+  if WasExistingInstall and (PreUpgradeBackupDir <> '') then begin
+    if not GNRestorePreUpgradeBackup(
+      PreUpgradeBackupDir,
+      ExpandConstant('{commonappdata}\GuardianNode'),
+      ExpandConstant('{app}')) then
+      Log('ERROR: one or more pre-upgrade files could not be restored.');
+    RunHidden('{sys}\sc.exe', 'start GuardianNodeBackend');
+  end else begin
+    RunHidden('{app}\GuardianNodeBackendService.exe', 'uninstall');
+    ScheduleFreshInstallCleanup;
+  end;
+  MarkerPath := ExpandConstant('{commonappdata}\GuardianNode\logs\installer-health-failure.log');
+  ForceDirectories(ExtractFileDir(MarkerPath));
+  SaveStringToFile(MarkerPath, 'Backend readiness gate failed; installer rolled back.' + #13#10, False);
+  ExitProcess(1);
+end;
+
 procedure RequireBackendHealth;
 var
   ResultCode: Integer;
@@ -365,7 +421,7 @@ begin
     '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health/ready''; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
-    RaiseException('GuardianNode backend did not become healthy after service start.')
+    FailAndRollbackBackendHealth
   else
     UpgradeInProgress := False;
 end;

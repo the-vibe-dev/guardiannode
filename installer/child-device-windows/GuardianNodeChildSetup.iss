@@ -190,6 +190,13 @@ var
   DetectedVisionModel: String;
   DetectedReasoning: String;
   MaintenanceMarkerCreated: Boolean;
+  WasExistingInstall: Boolean;
+  PreUpgradeBackupDir: String;
+
+procedure ExitProcess(ExitCode: Integer);
+  external 'ExitProcess@kernel32.dll stdcall';
+function GetCurrentProcessId: Integer;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
 
 function HardwareProbeScript: String;
 begin
@@ -379,6 +386,66 @@ begin
   end;
 end;
 
+procedure StopFailedCandidate;
+begin
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeAgent');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeTray');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeAgent.exe /F');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeTray.exe /F');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
+end;
+
+procedure ScheduleFreshInstallCleanup;
+var
+  CleanupPath, Script: String;
+  ResultCode: Integer;
+begin
+  CleanupPath := ExpandConstant('{tmp}\guardiannode_failed_install_cleanup.ps1');
+  Script :=
+    'param([int]$SetupPid,[string]$AppDir,[string]$DataDir)' + #13#10 +
+    'Wait-Process -Id $SetupPid -ErrorAction SilentlyContinue' + #13#10 +
+    '$uninstaller = Join-Path $AppDir ''unins000.exe''' + #13#10 +
+    'if (Test-Path $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList ''/VERYSILENT'',''/SUPPRESSMSGBOXES'',''/NORESTART'' -Wait }' + #13#10 +
+    'Remove-Item -LiteralPath $DataDir -Recurse -Force -ErrorAction SilentlyContinue' + #13#10;
+  SaveStringToFile(CleanupPath, Script, False);
+  Exec('powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + CleanupPath + '" -SetupPid ' +
+    IntToStr(GetCurrentProcessId) + ' -AppDir "' + ExpandConstant('{app}') +
+    '" -DataDir "' + ExpandConstant('{commonappdata}\GuardianNode') + '"',
+    '', SW_HIDE, ewNoWait, ResultCode);
+end;
+
+procedure FailAndRollbackBackendHealth;
+var
+  MarkerPath: String;
+begin
+  Log('Backend readiness gate failed; restoring the pre-install state.');
+  StopFailedCandidate;
+  if WasExistingInstall and (PreUpgradeBackupDir <> '') then begin
+    if not GNRestorePreUpgradeBackup(
+      PreUpgradeBackupDir,
+      ExpandConstant('{commonappdata}\GuardianNode'),
+      ExpandConstant('{app}')) then
+      Log('ERROR: one or more pre-upgrade files could not be restored.');
+    ClearMaintenanceMarker;
+    RestoreExistingServices;
+  end else begin
+    RunHidden('{app}\GuardianNodeBackendService.exe', 'uninstall');
+    RunHidden('{app}\GuardianNodeBrokerService.exe', 'uninstall');
+    RunHidden('{app}\GuardianNodeWatchdogService.exe', 'uninstall');
+    RunHidden('{sys}\schtasks.exe', '/Delete /TN GuardianNodeAgent /F');
+    RunHidden('{sys}\schtasks.exe', '/Delete /TN GuardianNodeTray /F');
+    ScheduleFreshInstallCleanup;
+  end;
+  MarkerPath := ExpandConstant('{commonappdata}\GuardianNode\logs\installer-health-failure.log');
+  ForceDirectories(ExtractFileDir(MarkerPath));
+  SaveStringToFile(MarkerPath, 'Backend readiness gate failed; installer rolled back.' + #13#10, False);
+  ExitProcess(1);
+end;
+
 procedure RequireBackendHealth;
 var
   ResultCode: Integer;
@@ -387,7 +454,7 @@ begin
     '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health/ready''; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
-    RaiseException('GuardianNode backend did not become healthy after service start.');
+    FailAndRollbackBackendHealth;
 end;
 
 function ValidateInstallInputs(var ErrorMessage: String): Boolean; forward;
@@ -398,6 +465,8 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ErrorMessage: String;
 begin
+  WasExistingInstall := IsExistingInstall;
+  PreUpgradeBackupDir := '';
   if not ValidateInstallInputs(ErrorMessage) then begin
     Result := ErrorMessage;
     Exit;
@@ -440,7 +509,11 @@ begin
   RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
   RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
 
-  if not GNCreatePreUpgradeBackup(ExpandConstant('{commonappdata}\GuardianNode')) then begin
+  if WasExistingInstall and
+     (not GNCreatePreUpgradeBackup(
+       ExpandConstant('{commonappdata}\GuardianNode'),
+       ExpandConstant('{app}'),
+       PreUpgradeBackupDir)) then begin
     RestoreExistingServices;
     ClearMaintenanceMarker;
     Result := 'GuardianNode could not create a pre-upgrade database/key backup. The existing release was restarted.';
