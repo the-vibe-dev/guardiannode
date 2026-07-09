@@ -257,6 +257,13 @@ def test_server_uninstall_removes_private_lan_firewall_rule() -> None:
     assert text.index(delete_rule) > text.index("[UninstallRun]")
 
 
+def test_windows_uninstallers_remove_runtime_created_app_logs() -> None:
+    for path in (CHILD_INSTALLER, SERVER_INSTALLER):
+        text = path.read_text(encoding="utf-8")
+        assert "[UninstallDelete]" in text
+        assert 'Type: filesandordirs; Name: "{app}"' in text
+
+
 def test_child_installer_precreates_broker_secure_directories() -> None:
     text = CHILD_INSTALLER.read_text(encoding="utf-8")
 

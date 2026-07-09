@@ -31,7 +31,7 @@ foreach ($task in @("GuardianNodeAgent", "GuardianNodeTray", "GuardianNodeOllama
   schtasks.exe /Delete /TN $task /F | Out-File -Append -Encoding utf8 $LogPath
 }
 
-foreach ($proc in @("GuardianNodeAgent", "GuardianNodeTray", "GuardianNodeWatchdog", "GuardianNodeBackend", "ollama", "llama-server")) {
+foreach ($proc in @("GuardianNodeAgent", "GuardianNodeTray", "GuardianNodeWatchdog", "GuardianNodeBackend", "GuardianNodeBroker", "ollama", "llama-server")) {
   taskkill.exe /IM "$proc.exe" /F | Out-File -Append -Encoding utf8 $LogPath
 }
 
@@ -66,6 +66,8 @@ foreach ($path in $paths) {
 }
 
 netsh.exe advfirewall firewall delete rule name="GuardianNode Backend (LAN)" protocol=TCP localport=8787 |
+  Out-File -Append -Encoding utf8 $LogPath
+netsh.exe advfirewall firewall delete rule name="GuardianNode Backend (Private LAN)" |
   Out-File -Append -Encoding utf8 $LogPath
 
 Write-CleanLog "clean done $(Get-Date -Format o)"

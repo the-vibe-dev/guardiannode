@@ -77,6 +77,11 @@ Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeOllama /F"; Flags
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
 
+[UninstallDelete]
+; WinSW may create final wrapper logs while its uninstall command is exiting.
+; Remove those runtime-created files after all uninstall commands complete.
+Type: filesandordirs; Name: "{app}"
+
 [Code]
 #include "..\shared\server_env_windows.iss"
 #include "..\shared\hardware_tiers.iss"
