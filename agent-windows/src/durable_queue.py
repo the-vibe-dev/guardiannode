@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
 
@@ -137,31 +138,32 @@ class DurableScreenshotQueue:
         return conn
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS screenshot_queue (
-                    item_id TEXT PRIMARY KEY,
-                    created_at REAL NOT NULL,
-                    next_attempt_at REAL NOT NULL DEFAULT 0,
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    payload_size INTEGER NOT NULL,
-                    payload_nonce BLOB NOT NULL,
-                    payload_ciphertext BLOB NOT NULL,
-                    lease_owner TEXT,
-                    lease_until REAL NOT NULL DEFAULT 0,
-                    claimed_at REAL,
-                    last_error TEXT
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS screenshot_queue (
+                        item_id TEXT PRIMARY KEY,
+                        created_at REAL NOT NULL,
+                        next_attempt_at REAL NOT NULL DEFAULT 0,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        payload_size INTEGER NOT NULL,
+                        payload_nonce BLOB NOT NULL,
+                        payload_ciphertext BLOB NOT NULL,
+                        lease_owner TEXT,
+                        lease_until REAL NOT NULL DEFAULT 0,
+                        claimed_at REAL,
+                        last_error TEXT
+                    )
+                    """
                 )
-                """
-            )
-            self._ensure_column(conn, "lease_owner", "TEXT")
-            self._ensure_column(conn, "lease_until", "REAL NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "claimed_at", "REAL")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS ix_screenshot_queue_ready "
-                "ON screenshot_queue(next_attempt_at, lease_until, created_at)"
-            )
+                self._ensure_column(conn, "lease_owner", "TEXT")
+                self._ensure_column(conn, "lease_until", "REAL NOT NULL DEFAULT 0")
+                self._ensure_column(conn, "claimed_at", "REAL")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_screenshot_queue_ready "
+                    "ON screenshot_queue(next_attempt_at, lease_until, created_at)"
+                )
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, name: str, ddl: str) -> None:
@@ -177,17 +179,18 @@ class DurableScreenshotQueue:
         nonce = os.urandom(12)
         ciphertext = AESGCM(self._key).encrypt(nonce, plain, item_id.encode("ascii"))
         now = time.time()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO screenshot_queue (
-                    item_id, created_at, next_attempt_at, attempts,
-                    payload_size, payload_nonce, payload_ciphertext
-                ) VALUES (?, ?, 0, 0, ?, ?, ?)
-                """,
-                (item_id, now, len(plain), nonce, ciphertext),
-            )
-            self._enforce_limits(conn)
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO screenshot_queue (
+                        item_id, created_at, next_attempt_at, attempts,
+                        payload_size, payload_nonce, payload_ciphertext
+                    ) VALUES (?, ?, 0, 0, ?, ?, ?)
+                    """,
+                    (item_id, now, len(plain), nonce, ciphertext),
+                )
+                self._enforce_limits(conn)
         self._ready.set()
 
     async def get(self) -> dict:
@@ -203,43 +206,44 @@ class DurableScreenshotQueue:
 
     def _get_ready(self) -> dict | None:
         now = time.time()
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                """
-                SELECT item_id
-                FROM screenshot_queue
-                WHERE next_attempt_at <= ?
-                  AND (lease_owner IS NULL OR lease_until <= ?)
-                ORDER BY created_at ASC
-                LIMIT 1
-                """,
-                (now, now),
-            ).fetchone()
-            if row is None:
-                return None
-            item_id = row[0]
-            lease_until = now + self.lease_seconds
-            updated = conn.execute(
-                """
-                UPDATE screenshot_queue
-                SET lease_owner = ?, lease_until = ?, claimed_at = ?
-                WHERE item_id = ?
-                  AND next_attempt_at <= ?
-                  AND (lease_owner IS NULL OR lease_until <= ?)
-                """,
-                (self.lease_owner, lease_until, now, item_id, now, now),
-            ).rowcount
-            if updated != 1:
-                return None
-            row = conn.execute(
-                """
-                SELECT item_id, payload_nonce, payload_ciphertext
-                FROM screenshot_queue
-                WHERE item_id = ? AND lease_owner = ?
-                """,
-                (item_id, self.lease_owner),
-            ).fetchone()
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT item_id
+                    FROM screenshot_queue
+                    WHERE next_attempt_at <= ?
+                      AND (lease_owner IS NULL OR lease_until <= ?)
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                    """,
+                    (now, now),
+                ).fetchone()
+                if row is None:
+                    return None
+                item_id = row[0]
+                lease_until = now + self.lease_seconds
+                updated = conn.execute(
+                    """
+                    UPDATE screenshot_queue
+                    SET lease_owner = ?, lease_until = ?, claimed_at = ?
+                    WHERE item_id = ?
+                      AND next_attempt_at <= ?
+                      AND (lease_owner IS NULL OR lease_until <= ?)
+                    """,
+                    (self.lease_owner, lease_until, now, item_id, now, now),
+                ).rowcount
+                if updated != 1:
+                    return None
+                row = conn.execute(
+                    """
+                    SELECT item_id, payload_nonce, payload_ciphertext
+                    FROM screenshot_queue
+                    WHERE item_id = ? AND lease_owner = ?
+                    """,
+                    (item_id, self.lease_owner),
+                ).fetchone()
         if row is None:
             return None
         item_id, nonce, ciphertext = row
@@ -253,14 +257,15 @@ class DurableScreenshotQueue:
         lease_owner = payload.get("_queue_lease_owner")
         if not item_id:
             return
-        with self._connect() as conn:
-            if lease_owner:
-                conn.execute(
-                    "DELETE FROM screenshot_queue WHERE item_id = ? AND lease_owner = ?",
-                    (item_id, lease_owner),
-                )
-            else:
-                conn.execute("DELETE FROM screenshot_queue WHERE item_id = ?", (item_id,))
+        with closing(self._connect()) as conn:
+            with conn:
+                if lease_owner:
+                    conn.execute(
+                        "DELETE FROM screenshot_queue WHERE item_id = ? AND lease_owner = ?",
+                        (item_id, lease_owner),
+                    )
+                else:
+                    conn.execute("DELETE FROM screenshot_queue WHERE item_id = ?", (item_id,))
 
     def drop_payload(self, payload: dict, reason: str = "") -> None:
         self.ack_payload(payload)
@@ -271,39 +276,45 @@ class DurableScreenshotQueue:
         if not item_id:
             self.put_nowait(payload)
             return
-        with self._connect() as conn:
-            if lease_owner:
-                conn.execute(
-                    """
-                    UPDATE screenshot_queue
-                    SET attempts = attempts + 1,
-                        next_attempt_at = ?,
-                        lease_owner = NULL,
-                        lease_until = 0,
-                        claimed_at = NULL,
-                        last_error = ?
-                    WHERE item_id = ? AND lease_owner = ?
-                    """,
-                    (time.time() + max(0.0, delay_seconds), error[:500], item_id, lease_owner),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE screenshot_queue
-                    SET attempts = attempts + 1,
-                        next_attempt_at = ?,
-                        lease_owner = NULL,
-                        lease_until = 0,
-                        claimed_at = NULL,
-                        last_error = ?
-                    WHERE item_id = ?
-                    """,
-                    (time.time() + max(0.0, delay_seconds), error[:500], item_id),
-                )
+        with closing(self._connect()) as conn:
+            with conn:
+                if lease_owner:
+                    conn.execute(
+                        """
+                        UPDATE screenshot_queue
+                        SET attempts = attempts + 1,
+                            next_attempt_at = ?,
+                            lease_owner = NULL,
+                            lease_until = 0,
+                            claimed_at = NULL,
+                            last_error = ?
+                        WHERE item_id = ? AND lease_owner = ?
+                        """,
+                        (
+                            time.time() + max(0.0, delay_seconds),
+                            error[:500],
+                            item_id,
+                            lease_owner,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE screenshot_queue
+                        SET attempts = attempts + 1,
+                            next_attempt_at = ?,
+                            lease_owner = NULL,
+                            lease_until = 0,
+                            claimed_at = NULL,
+                            last_error = ?
+                        WHERE item_id = ?
+                        """,
+                        (time.time() + max(0.0, delay_seconds), error[:500], item_id),
+                    )
         self._ready.set()
 
     def qsize(self) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             return int(conn.execute("SELECT count(*) FROM screenshot_queue").fetchone()[0])
 
     def full(self) -> bool:

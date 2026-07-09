@@ -206,7 +206,31 @@ def test_child_installer_installs_endpoint_broker_before_session_tasks() -> None
     assert broker_start < watchdog_start
 
     assert "stop GuardianNodeBroker" in text
-    assert "delete GuardianNodeBroker" in text
+    assert 'GuardianNodeBrokerService.exe"; Parameters: "uninstall"' in text
+
+
+def test_windows_repairs_preserve_state_and_restart_previous_release_on_failure() -> None:
+    child = CHILD_INSTALLER.read_text(encoding="utf-8")
+    server = SERVER_INSTALLER.read_text(encoding="utf-8")
+    helper = (ROOT / "installer" / "shared" / "upgrade_helpers.iss").read_text(
+        encoding="utf-8"
+    )
+
+    for text in (child, server):
+        assert '#include "..\\shared\\upgrade_helpers.iss"' in text
+        assert "GNCreatePreUpgradeBackup" in text
+        assert "procedure DeinitializeSetup" in text
+        assert "/api/health/ready" in text
+        assert "ShouldInstallBackendService" in text
+
+    assert "if IsExistingInstall then begin" in child
+    assert "not FileExists(CfgPath)" in child
+    assert "Secure\\device.json" in child
+    assert "RestoreExistingServices" in child
+    assert "if FileExists(AddBackslash(DataDir) + 'server.env') then" in server
+    assert "start GuardianNodeBackend" in server
+    assert "guardiannode.db-wal" in helper
+    assert "keys" in helper
 
 
 def test_child_installer_precreates_broker_secure_directories() -> None:

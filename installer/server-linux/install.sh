@@ -381,7 +381,7 @@ wait_for_health() {
   local tries=0
   blue "Waiting for backend health check..."
   while [ $tries -lt 30 ]; do
-    if curl -sf "http://127.0.0.1:$GN_BIND_PORT/api/health" >/dev/null; then
+    if curl -sf "http://127.0.0.1:$GN_BIND_PORT/api/health/ready" >/dev/null; then
       green "Backend is healthy."
       return 0
     fi

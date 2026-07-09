@@ -214,7 +214,7 @@ def record_feedback(
 
 class ActionRequest(BaseModel):
     action: str = Field(pattern="^(notify|escalate|pause_app|block_app|delete_evidence)$")
-    note: str | None = None
+    note: str | None = Field(default=None, max_length=4096)
 
 
 @router.post("/{alert_id}/action", response_model=AlertDTO)
@@ -227,6 +227,28 @@ def take_action(
     a = db.get(Alert, alert_id)
     if a is None:
         raise HTTPException(404, "Alert not found")
+    if req.action in {"pause_app", "block_app", "delete_evidence"}:
+        # These actions were present in the early schema before an enforcement
+        # transport existed.  Never acknowledge an enforcement request that did
+        # not actually happen.
+        raise HTTPException(
+            status_code=501,
+            detail=f"Action {req.action!r} is not implemented in this release",
+        )
+    risk = db.get(RiskResult, a.risk_id)
+    if req.action == "notify":
+        from app.services import notifications
+
+        notifications.enqueue(
+            db,
+            alert=a,
+            risk_summary=risk.summary if risk is not None else "",
+            immediate=True,
+        )
+    elif req.action == "escalate":
+        a.status = "escalated"
+        a.reviewed_by = str(user.id)
+        a.reviewed_at = datetime.now(timezone.utc)
     a.action_taken = req.action
     log_action(
         db, actor=str(user.id), action="alert.action",

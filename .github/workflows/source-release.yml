@@ -55,6 +55,7 @@ jobs:
         run: |
           python scripts/check_feature_matrix.py
           python scripts/check_version_consistency.py
+          python scripts/run_classifier_benchmark.py --mode rules
           python scripts/sync_hardware_tiers.py --check
           python scripts/check_third_party_notices.py
           python scripts/check_repository_controls.py

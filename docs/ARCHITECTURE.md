@@ -78,7 +78,7 @@ The installer picks A vs B on page 2 of its wizard. C is a post-install action.
 ## Module layout (repo top level)
 
 ```
-backend/             FastAPI app, services, prompts, DB models, startup schema patches
+backend/             FastAPI app, services, prompts, DB models, Alembic migrations
 agent-windows/       Python source for the Windows agent (PyInstaller bundled at build)
 dashboard/           React + Vite + Tailwind frontend
 shared/              JSON schemas + Pydantic models used by backend + agent
@@ -91,10 +91,11 @@ docker/              Docker assets for self-hosted server
 
 ## Key design choices
 
-- **SQLite by default** — single file and easy backup for alpha deployments.
-- **Startup schema patches** — the current alpha uses SQLAlchemy `create_all()`
-  plus idempotent startup patches. Formal Alembic migrations are planned before
-  stable release.
+- **SQLite by default** — single file, online backups, and straightforward
+  integrity-checked restores for family deployments.
+- **Alembic migrations** — startup upgrades to the repository migration head,
+  creates a pre-migration SQLite backup, and fails readiness if schema state
+  diverges from that head.
 - **AES-GCM via Python `cryptography`** — well-audited, available on all platforms, no SQLCipher native build pain.
 - **Ollama HTTP API** — abstracts the runtime; we never link to model code directly. Lets us swap llama.cpp/vLLM/MLC underneath.
 - **Argon2id for passwords** — current best practice for password hashing.

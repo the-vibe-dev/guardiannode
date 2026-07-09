@@ -64,13 +64,12 @@ from app.api import (
 from app.api import (
     storage as storage_api,
 )
-from app.db.models import Base
 from app.db.session import get_engine
 from app.services import mdns_advertiser
 from app.services.device_bootstrap_token import ensure_device_bootstrap_token
 from app.services.setup_token import ensure_setup_token
 from app.settings import settings
-from app.workers import cleanup_worker, notification_worker, offline_monitor
+from app.workers import backup_worker, cleanup_worker, notification_worker, offline_monitor
 
 log = logging.getLogger("guardiannode")
 
@@ -180,83 +179,15 @@ def _setup_logging() -> None:
     )
 
 
-def _patch_schema(engine) -> None:
-    """Idempotently apply additive column changes that ``create_all`` cannot
-    perform on existing tables. SQLite supports ``ALTER TABLE ADD COLUMN``;
-    other dialects do too. Safe to run on every boot.
-    """
-    from sqlalchemy import inspect, text
-    insp = inspect(engine)
-    tables = insp.get_table_names()
-    if "child_profiles" in tables:
-        cols = {c["name"] for c in insp.get_columns("child_profiles")}
-        if "custom_watch_phrases" not in cols:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    "ALTER TABLE child_profiles ADD COLUMN custom_watch_phrases TEXT DEFAULT '[]'"
-                ))
-            log.info("schema patch: added child_profiles.custom_watch_phrases")
-        if "alert_policy" not in cols:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    "ALTER TABLE child_profiles ADD COLUMN alert_policy TEXT DEFAULT '{}'"
-                ))
-            log.info("schema patch: added child_profiles.alert_policy")
-    if "alerts" in tables:
-        cols = {c["name"] for c in insp.get_columns("alerts")}
-        patches = {
-            "dedup_key": "ALTER TABLE alerts ADD COLUMN dedup_key VARCHAR(64)",
-            "repeat_count": "ALTER TABLE alerts ADD COLUMN repeat_count INTEGER DEFAULT 1",
-            "last_seen_at": "ALTER TABLE alerts ADD COLUMN last_seen_at DATETIME",
-        }
-        for col, ddl in patches.items():
-            if col not in cols:
-                with engine.begin() as conn:
-                    conn.execute(text(ddl))
-                log.info("schema patch: added alerts.%s", col)
-    if "devices" in tables:
-        cols = {c["name"] for c in insp.get_columns("devices")}
-        if "profile_id" not in cols:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE devices ADD COLUMN profile_id VARCHAR(64)"))
-            log.info("schema patch: added devices.profile_id")
-    if "users" in tables:
-        cols = {c["name"] for c in insp.get_columns("users")}
-        if "session_revoked_at" not in cols:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN session_revoked_at DATETIME"))
-            log.info("schema patch: added users.session_revoked_at")
-        existing_indexes = {ix["name"] for ix in insp.get_indexes("users")}
-        if "ux_users_single_admin" not in existing_indexes:
-            with engine.begin() as conn:
-                if engine.dialect.name == "sqlite":
-                    conn.execute(text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_single_admin "
-                        "ON users(role) WHERE role = 'admin'"
-                    ))
-                elif engine.dialect.name == "postgresql":
-                    conn.execute(text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_single_admin "
-                        "ON users(role) WHERE role = 'admin'"
-                    ))
-            log.info("schema patch: ensured users single-admin index")
-    if "risk_results" in tables:
-        cols = {c["name"] for c in insp.get_columns("risk_results")}
-        if "classifier_status" not in cols:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    "ALTER TABLE risk_results ADD COLUMN classifier_status VARCHAR(48) DEFAULT 'ok'"
-                ))
-            log.info("schema patch: added risk_results.classifier_status")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _setup_logging()
     settings.ensure_dirs()
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    _patch_schema(engine)
+    from app.db.migrations import upgrade_schema
+
+    migration_result = upgrade_schema(engine)
+    log.info("database schema ready: %s", migration_result)
     storage_api._cleanup_abandoned_exports()
     from app.db.models import Device, User
     from app.db.session import get_sessionmaker
@@ -285,17 +216,33 @@ async def lifespan(app: FastAPI):
             mdns_advertiser.start()
         except Exception as e:  # pragma: no cover
             log.warning("mDNS start failed: %s", e)
+    from app.services import worker_supervisor
+
     background_tasks = []
     # Single-consumer screenshot classification worker (stores on arrival,
     # classifies one frame at a time so the vision model isn't hit concurrently).
     from app.services import screenshot_async
-    background_tasks.append(asyncio.create_task(screenshot_async.loop()))
+    background_tasks.append(
+        asyncio.create_task(worker_supervisor.supervise("screenshot", screenshot_async.loop))
+    )
     if settings.retention_cleanup_enabled:
-        background_tasks.append(asyncio.create_task(cleanup_worker.loop()))
+        background_tasks.append(
+            asyncio.create_task(worker_supervisor.supervise("retention", cleanup_worker.loop))
+        )
     if settings.device_offline_alert_enabled:
-        background_tasks.append(asyncio.create_task(offline_monitor.loop()))
+        background_tasks.append(
+            asyncio.create_task(worker_supervisor.supervise("offline", offline_monitor.loop))
+        )
     if settings.notification_worker_enabled:
-        background_tasks.append(asyncio.create_task(notification_worker.loop()))
+        background_tasks.append(
+            asyncio.create_task(
+                worker_supervisor.supervise("notifications", notification_worker.loop)
+            )
+        )
+    if settings.database_backup_enabled:
+        background_tasks.append(
+            asyncio.create_task(worker_supervisor.supervise("backup", backup_worker.loop))
+        )
     log.info("GuardianNode backend %s listening on %s:%s", __version__, settings.bind_host, settings.bind_port)
     if settings.binds_beyond_loopback():
         log.warning(
@@ -307,6 +254,8 @@ async def lifespan(app: FastAPI):
     finally:
         for task in background_tasks:
             task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
         try:
             mdns_advertiser.stop()
         except Exception:

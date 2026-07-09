@@ -23,6 +23,10 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 | `GUARDIANNODE_DB_URL` | `sqlite:///{data_dir}/guardiannode.db` | Postgres optional |
 | `GUARDIANNODE_LOG_LEVEL` | `INFO` | |
 | `GUARDIANNODE_DEV_MODE` | `0` | Disables auth-required for /dev endpoints |
+| `GUARDIANNODE_DATABASE_BACKUP_ENABLED` | `true` | Run integrity-checked scheduled SQLite backups |
+| `GUARDIANNODE_DATABASE_BACKUP_INTERVAL_SECONDS` | `86400` | Backup interval; minimum worker interval is 300 seconds |
+| `GUARDIANNODE_DATABASE_BACKUP_KEEP` | `7` | Scheduled generations retained |
+| `GUARDIANNODE_READINESS_MIN_FREE_BYTES` | `268435456` | Minimum free disk space required by `/api/health/ready` |
 
 After logging in as the parent, `GET /api/health/runtime-settings` returns the
 effective non-secret runtime configuration: bind host/port, classifier tier,
@@ -74,9 +78,26 @@ Via `install.sh` — registers `guardiannode-backend.service` systemd unit runni
 
 ## Database Schema
 
-The current alpha uses SQLAlchemy `Base.metadata.create_all()` plus idempotent
-startup schema patches for SQLite. Formal Alembic migrations are planned before
-stable release, but this checkout does not include an Alembic migration tree.
+Startup applies the Alembic migration tree before any worker starts. An existing
+SQLite database is backed up under `backups/pre-migration-*.sqlite3` before its
+revision changes, and startup fails if migration or post-migration integrity
+validation fails. `/api/health/ready` verifies database access, schema revision,
+encryption availability, disk headroom, and required worker supervision.
+
+Scheduled SQLite backups are stored under `backups/scheduled-*.sqlite3`. They
+are created with SQLite's online backup API, integrity checked, fsynced, and
+pruned to the configured retention count. For a manual backup or restore drill,
+stop the backend service first for restore, then run from the backend environment:
+
+```bash
+python -m app.db.maintenance backup /safe/path/guardiannode.sqlite3
+python -m app.db.maintenance integrity --database /safe/path/guardiannode.sqlite3
+python -m app.db.maintenance restore /safe/path/guardiannode.sqlite3
+```
+
+Restore validates the backup and restored copy and retains the replaced live
+database as `backups/pre-restore-*`. Database backups must be paired with the
+portable evidence-key backup described above when recovering on another machine.
 
 ## API docs
 

@@ -1,10 +1,13 @@
 """Health endpoint — no auth, useful for installer self-tests + dashboard live status."""
 from __future__ import annotations
 
+import shutil
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from app import __version__
 from app.api.deps import current_user
@@ -23,6 +26,69 @@ def health() -> dict:
         "version": __version__,
         "service": "guardiannode-backend",
     }
+
+
+@router.get("/health/live")
+def liveness() -> dict:
+    """Process liveness only; does not claim the safety pipeline is ready."""
+    return health()
+
+
+def _required_workers() -> set[str]:
+    required = {"screenshot"}
+    if settings.retention_cleanup_enabled:
+        required.add("retention")
+    if settings.device_offline_alert_enabled:
+        required.add("offline")
+    if settings.notification_worker_enabled:
+        required.add("notifications")
+    if settings.database_backup_enabled:
+        required.add("backup")
+    return required
+
+
+@router.get("/health/ready")
+def readiness():
+    """Fail closed unless storage, schema, encryption, and workers are ready."""
+    from app.db.migrations import schema_revisions
+    from app.db.session import get_engine
+    from app.services import encryption, worker_supervisor
+
+    checks: dict[str, dict] = {}
+    engine = get_engine()
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        checks["database"] = {"ok": True}
+    except Exception as exc:
+        checks["database"] = {"ok": False, "error": type(exc).__name__}
+
+    try:
+        current, head = schema_revisions(engine)
+        checks["schema"] = {"ok": current == head, "revision": current, "head": head}
+    except Exception as exc:
+        checks["schema"] = {"ok": False, "error": type(exc).__name__}
+
+    try:
+        checks["encryption"] = {"ok": encryption.current_key_version() >= 1}
+    except Exception as exc:
+        checks["encryption"] = {"ok": False, "error": type(exc).__name__}
+
+    try:
+        free = shutil.disk_usage(settings.data_dir).free
+        checks["storage"] = {
+            "ok": free >= settings.readiness_min_free_bytes,
+            "free_bytes": free,
+            "minimum_free_bytes": settings.readiness_min_free_bytes,
+        }
+    except Exception as exc:
+        checks["storage"] = {"ok": False, "error": type(exc).__name__}
+
+    workers_ok, workers = worker_supervisor.readiness(_required_workers())
+    checks["workers"] = {"ok": workers_ok, "items": workers}
+    ready = all(bool(item.get("ok")) for item in checks.values())
+    body = {"status": "ready" if ready else "not_ready", "version": __version__, "checks": checks}
+    return JSONResponse(body, status_code=200 if ready else 503)
 
 
 class RuntimeSettingsResponse(BaseModel):

@@ -25,7 +25,7 @@ require the explicit private/internal opt-in in Settings.
 |---|---|
 | Critical | Immediate via all enabled channels; optional enforcement |
 | High | Immediate via all enabled channels |
-| Medium | Bundled into daily digest unless repeated |
+| Medium | Dashboard only until digest delivery is implemented |
 | Low | Dashboard only |
 
 ## SMTP configuration
@@ -43,11 +43,10 @@ Dashboard **Settings → Notifications**:
 
 ## Daily digest
 
-Sent at parent-configured time (default 8 AM local). Includes:
-- Critical/high alerts since last digest
-- Medium alert count
-- New devices online
-- Service health status
+The dashboard stores digest preferences, but scheduled digest delivery is not
+implemented in this beta. Medium findings remain visible in the dashboard and
+are not represented as sent email/webhook notifications. The roadmap item must
+remain open until delivery scheduling, deduplication, and audit tests exist.
 
 ## Audit
 

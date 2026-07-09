@@ -139,3 +139,33 @@ def test_logout_all_revokes_other_browser_sessions(monkeypatch, tmp_path):
     response = client_b.get("/api/auth/me")
     assert response.status_code == 401
     assert response.json()["detail"] == "Session revoked"
+
+
+def test_recovery_reset_revokes_existing_browser_sessions(monkeypatch, tmp_path):
+    client_a = _client(monkeypatch, tmp_path)
+    client_b = TestClient(client_a.app, client=("127.0.0.1", 50001))
+    recovery_client = TestClient(client_a.app, client=("127.0.0.1", 50002))
+
+    assert client_b.post("/api/auth/login", json={"password": PASSWORD}).status_code == 200
+    assert client_b.get("/api/auth/me").status_code == 200
+
+    response = recovery_client.post(
+        "/api/auth/recovery-reset",
+        json={
+            "recovery_code": "one two three",
+            "new_password": "new correct horse battery",
+        },
+    )
+    assert response.status_code == 200
+    assert client_b.get("/api/auth/me").status_code == 401
+    assert client_a.get("/api/auth/me").status_code == 401
+
+
+def test_specific_lan_bind_is_reported_as_beyond_loopback(monkeypatch, tmp_path):
+    from app import settings as settings_mod
+
+    assert settings_mod.Settings(data_dir=tmp_path, bind_host="127.0.0.1").binds_beyond_loopback() is False
+    assert settings_mod.Settings(data_dir=tmp_path, bind_host="::1").binds_beyond_loopback() is False
+    assert settings_mod.Settings(data_dir=tmp_path, bind_host="localhost").binds_beyond_loopback() is False
+    assert settings_mod.Settings(data_dir=tmp_path, bind_host="192.168.1.42").binds_beyond_loopback() is True
+    assert settings_mod.Settings(data_dir=tmp_path, bind_host="guardian-server").binds_beyond_loopback() is True

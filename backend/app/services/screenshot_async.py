@@ -53,7 +53,17 @@ def _dead_letter_dir() -> Path:
 
 def get_queue() -> asyncio.Queue:
     global _queue
-    if _queue is None:
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    queue_loop = getattr(_queue, "_loop", None) if _queue is not None else None
+    if _queue is None or (
+        running_loop is not None and queue_loop is not None and queue_loop is not running_loop
+    ):
+        # A fresh ASGI lifespan may run on a new event loop (notably service
+        # restarts and concurrent TestClient qualification). Pending frames are
+        # durable on disk and loop() replays them into this new queue.
         _queue = asyncio.Queue(maxsize=_MAX_PENDING)
     return _queue
 

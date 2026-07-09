@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import Alert, ChildProfile, Device, Event, RiskResult
+from app.db.models import Alert, ChildProfile, Device, Event, NotificationJob, RiskResult
 from app.services import event_ingest
 
 
@@ -195,6 +195,49 @@ def test_alert_detail_includes_feed_context(monkeypatch, tmp_path):
     assert body["alert"]["categories"] == ["grooming", "scam"]
     assert body["alert"]["summary"] == "Trigger text detected."
     assert body["alert"]["app_name"] == "notepad.exe"
+
+
+def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        db.add(Device(device_id="action-dev", hostname="kid-pc", paired=True))
+        db.add(Event(
+            event_id="action-event", device_id="action-dev", source_type="text",
+            timestamp=datetime.now(timezone.utc),
+        ))
+        db.add(RiskResult(
+            risk_id="action-risk", event_id="action-event", risk_level="high", score=80,
+            categories=["scam"], summary="Possible scam.", evidence=[],
+            recommended_action="alert_parent", confidence=0.9,
+        ))
+        db.flush()
+        db.add(Alert(
+            alert_id="action-alert", risk_id="action-risk", device_id="action-dev",
+            severity="high",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    unsupported = client.post(
+        "/api/alerts/action-alert/action", json={"action": "pause_app"}
+    )
+    assert unsupported.status_code == 501
+
+    notified = client.post(
+        "/api/alerts/action-alert/action", json={"action": "notify"}
+    )
+    assert notified.status_code == 200
+    assert notified.json()["action_taken"] == "notify"
+
+    db = get_sessionmaker()()
+    try:
+        assert db.query(NotificationJob).filter_by(alert_id="action-alert", status="queued").count() == 1
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio

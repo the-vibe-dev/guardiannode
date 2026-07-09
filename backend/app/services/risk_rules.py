@@ -58,7 +58,10 @@ _RULES: list[Rule] = [
         category="sexual_content",
         severity="critical",
         patterns=_compile([
-            r"\b(?:send|share)\s+(?:me\s+)?(?:a\s+)?(?:pic|picture|photo|nude|nudes)\b",
+            # Generic requests for a worksheet/photo are common and benign.
+            # Require explicit nudity or a request for an image "of you".
+            r"\b(?:send|share)\s+(?:me\s+)?(?:a\s+)?(?:nude|nudes)\b",
+            r"\b(?:send|share)\s+(?:me\s+)?(?:a\s+)?(?:pic|picture|photo)\s+of\s+(?:you|yourself)\b",
             r"\bdick\s+pic\b",
             r"\bsend\s+me\s+(?:something|one)\s+(?:dirty|hot|sexy)\b",
         ]),
@@ -154,7 +157,7 @@ _RULES: list[Rule] = [
         severity="high",
         patterns=_compile([
             r"\bi\s+(?:hate|cant\s+stand)\s+(?:my\s+)?life\b",
-            r"\bi\s+want\s+to\s+(?:disappear|not\s+exist)\b",
+            r"\bi\s+want\s+to\s+(?:disappear(?!\s+into\b)|not\s+exist)\b",
             r"\beveryone\s+(?:would\s+be\s+better|hates\s+me)\b",
             r"\bcutting\s+(?:myself|again)\b",
         ]),

@@ -16,6 +16,8 @@ hiddenimports = (
 )
 
 datas = [
+    ("alembic.ini", "."),
+    ("migrations", "migrations"),
     ("app/prompts", "app/prompts"),
     ("app/data", "app/data"),
     ("app/static", "app/static"),

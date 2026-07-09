@@ -64,7 +64,7 @@ Filename: "icacls.exe"; Parameters: """{commonappdata}\GuardianNode"" /inheritan
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""GuardianNode Backend (Private LAN)"" dir=in action=allow protocol=TCP localport=8787 profile=private"; Flags: runhidden waituntilterminated; Check: ShouldEnableLanAccess
 
 ; Install backend service
-Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."
+Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."; Check: ShouldInstallBackendService
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; AfterInstall: RequireBackendHealth
 
 ; Open setup wizard
@@ -79,6 +79,7 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags
 [Code]
 #include "..\shared\server_env_windows.iss"
 #include "..\shared\hardware_tiers.iss"
+#include "..\shared\upgrade_helpers.iss"
 
 var
   HardwareSummaryPage: TOutputMsgWizardPage;
@@ -88,6 +89,7 @@ var
   DetectedTextModel: String;
   DetectedVisionModel: String;
   DetectedReasoning: String;
+  UpgradeInProgress: Boolean;
 
 function InstallerParam(Name: String): String;
 begin
@@ -222,12 +224,52 @@ begin
   Result := ResultCode = 0;
 end;
 
+function IsExistingInstall: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{commonappdata}\GuardianNode\server.env')) or
+    GNServiceExists('GuardianNodeBackend');
+end;
+
+function ShouldInstallBackendService: Boolean;
+begin
+  Result := not GNServiceExists('GuardianNodeBackend');
+end;
+
+procedure RunHidden(const ExeName, Params: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant(ExeName), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure DeinitializeSetup;
+begin
+  // Inno Setup restores replaced files on a failed install. Restart the
+  // existing registration so the previous release comes back online.
+  if UpgradeInProgress and GNServiceExists('GuardianNodeBackend') then begin
+    RunHidden('{sys}\sc.exe', 'start GuardianNodeBackend');
+    UpgradeInProgress := False;
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   ExtractTemporaryFile('configure_ollama_windows.ps1');
-  if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then
+  if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then begin
     Result := 'GuardianNode Ollama/model setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
+    Exit;
+  end;
+
+  if IsExistingInstall then begin
+    UpgradeInProgress := True;
+    RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
+    if not GNCreatePreUpgradeBackup(ExpandConstant('{commonappdata}\GuardianNode')) then begin
+      RunHidden('{sys}\sc.exe', 'start GuardianNodeBackend');
+      UpgradeInProgress := False;
+      Result := 'GuardianNode could not create a pre-upgrade database/key backup. The existing server was restarted.';
+    end;
+  end;
 end;
 
 procedure InitializeWizard;
@@ -264,6 +306,12 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
+  if IsExistingInstall and
+     ((PageID = HardwareSummaryPage.ID) or (PageID = NetworkPage.ID) or
+      (PageID = LanAddressPage.ID)) then begin
+    Result := True;
+    Exit;
+  end;
   if (PageID = LanAddressPage.ID) and (not ShouldEnableLanAccess) then
     Result := True;
 end;
@@ -284,6 +332,8 @@ var
   DataDir, BindHost, AllowedHosts: String;
 begin
   DataDir := ExpandConstant('{commonappdata}\GuardianNode');
+  if FileExists(AddBackslash(DataDir) + 'server.env') then
+    Exit;
   BindHost := '127.0.0.1';
   AllowedHosts := '127.0.0.1,localhost';
   if ShouldEnableLanAccess then begin
@@ -312,8 +362,10 @@ var
   ResultCode: Integer;
 begin
   Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health''; if ($r.StatusCode -ge 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
+    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health/ready''; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
-    RaiseException('GuardianNode backend did not become healthy after service start.');
+    RaiseException('GuardianNode backend did not become healthy after service start.')
+  else
+    UpgradeInProgress := False;
 end;

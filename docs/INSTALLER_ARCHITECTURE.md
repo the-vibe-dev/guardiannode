@@ -22,11 +22,18 @@ The shipped child installer is implemented in
 Flow:
 
 1. Choose all-in-one mode or connect to an existing server.
-2. Select the child age group.
-3. In separated mode, enter the explicit server URL and pairing code from the parent dashboard.
-4. In all-in-one mode, run a hardware probe and choose the model tier.
-5. Install the endpoint broker, agent, tray, watchdog services, optional backend, and scheduled logon tasks.
-6. Open the dashboard only when the installer knows the dashboard URL.
+2. In separated mode, enter the explicit server URL and pairing code from the parent dashboard.
+3. In all-in-one mode, run a hardware probe and choose the model tier.
+4. Install the endpoint broker, agent, tray, watchdog services, optional backend, and scheduled logon tasks.
+5. Open the dashboard only when the installer knows the dashboard URL.
+
+Repair and upgrade installs preserve the established mode, pairing identity,
+endpoint, and runtime configuration. They finish model prerequisites before
+entering maintenance mode, stop but retain existing service registrations, and
+create a timestamped database/config/key snapshot under
+`%ProgramData%\GuardianNode\backups\installer-*`. If setup aborts, Inno restores
+replaced files and the installer restarts the prior service/task set and removes
+the maintenance marker. Success requires `/api/health/ready`.
 
 The agent and tray run in the signed-in Windows user session because service
 session 0 cannot capture the desktop. The GuardianNode Endpoint Broker runs as
@@ -89,6 +96,9 @@ Flow:
 2. Install Ollama and pull the chosen model(s).
 3. Install and start the WinSW backend service.
 4. Open the local web setup wizard at `http://127.0.0.1:8787/setup`.
+
+Server repair/upgrade follows the same pre-upgrade snapshot and readiness gate,
+preserves `server.env`, and restarts the previous backend service if setup fails.
 
 Fresh installs bind to loopback and do not open a Windows Firewall LAN rule.
 First-run setup requires the one-time setup token stored in

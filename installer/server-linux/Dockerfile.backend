@@ -18,8 +18,9 @@ RUN apt-get update && \
     useradd --system --uid 10001 --gid guardiannode --home-dir /nonexistent --shell /usr/sbin/nologin guardiannode
 
 WORKDIR /app
-COPY backend/pyproject.toml backend/README.md ./backend/
+COPY backend/pyproject.toml backend/README.md backend/alembic.ini ./backend/
 COPY backend/app ./backend/app
+COPY backend/migrations ./backend/migrations
 
 RUN pip install --no-cache-dir -e ./backend
 

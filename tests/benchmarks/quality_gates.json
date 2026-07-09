@@ -1,0 +1,19 @@
+{
+  "version": "beta-1",
+  "rules": {
+    "minimum_cases": 150,
+    "minimum_precision": 0.98,
+    "minimum_recall": 0.98,
+    "minimum_critical_recall": 1.0,
+    "minimum_category_recall": 0.98,
+    "maximum_p95_latency_ms": 15.0
+  },
+  "live": {
+    "minimum_cases": 150,
+    "minimum_precision": 0.95,
+    "minimum_recall": 0.95,
+    "minimum_critical_recall": 1.0,
+    "minimum_category_recall": 0.9,
+    "maximum_p95_latency_ms": 35000.0
+  }
+}

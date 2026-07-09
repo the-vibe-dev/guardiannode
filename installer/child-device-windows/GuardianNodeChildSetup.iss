@@ -106,7 +106,7 @@ Filename: "icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r SYSTEM:(O
 Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntilterminated; StatusMsg: "Securing GuardianNode data directories..."; BeforeInstall: HardenDataAclsBeforeStart
 
 ; ---- All-in-one mode: install + start the backend service first so the agent can pair against it ----
-Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Backend service..."; Check: IsAllInOne
+Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Backend service..."; Check: ShouldInstallBackendService
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; Check: IsAllInOne; AfterInstall: RequireBackendHealth
 
 ; ---- Clean up the agent service from older installs (the agent is a scheduled
@@ -118,7 +118,7 @@ Filename: "sc.exe"; Parameters: "delete GuardianNodeAgent"; Flags: runhidden wai
 ; ---- Install + start endpoint broker before session tasks. The broker owns
 ; device credentials, durable queue, pause state, and backend upload transport. ----
 Filename: "{app}\agent\GuardianNodeBroker.exe"; Parameters: "--self-test"; Flags: runhidden waituntilterminated; StatusMsg: "Validating GuardianNode broker..."
-Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Endpoint Broker service..."
+Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Endpoint Broker service..."; Check: ShouldInstallBrokerService
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeBroker {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; StatusMsg: "Starting GuardianNode Endpoint Broker service..."
 
@@ -128,7 +128,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 
 ; ---- Install + start one watchdog service. WinSW/SCM recovery restarts the
 ; watchdog itself; the watchdog keeps the agent/tray scheduled tasks healthy. ----
-Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."
+Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."; Check: ShouldInstallWatchdogService
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
 ; ---- Restrict the service ACLs: allow-only DACL, no explicit deny ACEs ----
@@ -178,6 +178,7 @@ Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "uninstall"; Flags
 [Code]
 #include "..\shared\server_env_windows.iss"
 #include "..\shared\hardware_tiers.iss"
+#include "..\shared\upgrade_helpers.iss"
 
 var
   ModePage: TInputOptionWizardPage;
@@ -188,6 +189,7 @@ var
   DetectedTextModel: String;
   DetectedVisionModel: String;
   DetectedReasoning: String;
+  MaintenanceMarkerCreated: Boolean;
 
 function HardwareProbeScript: String;
 begin
@@ -282,6 +284,16 @@ function IsAllInOne: Boolean;
 var
   ModeParam: String;
 begin
+  if FileExists(ExpandConstant('{commonappdata}\GuardianNode\server.env')) or
+     GNServiceExists('GuardianNodeBackend') then begin
+    Result := True;
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{commonappdata}\GuardianNode\Secure\device.json')) or
+     FileExists(ExpandConstant('{commonappdata}\GuardianNode\device.json')) then begin
+    Result := False;
+    Exit;
+  end;
   ModeParam := Lowercase(InstallerParam('MODE'));
   if ModeParam = 'allinone' then begin
     Result := True;
@@ -293,6 +305,28 @@ begin
     Exit;
   end;
   Result := (ModePage.SelectedValueIndex = 0);
+end;
+
+function IsExistingInstall: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\agent\GuardianNodeAgent.exe')) or
+    FileExists(ExpandConstant('{commonappdata}\GuardianNode\agent.yaml')) or
+    GNServiceExists('GuardianNodeBroker');
+end;
+
+function ShouldInstallBackendService: Boolean;
+begin
+  Result := IsAllInOne and (not GNServiceExists('GuardianNodeBackend'));
+end;
+
+function ShouldInstallBrokerService: Boolean;
+begin
+  Result := not GNServiceExists('GuardianNodeBroker');
+end;
+
+function ShouldInstallWatchdogService: Boolean;
+begin
+  Result := not GNServiceExists('GuardianNodeWatchdog');
 end;
 
 procedure RunHidden(const ExeName, Params: String);
@@ -315,11 +349,33 @@ begin
   SetArrayLength(Lines, 1);
   Lines[0] := 'GuardianNode installer maintenance in progress.';
   SaveStringsAtomic(MaintenanceMarkerPath, Lines);
+  MaintenanceMarkerCreated := True;
 end;
 
 procedure ClearMaintenanceMarker;
 begin
   DeleteFile(MaintenanceMarkerPath);
+  MaintenanceMarkerCreated := False;
+end;
+
+procedure RestoreExistingServices;
+begin
+  if GNServiceExists('GuardianNodeBackend') then
+    RunHidden('{sys}\sc.exe', 'start GuardianNodeBackend');
+  if GNServiceExists('GuardianNodeBroker') then
+    RunHidden('{sys}\sc.exe', 'start GuardianNodeBroker');
+  if GNServiceExists('GuardianNodeWatchdog') then
+    RunHidden('{sys}\sc.exe', 'start GuardianNodeWatchdog');
+  RunHidden('{sys}\schtasks.exe', '/Run /TN GuardianNodeAgent');
+  RunHidden('{sys}\schtasks.exe', '/Run /TN GuardianNodeTray');
+end;
+
+procedure DeinitializeSetup;
+begin
+  if MaintenanceMarkerCreated then begin
+    RestoreExistingServices;
+    ClearMaintenanceMarker;
+  end;
 end;
 
 procedure RequireBackendHealth;
@@ -327,7 +383,7 @@ var
   ResultCode: Integer;
 begin
   Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health''; if ($r.StatusCode -ge 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
+    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health/ready''; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
     RaiseException('GuardianNode backend did not become healthy after service start.');
@@ -346,31 +402,9 @@ begin
     Exit;
   end;
 
-  CreateMaintenanceMarker;
-
-  // Free locked binaries before the file-copy stage so upgrades don't roll back
-  // with "file in use". Stop the legacy secondary watchdog first if present,
-  // then the current watchdog, legacy agent service, scheduled tasks, and
-  // finally the processes.
-  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog2');
-  RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog2');
-  RunHidden('{sys}\sc.exe', 'stop EndpointHealthAgent');   // legacy name (pre-rename installs)
-  RunHidden('{sys}\sc.exe', 'delete EndpointHealthAgent');
-  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog');
-  RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog');
-  RunHidden('{sys}\sc.exe', 'stop GuardianNodeAgent');
-  RunHidden('{sys}\sc.exe', 'delete GuardianNodeAgent');
-  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
-  RunHidden('{sys}\sc.exe', 'delete GuardianNodeBackend');
-  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeAgent');
-  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeTray');
-  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeOllama');
-  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeWatchdog.exe /F');
-  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeAgent.exe /F');
-  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeTray.exe /F');
-  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
-  RunHidden('{sys}\sc.exe', 'delete GuardianNodeBroker');
-  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
+  // Complete potentially slow downloads before disabling the currently
+  // installed protection stack. A failed model/OCR setup leaves the old
+  // release untouched and running.
   ExtractTemporaryFile('configure_ollama_windows.ps1');
   if IsAllInOne then begin
     if not RunOllamaSetup(ExpandConstant('{tmp}\configure_ollama_windows.ps1')) then begin
@@ -382,6 +416,34 @@ begin
       Result := 'GuardianNode OCR setup failed. Check C:\ProgramData\GuardianNode\logs\install-ollama.log.';
       Exit;
     end;
+  end;
+
+  CreateMaintenanceMarker;
+
+  // Stop current services without deleting their registrations. If a later
+  // install step fails, DeinitializeSetup can restart the previous release.
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog2');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeWatchdog2');
+  RunHidden('{sys}\sc.exe', 'stop EndpointHealthAgent');
+  RunHidden('{sys}\sc.exe', 'delete EndpointHealthAgent');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeWatchdog');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeAgent');
+  RunHidden('{sys}\sc.exe', 'delete GuardianNodeAgent');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBackend');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeAgent');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeTray');
+  RunHidden('{sys}\schtasks.exe', '/End /TN GuardianNodeOllama');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeWatchdog.exe /F');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeAgent.exe /F');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeTray.exe /F');
+  RunHidden('{sys}\sc.exe', 'stop GuardianNodeBroker');
+  RunHidden('{sys}\taskkill.exe', '/IM GuardianNodeBroker.exe /F');
+
+  if not GNCreatePreUpgradeBackup(ExpandConstant('{commonappdata}\GuardianNode')) then begin
+    RestoreExistingServices;
+    ClearMaintenanceMarker;
+    Result := 'GuardianNode could not create a pre-upgrade database/key backup. The existing release was restarted.';
+    Exit;
   end;
   Result := '';
 end;
@@ -595,6 +657,15 @@ function ValidateInstallInputs(var ErrorMessage: String): Boolean;
 var
   Mode, ServerUrl, PairCode: String;
 begin
+  // Repair/upgrade installs retain their established mode, endpoint, and
+  // credentials. Requiring a new pairing code here would make unattended
+  // upgrades impossible and could accidentally replace a working identity.
+  if IsExistingInstall then begin
+    ErrorMessage := '';
+    Result := True;
+    Exit;
+  end;
+
   Result := False;
   ErrorMessage := '';
   Mode := Lowercase(InstallerParam('MODE'));
@@ -680,6 +751,8 @@ begin
   ModePage.SelectedValueIndex := 0;
   if (ModeParam = 'child') or (ServerUrlParam <> '') or (PairCodeParam <> '') then
     ModePage.SelectedValueIndex := 1;
+  if IsExistingInstall and (not IsAllInOne) then
+    ModePage.SelectedValueIndex := 1;
 
   // -- Server connection (only used in separated mode) --
   ServerConnectionPage := CreateInputQueryPage(ModePage.ID,
@@ -703,6 +776,12 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
+  if IsExistingInstall and
+     ((PageID = ModePage.ID) or (PageID = ServerConnectionPage.ID) or
+      (PageID = HardwareSummaryPage.ID)) then begin
+    Result := True;
+    Exit;
+  end;
   if (PageID = ServerConnectionPage.ID) and (ModePage.SelectedValueIndex = 0) then
     Result := True;
   if (PageID = HardwareSummaryPage.ID) and (ModePage.SelectedValueIndex = 1) then
@@ -733,7 +812,8 @@ begin
   ServerUrl := Trim(ServerConnectionPage.Values[0]);
   ServerDataDir := ExpandConstant('{commonappdata}\GuardianNode');
 
-  if IsAllInOne then
+  if IsAllInOne and
+     (not FileExists(AddBackslash(ServerDataDir) + 'server.env')) then
     WriteGuardianNodeServerEnv(
       ServerDataDir,
       DetectedTier,
@@ -742,21 +822,24 @@ begin
       'http://127.0.0.1:11434'
     );
 
-  // Write the agent config based on wizard inputs
+  // Preserve an existing endpoint and local tuning during repair/upgrade.
+  // First installs still receive a complete, atomic default configuration.
   CfgPath := AddBackslash(ServerDataDir) + 'agent.yaml';
-  SetArrayLength(CfgFile, 8);
-  if IsAllInOne or (ServerUrl = '') then
-    CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
-  else
-    CfgFile[0] := 'backend_url: ' + ServerUrl;
-  CfgFile[1] := 'ocr_engine: tesseract';
-  CfgFile[2] := 'ocr_cadence_seconds: 5';
-  CfgFile[3] := 'ocr_min_confidence: 0.5';
-  CfgFile[4] := 'phash_threshold: 2';
-  CfgFile[5] := 'log_level: INFO';
-  CfgFile[6] := 'dry_run: false';
-  CfgFile[7] := 'full_screen_capture_enabled: true';
-  SaveStringsAtomic(CfgPath, CfgFile);
+  if not FileExists(CfgPath) then begin
+    SetArrayLength(CfgFile, 8);
+    if IsAllInOne or (ServerUrl = '') then
+      CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
+    else
+      CfgFile[0] := 'backend_url: ' + ServerUrl;
+    CfgFile[1] := 'ocr_engine: tesseract';
+    CfgFile[2] := 'ocr_cadence_seconds: 5';
+    CfgFile[3] := 'ocr_min_confidence: 0.5';
+    CfgFile[4] := 'phash_threshold: 2';
+    CfgFile[5] := 'log_level: INFO';
+    CfgFile[6] := 'dry_run: false';
+    CfgFile[7] := 'full_screen_capture_enabled: true';
+    SaveStringsAtomic(CfgPath, CfgFile);
+  end;
 
   // Drop the pending pairing handshake for the agent to complete on first
   // start. All-in-one uses a loopback-only device bootstrap token generated
@@ -764,13 +847,17 @@ begin
   // the parent-issued 6-digit code. The agent deletes this file once pairing
   // succeeds.
   PairPath := ExpandConstant('{commonappdata}\GuardianNode\pending_pairing.json');
-  SetArrayLength(PairFile, 1);
-  if IsAllInOne then
-    PairFile[0] := '{"backend_url": "http://127.0.0.1:8787", "local_bootstrap": true}'
-  else
-    PairFile[0] := '{"backend_url": "' + JsonEscape(ServerUrl) + '", "code": "' +
-      JsonEscape(Trim(ServerConnectionPage.Values[1])) + '"}';
-  SaveStringsAtomic(PairPath, PairFile);
+  if (not FileExists(PairPath)) and
+     (not FileExists(AddBackslash(ServerDataDir) + 'Secure\device.json')) and
+     (not FileExists(AddBackslash(ServerDataDir) + 'device.json')) then begin
+    SetArrayLength(PairFile, 1);
+    if IsAllInOne then
+      PairFile[0] := '{"backend_url": "http://127.0.0.1:8787", "local_bootstrap": true}'
+    else
+      PairFile[0] := '{"backend_url": "' + JsonEscape(ServerUrl) + '", "code": "' +
+        JsonEscape(Trim(ServerConnectionPage.Values[1])) + '"}';
+    SaveStringsAtomic(PairPath, PairFile);
+  end;
 end;
 
 procedure WriteRuntimeConfigBeforeStart;

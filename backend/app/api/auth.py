@@ -175,12 +175,17 @@ def recovery_reset(req: RecoveryResetRequest, request: Request, db: Session = De
         raise HTTPException(status_code=401, detail="Invalid recovery code")
     rate_limit.reset("recovery", _client_ip(request))
     user.password_hash = hash_password(req.new_password)
+    # A recovery reset is an account-compromise boundary.  Rotating only the
+    # password would leave every previously signed browser session valid until
+    # its normal expiry, including the session that prompted the reset.
+    user.session_revoked_at = datetime.fromtimestamp(time.time(), UTC)
     log_action(
         db, actor=str(user.id), action="auth.recovery_reset.success",
         target=str(user.id),
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
+    request.session.clear()
     return {"ok": True}
 
 

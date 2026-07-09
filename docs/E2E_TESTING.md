@@ -37,9 +37,21 @@ cd backend
 pytest ../tests/e2e/
 ```
 
-With real Ollama:
+The deterministic beta classifier gate expands the versioned scenario corpus to
+196 context variants and enforces precision, recall, critical-risk recall,
+category recall, and p95 latency:
+
 ```bash
-GUARDIANNODE_E2E_REAL_OLLAMA=1 pytest ../tests/e2e/
+python scripts/run_classifier_benchmark.py --mode rules
+```
+
+With real Ollama available, run the same corpus through the complete text
+classifier. This is the hardware release-acceptance gate and writes an optional
+machine-readable report:
+
+```bash
+python scripts/run_classifier_benchmark.py --mode live \
+  --output build/classifier-benchmark-live.json
 ```
 
 ## Manual acceptance test (release gate)

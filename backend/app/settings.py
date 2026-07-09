@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     device_offline_check_interval_seconds: int = 60
     notification_worker_enabled: bool = True
     notification_worker_interval_seconds: int = 10
+    database_backup_enabled: bool = True
+    database_backup_interval_seconds: int = 24 * 60 * 60
+    database_backup_keep: int = 7
+    readiness_min_free_bytes: int = 256 * 1024 * 1024
     # Safety cap on the long edge (px) sent to the vision model. qwen3-vl:8b has
     # ~4.6 GB headroom on a 12 GB card, so full-res frames OCR best and are left
     # untouched; this only shrinks enormous 4K+ frames. Downscaling degrades OCR
@@ -112,6 +116,10 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
+
+    @property
+    def backups_dir(self) -> Path:
+        return self.data_dir / "backups"
 
     @property
     def db_url_resolved(self) -> str:
@@ -148,12 +156,21 @@ class Settings(BaseSettings):
         if not host:
             return True
         try:
-            return ipaddress.ip_address(host).is_unspecified
+            # Any concrete LAN/WAN address is still beyond loopback.  Hostnames
+            # are conservatively treated as exposed because they may resolve to
+            # a non-loopback interface at runtime.
+            return not ipaddress.ip_address(host).is_loopback
         except ValueError:
-            return False
+            return host.lower() != "localhost"
 
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.keys_dir, self.evidence_dir, self.logs_dir):
+        for d in (
+            self.data_dir,
+            self.keys_dir,
+            self.evidence_dir,
+            self.logs_dir,
+            self.backups_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
 
 
