@@ -29,6 +29,8 @@ def test_acl_qualification_script_checks_broker_owned_sensitive_state() -> None:
     assert "S-1-5-18" in text  # LocalSystem
     assert "S-1-5-32-544" in text  # Builtin Administrators
     assert "FileSystemRights]::FullControl" in text
+    assert "$requiredProtectedPaths" in text
+    assert "$optionalProtectedPaths" in text
     assert "throw" in text
 
 

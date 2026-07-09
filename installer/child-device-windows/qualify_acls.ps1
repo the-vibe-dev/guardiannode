@@ -14,21 +14,29 @@ $lowPrivilegeSids = @(
     "S-1-5-32-545"   # Builtin Users
 )
 
-$protectedPaths = @(
+$requiredProtectedPaths = @(
     "$DataRoot\Secure",
     "$DataRoot\Secure\device.json",
-    "$DataRoot\Secure\parent.json",
-    "$DataRoot\Secure\pause_state.json",
-    "$DataRoot\Secure\maintenance.flag",
     "$DataRoot\AgentSecure",
     "$DataRoot\AgentSecure\queue.sqlite",
     "$DataRoot\AgentSecure\queue.key",
     "$DataRoot\keys\setup_token.json",
     "$DataRoot\keys\device_bootstrap_token.json",
-    "$DataRoot\keys\master.key",
     "$DataRoot\keys\master.key.dpapi",
     "$DataRoot\server.env"
 )
+
+# These files are sensitive when present, but are created only after the
+# corresponding feature is used (parent broker auth, pause, installer
+# maintenance) or retained solely for an upgraded legacy key.
+$optionalProtectedPaths = @(
+    "$DataRoot\Secure\parent.json",
+    "$DataRoot\Secure\pause_state.json",
+    "$DataRoot\Secure\maintenance.flag",
+    "$DataRoot\keys\master.key"
+)
+
+$protectedPaths = @($requiredProtectedPaths) + @($optionalProtectedPaths)
 
 $services = @(
     "GuardianNodeBroker",
@@ -161,8 +169,13 @@ foreach ($task in $tasks) {
 }
 
 Write-Section "Asserting protected filesystem ACLs"
-foreach ($path in $protectedPaths) {
+foreach ($path in $requiredProtectedPaths) {
     Assert-ProtectedPath -Path $path
+}
+foreach ($path in $optionalProtectedPaths) {
+    if (Test-Path -LiteralPath $path) {
+        Assert-ProtectedPath -Path $path
+    }
 }
 
 Write-Section "Asserting service DACLs"
