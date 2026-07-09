@@ -108,6 +108,11 @@ def backup_database(destination: Path, *, source: Path | None = None, overwrite:
             with closing(sqlite3.connect(tmp_path)) as dst:
                 src.backup(dst)
                 dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                # The backup API copies the source database header, including
+                # WAL journal mode. Convert the finished snapshot to DELETE so
+                # it is a single portable file and does not leave temporary
+                # -wal/-shm sidecars beside an otherwise atomic backup.
+                dst.execute("PRAGMA journal_mode=DELETE")
                 dst.commit()
         result = integrity_check(tmp_path)
         if not result.ok:
@@ -125,6 +130,9 @@ def backup_database(destination: Path, *, source: Path | None = None, overwrite:
     except Exception:
         _quarantine_file(tmp_path)
         raise
+    finally:
+        for suffix in ("-wal", "-shm"):
+            tmp_path.with_name(tmp_path.name + suffix).unlink(missing_ok=True)
     return destination
 
 

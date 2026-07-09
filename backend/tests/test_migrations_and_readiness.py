@@ -82,6 +82,8 @@ def test_scheduled_backup_is_restorable_and_prunes_old_generations(monkeypatch, 
     scheduled = backup_worker.run_once()
     assert scheduled is not None and scheduled.is_file()
     assert list(settings_mod.settings.backups_dir.glob("scheduled-*.sqlite3")) == [scheduled]
+    assert not list(settings_mod.settings.backups_dir.glob(".*.partial-wal"))
+    assert not list(settings_mod.settings.backups_dir.glob(".*.partial-shm"))
 
     restored = tmp_path / "restore-drill.sqlite3"
     restore_database(scheduled, destination=restored)
