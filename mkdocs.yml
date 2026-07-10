@@ -87,6 +87,7 @@ nav:
       - End-to-end testing: E2E_TESTING.md
       - Reproducible builds: REPRODUCIBLE_BUILDS.md
       - Windows source-agent validation: release-validation/windows-source-agent-2026-06-22.md
+      - Windows beta qualification: release-validation/windows-beta-2026-07-09.md
       - Windows 11 alpha installer validation: release/windows-11-alpha-installer-validation.md
       - Repository controls: REPOSITORY_CONTROLS.md
       - Launch messaging: LAUNCH_MESSAGING.md
