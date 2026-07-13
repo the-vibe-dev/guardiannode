@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep
+from app.api.deps import current_user, get_db_dep, require_recent_auth
 from app.db.models import Policy, User
 from app.services.audit import log_action
 
@@ -65,6 +65,7 @@ def create_policy(
     req: CreatePolicyRequest,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     p = Policy(policy_id=str(ULID()), profile_id=req.profile_id, config_json=req.config)
     db.add(p)
@@ -105,6 +106,7 @@ def update_effective_policy(
     req: EffectivePolicyUpdateRequest,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     p = _effective_policy(db, profile_id)
     p.config_json = req.config
@@ -123,6 +125,7 @@ def update_policy(
     req: UpdatePolicyRequest,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     p = db.get(Policy, policy_id)
     if p is None:

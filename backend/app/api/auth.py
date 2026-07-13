@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db_dep
+from app import settings as settings_mod
+from app.api.deps import current_user, get_db_dep, require_recent_auth
 from app.db.models import User
 from app.db.session import begin_immediate_if_sqlite
 from app.services import rate_limit
@@ -54,6 +55,7 @@ def _mark_session_authenticated(request: Request, user: User) -> None:
     request.session["user_id"] = user.id
     request.session["login_at"] = now
     request.session["reauth_at"] = now
+    request.session["reauth_method"] = "password"
     request.session["last_activity_at"] = now
     user.last_login = datetime.fromtimestamp(now, UTC)
 
@@ -109,6 +111,7 @@ def reauth(req: LoginRequest, request: Request, db: Session = Depends(get_db_dep
         raise HTTPException(status_code=401, detail="Invalid credentials")
     rate_limit.reset("reauth", _client_ip(request))
     request.session["reauth_at"] = time.time()
+    request.session["reauth_method"] = "password"
     log_action(
         db,
         actor=str(user.id),
@@ -117,7 +120,27 @@ def reauth(req: LoginRequest, request: Request, db: Session = Depends(get_db_dep
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
-    return {"ok": True}
+    return {
+        "ok": True,
+        "method": "password",
+        "verified_at": request.session["reauth_at"],
+    }
+
+
+@router.get("/step-up/status")
+def step_up_status(request: Request, _: User = Depends(current_user)):
+    verified_at = request.session.get("reauth_at") or request.session.get("login_at")
+    try:
+        age_seconds = max(0, time.time() - float(str(verified_at)))
+    except (TypeError, ValueError):
+        age_seconds = None
+    return {
+        "method": request.session.get("reauth_method", "password"),
+        "verified_at": verified_at,
+        "age_seconds": age_seconds,
+        "standard_valid": age_seconds is not None and age_seconds <= settings_mod.settings.recent_auth_timeout_seconds,
+        "critical_valid": age_seconds is not None and age_seconds <= settings_mod.settings.critical_auth_timeout_seconds,
+    }
 
 
 @router.post("/logout")
@@ -135,6 +158,7 @@ def logout_all(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     user.session_revoked_at = datetime.fromtimestamp(time.time(), UTC)
     log_action(
@@ -147,6 +171,39 @@ def logout_all(
     db.commit()
     request.session.clear()
     return {"ok": True}
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=10, max_length=256)
+
+
+@router.post("/change-password")
+def change_password(
+    req: PasswordChangeRequest,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+):
+    _enforce_rate_limit("reauth", request)
+    if not verify_password(req.current_password, user.password_hash):
+        rate_limit.record_failure("reauth", _client_ip(request))
+        log_action(
+            db, actor=str(user.id), action="auth.password_change.denied",
+            target=str(user.id), source_ip=request.client.host if request.client else None,
+        )
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid current password")
+    rate_limit.reset("reauth", _client_ip(request))
+    user.password_hash = hash_password(req.new_password)
+    user.session_revoked_at = datetime.now(UTC)
+    log_action(
+        db, actor=str(user.id), action="auth.password_change.success",
+        target=str(user.id), source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    request.session.clear()
+    return {"ok": True, "sessions_revoked": True}
 
 
 @router.get("/me", response_model=LoginResponse)

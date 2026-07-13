@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_device, current_user, get_db_dep
+from app.api.deps import current_device, current_user, get_db_dep, require_recent_auth
 from app.db.models import Device, User
 from app.db.session import begin_immediate_if_sqlite
 from app.services import device_tokens, rate_limit
@@ -106,6 +106,7 @@ def pair_start(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     code, expires_at = pairing_svc.issue(db)
     log_action(
@@ -350,6 +351,7 @@ def revoke_device(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     device = db.get(Device, device_id)
     if device is None:

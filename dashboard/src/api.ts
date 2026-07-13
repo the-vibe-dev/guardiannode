@@ -32,13 +32,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers,
   });
   if (res.status === 403 && mutating) {
-    cachedCsrfToken = null;
-    headers.set("X-CSRF-Token", await getCsrfToken());
-    res = await fetch(API_BASE + path, {
-      ...init,
-      credentials: "same-origin",
-      headers,
-    });
+    const challenge = await res.clone().json().catch(() => null);
+    if (challenge?.detail?.code === "step_up_required") {
+      const password = window.prompt(
+        challenge.detail.level === "critical"
+          ? "Confirm your password for this critical security action."
+          : "Confirm your password to continue.",
+      );
+      if (password === null) throw new Error("Recent authentication required");
+      await request<{ ok: boolean }>("/auth/reauth", {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      });
+    } else {
+      cachedCsrfToken = null;
+      headers.set("X-CSRF-Token", await getCsrfToken());
+    }
+    res = await fetch(API_BASE + path, { ...init, credentials: "same-origin", headers });
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");

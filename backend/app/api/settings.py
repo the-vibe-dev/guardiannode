@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db_dep, require_recent_auth
+from app.api.deps import current_user, get_db_dep, require_critical_auth, require_recent_auth
 from app.db.models import BackupRun, Setting, User
 from app.services import encryption, retention
 from app.services.audit import log_action
@@ -103,6 +103,7 @@ def update_notifications(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     existing = _get_json(db, "notification_settings", {})
     data = req.model_dump(exclude={"password", "clear_password"})
@@ -184,13 +185,9 @@ def update_retention(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     data = req.model_dump()
-    if data["incremental_evidence"]:
-        raise HTTPException(
-            status_code=422,
-            detail="Incremental evidence chains are not enabled in this release; use complete backups",
-        )
     _set_json(db, "retention_settings", data)
     log_action(
         db,
@@ -275,11 +272,16 @@ def update_backups(
     request: Request,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
-    _: None = Depends(require_recent_auth),
+    _: None = Depends(require_critical_auth),
 ):
     from cryptography.hazmat.primitives import serialization
 
     data = req.model_dump()
+    if data["incremental_evidence"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Incremental evidence chains are not enabled in this release; use complete backups",
+        )
     if any(not item or len(item) > 1024 for item in data["hook_argv"]):
         raise HTTPException(status_code=422, detail="Backup hook arguments must be 1-1024 characters")
     if data["recipient_public_key"]:

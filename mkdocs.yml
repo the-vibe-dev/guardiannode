@@ -98,5 +98,6 @@ nav:
   - Safety & Trust:
       - Safety boundaries: SAFETY_BOUNDARIES.md
       - Threat model: THREAT_MODEL.md
+      - Administrative security: ADMIN_SECURITY.md
   - Roadmap: ROADMAP.md
   - Support: SUPPORT.md

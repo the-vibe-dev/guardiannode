@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     session_idle_timeout_seconds: int = 60 * 60
     session_absolute_timeout_seconds: int = 7 * 24 * 60 * 60
     recent_auth_timeout_seconds: int = 15 * 60
+    critical_auth_timeout_seconds: int = 5 * 60
     setup_token_ttl_seconds: int = 24 * 60 * 60
     https_only_cookies: bool = False
     mdns_enabled: bool = True

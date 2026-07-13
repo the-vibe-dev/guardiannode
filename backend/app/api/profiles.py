@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep
+from app.api.deps import current_user, get_db_dep, require_recent_auth
 from app.db.models import Alert, ChildProfile, ChildRequest, Device, Event, Policy, User
 from app.services import profile_policy
 from app.services.audit import log_action
@@ -112,6 +112,7 @@ def update_profile(
     req: UpdateProfileRequest,
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
 ):
     p = db.get(ChildProfile, profile_id)
     if p is None:

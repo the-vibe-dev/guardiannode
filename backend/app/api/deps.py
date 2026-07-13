@@ -13,6 +13,7 @@ from app import settings as settings_mod
 from app.db.models import Device, User
 from app.db.session import get_db
 from app.services import device_tokens, rate_limit
+from app.services.audit import log_action
 
 log = logging.getLogger(__name__)
 
@@ -71,18 +72,62 @@ def current_user(request: Request, db: Session = Depends(get_db_dep)) -> User:
     return user
 
 
-def require_recent_auth(request: Request, _: User = Depends(current_user)) -> None:
-    """Require a fresh parent authentication for high-impact browser actions."""
+def _require_step_up(
+    request: Request,
+    db: Session,
+    user: User,
+    *,
+    level: str,
+    timeout_seconds: int,
+) -> None:
     ts = request.session.get("reauth_at") or request.session.get("login_at")
     try:
         authenticated_at = float(str(ts))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=403, detail="Recent authentication required") from None
-    if settings_mod.settings.recent_auth_timeout_seconds > 0:
-        if time.time() - authenticated_at > settings_mod.settings.recent_auth_timeout_seconds:
-            raise HTTPException(status_code=403, detail="Recent authentication required")
-    elif settings_mod.settings.recent_auth_timeout_seconds == 0:
-        raise HTTPException(status_code=403, detail="Recent authentication required")
+        authenticated_at = 0
+    if timeout_seconds > 0 and time.time() - authenticated_at <= timeout_seconds:
+        return
+    log_action(
+        db,
+        actor=str(user.id),
+        action="auth.step_up.denied",
+        details={"level": level, "path": request.url.path, "method": request.method},
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "step_up_required",
+            "level": level,
+            "method": "password",
+            "action": f"{request.method} {request.url.path}",
+        },
+    )
+
+
+def require_recent_auth(
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+) -> None:
+    """Require standard recent parent authentication for a sensitive action."""
+    _require_step_up(
+        request, db, user, level="standard",
+        timeout_seconds=settings_mod.settings.recent_auth_timeout_seconds,
+    )
+
+
+def require_critical_auth(
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+) -> None:
+    """Require the shorter key/transport/update authentication window."""
+    _require_step_up(
+        request, db, user, level="critical",
+        timeout_seconds=settings_mod.settings.critical_auth_timeout_seconds,
+    )
 
 
 def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Device:

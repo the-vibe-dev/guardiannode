@@ -99,7 +99,10 @@ def test_recent_auth_timeout_uses_configured_window(monkeypatch, tmp_path):
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
-    assert response.json()["detail"] == "Recent authentication required"
+    assert response.json()["detail"]["code"] == "step_up_required"
+    assert response.json()["detail"]["level"] == "standard"
+    audit = client.get("/api/audit").json()
+    assert any(row["action"] == "auth.step_up.denied" for row in audit)
 
     csrf = _csrf(client)
     response = client.post(
@@ -159,6 +162,22 @@ def test_recovery_reset_revokes_existing_browser_sessions(monkeypatch, tmp_path)
     assert response.status_code == 200
     assert client_b.get("/api/auth/me").status_code == 401
     assert client_a.get("/api/auth/me").status_code == 401
+
+
+def test_password_change_revokes_all_sessions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    csrf = _csrf(client)
+    response = client.post(
+        "/api/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": "replacement horse battery"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200
+    assert response.json()["sessions_revoked"] is True
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.post(
+        "/api/auth/login", json={"password": "replacement horse battery"}
+    ).status_code == 200
 
 
 def test_specific_lan_bind_is_reported_as_beyond_loopback(monkeypatch, tmp_path):
