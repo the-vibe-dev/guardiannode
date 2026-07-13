@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import multiprocessing
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import httpx
@@ -77,8 +78,9 @@ def test_durable_queue_survives_process_restart_and_retry_delay(tmp_path):
     assert restarted.qsize() == 1
     assert restarted._get_ready() is None
 
-    with sqlite3.connect(tmp_path / "queue.sqlite") as conn:
-        conn.execute("UPDATE screenshot_queue SET next_attempt_at = 0")
+    with closing(sqlite3.connect(tmp_path / "queue.sqlite")) as conn:
+        with conn:
+            conn.execute("UPDATE screenshot_queue SET next_attempt_at = 0")
     recovered = asyncio.run(restarted.get())
     assert recovered["image_bytes"] == b"frame"
     assert recovered["idempotency_key"] == payload["idempotency_key"]
@@ -107,8 +109,9 @@ def test_durable_queue_recovers_expired_lease(tmp_path):
     q2 = _queue(tmp_path, lease_seconds=30)
     assert q2._get_ready() is None
 
-    with sqlite3.connect(tmp_path / "queue.sqlite") as conn:
-        conn.execute("UPDATE screenshot_queue SET lease_until = 0")
+    with closing(sqlite3.connect(tmp_path / "queue.sqlite")) as conn:
+        with conn:
+            conn.execute("UPDATE screenshot_queue SET lease_until = 0")
 
     recovered = q2._get_ready()
     assert recovered is not None

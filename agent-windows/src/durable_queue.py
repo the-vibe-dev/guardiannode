@@ -123,19 +123,22 @@ class DurableScreenshotQueue:
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout=30000")
-        deadline = time.monotonic() + 5.0
-        while True:
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                break
-            except sqlite3.OperationalError as exc:
-                if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
-                    conn.close()
-                    raise
-                time.sleep(0.05)
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        try:
+            conn.execute("PRAGMA busy_timeout=30000")
+            deadline = time.monotonic() + 5.0
+            while True:
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
+            conn.execute("PRAGMA synchronous=NORMAL")
+            return conn
+        except BaseException:
+            conn.close()
+            raise
 
     def _init_db(self) -> None:
         with closing(self._connect()) as conn:
