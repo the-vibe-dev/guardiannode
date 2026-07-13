@@ -45,23 +45,19 @@ Wipes are real deletions, not soft-deletes.
 
 ## Export format
 
-`POST /api/storage/export` writes `<data>/exports/<id>.gnexport` — a chunked
-AES-256-GCM encrypted container around a ZIP containing:
+`POST /api/storage/export` writes `<data>/exports/<id>.gna` — a complete,
+same-instance GuardianNode Archive Format v1 snapshot containing an exact
+SQLite backup, lossless typed records, encrypted evidence, configuration,
+component versions, and a signed manifest covering every file and hash.
 
-- `manifest.json` — export id, timestamp, format (`guardiannode-full-export-v3`), blob counts
-- `alerts.jsonl`, `events.jsonl`, `risk_results.jsonl`, `audit_logs.jsonl`
-- `evidence_manifest.json` — one entry per evidence blob (id, sha256, size, source event)
-- `evidence/<blob_id>.enc` — the actual encrypted screenshot evidence files,
-  byte-for-byte as stored on disk
-
-The export is **local and parent-controlled**. Decrypting it (and the inner
-`evidence/*.enc` files) requires this server's master key
-(`<data>/keys/master.key`); each blob uses its `blob_id` as AES-GCM associated
-data. There is no cloud upload and no recipient-key scheme. The dashboard
-creates the export on the server filesystem, lists existing `.gnexport` files,
-and downloads them through the authenticated
-`GET /api/storage/exports/<id>/download` endpoint. Deleting an export removes
-only that `.gnexport` file and writes an audit-log entry.
+The dashboard snapshot is **local and parent-controlled** and remains tied to
+the instance master key. Use `guardiannode-archive create` with a passphrase or
+offline recovery public key when a clean-host portable archive is required.
+The dashboard lists `.gna` files and any legacy `.gnexport` files and downloads
+them through the authenticated `GET /api/storage/exports/<id>/download`
+endpoint. Deleting an export removes only the selected archive and writes an
+audit-log entry. Legacy `.gnexport` files are incomplete and are supported only
+for download or deletion.
 
 ## Audit
 

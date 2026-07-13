@@ -245,11 +245,11 @@ export default function Settings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => run("export", api.exportStorage, "Encrypted .gnexport created.")}
+            onClick={() => run("export", api.exportStorage, "Complete encrypted .gna snapshot created.")}
             disabled={busy !== null}
             className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
           >
-            Export encrypted .gnexport
+            Create complete .gna snapshot
           </button>
           <button
             onClick={() => {

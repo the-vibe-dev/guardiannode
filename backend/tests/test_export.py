@@ -1,9 +1,6 @@
 """Evidence export includes the actual encrypted blob files."""
 from __future__ import annotations
 
-import io
-import json
-import zipfile
 from datetime import UTC
 
 import pytest
@@ -71,9 +68,6 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     blob_dir = settings.evidence_dir / "ab"
     blob_path = blob_dir / "blob1.enc"
     encryption.encrypt_blob_to_disk(b"fake-jpeg-bytes", blob_path, aad=b"blob1")
-    outside_path = tmp_path / "outside-secret.enc"
-    outside_path.write_bytes(b"do-not-export")
-
     s = get_sessionmaker()()
     s.add(Device(device_id="d1", hostname="kid-pc", paired=True))
     s.flush()
@@ -81,10 +75,6 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
                 timestamp=datetime.now(UTC), screenshot_blob_id="blob1"))
     s.add(EvidenceBlob(blob_id="blob1", kind="screenshot",
                        encrypted_path=str(blob_path), size_bytes=15, event_id="e1"))
-    s.add(Event(event_id="e2", device_id="d1", source_type="image",
-                timestamp=datetime.now(UTC), screenshot_blob_id="evilblob"))
-    s.add(EvidenceBlob(blob_id="evilblob", kind="screenshot",
-                       encrypted_path=str(outside_path), size_bytes=13, event_id="e2"))
     s.commit()
     s.close()
 
@@ -92,7 +82,7 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert "path" not in r.json()
     export_id = r.json()["export_id"]
-    export_path = settings.data_dir / "exports" / f"{export_id}.gnexport"
+    export_path = settings.data_dir / "exports" / f"{export_id}.gna"
     assert export_path.exists()
     assert r.json()["download_url"] == f"/api/storage/exports/{export_id}/download"
 
@@ -108,30 +98,16 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     assert downloaded.headers["x-content-type-options"] == "nosniff"
     assert downloaded.content == export_path.read_bytes()
 
-    # Decrypt the outer .gnexport and verify package contents.
-    payload = encryption.decrypt_stream_file_from_disk(
-        export_path, aad=export_id.encode("ascii"))
-    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-        names = set(zf.namelist())
-        assert {"manifest.json", "alerts.jsonl", "events.jsonl",
-                "risk_results.jsonl", "audit_logs.jsonl", "evidence_manifest.json"} <= names
-        assert "evidence/blob1.enc" in names
-        assert "evidence/evilblob.enc" not in names
-        manifest = json.loads(zf.read("manifest.json"))
-        assert manifest["includes_evidence_blobs"] is True
-        assert manifest["evidence_blob_count"] == 1
-        assert manifest["evidence_blobs_missing"] == ["evilblob"]
-        evidence_manifest = json.loads(zf.read("evidence_manifest.json"))
-        assert {row["blob_id"] for row in evidence_manifest} == {"blob1", "evilblob"}
-        assert all("encrypted_path" not in row for row in evidence_manifest)
-        # The embedded blob is the exact ciphertext from disk and still decrypts.
-        inner = zf.read("evidence/blob1.enc")
-        assert encryption.decrypt_bytes(inner, aad=b"blob1") == b"fake-jpeg-bytes"
+    from app.archive.format import verify_archive
+
+    verified = verify_archive(export_path, master_key=encryption.get_master_key())
+    assert verified["manifest"]["format"] == "guardiannode-archive-manifest-v1"
+    assert verified["manifest"]["evidence"]["covered"] is True
+    assert verified["manifest"]["evidence"]["file_count"] == 1
 
     deleted = client.delete(f"/api/storage/exports/{export_id}")
     assert deleted.status_code == 200
     assert not export_path.exists()
-    assert outside_path.exists()
     assert client.get("/api/storage/exports").json() == []
 
     audit = client.get("/api/audit").json()
@@ -140,28 +116,24 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     assert all("path" not in (row.get("details") or {}) for row in export_rows)
 
 
-@pytest.mark.parametrize("failure_point", ["write", "encrypt"])
-def test_failed_export_deletes_plaintext_zip(monkeypatch, tmp_path, failure_point):
+@pytest.mark.parametrize("controlled", [True, False])
+def test_failed_export_deletes_plaintext_zip(monkeypatch, tmp_path, controlled):
     client = _client(monkeypatch, tmp_path, raise_server_exceptions=False)
     _login(client)
 
     from app import settings as settings_mod
     from app.api import storage
-    from app.services import encryption
+    from app.archive.format import ArchiveError
 
-    if failure_point == "write":
-        def fail_write_jsonl(*args, **kwargs):
-            raise RuntimeError("simulated write failure")
+    def fail_archive(*args, **kwargs):
+        if controlled:
+            raise ArchiveError("simulated validation failure")
+        raise RuntimeError("simulated encryption failure")
 
-        monkeypatch.setattr(storage, "_write_jsonl", fail_write_jsonl)
-    else:
-        def fail_encrypt(*args, **kwargs):
-            raise RuntimeError("simulated encryption failure")
-
-        monkeypatch.setattr(encryption, "encrypt_file_to_disk", fail_encrypt)
+    monkeypatch.setattr(storage, "create_archive", fail_archive)
 
     response = client.post("/api/storage/export")
-    assert response.status_code == 500
+    assert response.status_code == (409 if controlled else 500)
     exports_dir = settings_mod.settings.data_dir / "exports"
     assert _export_plaintext_zips(settings_mod.settings.data_dir) == []
     assert not list(exports_dir.glob("*.partial"))

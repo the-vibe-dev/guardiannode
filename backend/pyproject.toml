@@ -44,6 +44,7 @@ dev = [
 [project.scripts]
 guardiannode-backend = "app.main:cli"
 guardiannode-db = "app.db.maintenance:cli"
+guardiannode-archive = "app.archive.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

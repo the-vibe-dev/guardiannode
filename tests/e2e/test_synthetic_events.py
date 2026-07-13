@@ -168,7 +168,7 @@ def test_synthetic_event_lifecycle(monkeypatch, tmp_path):
     exported = client.post("/api/storage/export")
     assert exported.status_code == 200
     export_id = exported.json()["export_id"]
-    export_path = tmp_path / "exports" / f"{export_id}.gnexport"
+    export_path = tmp_path / "exports" / f"{export_id}.gna"
     assert export_path.is_file()
     assert not export_path.read_bytes().startswith(b"PK")
     downloaded = client.get(exported.json()["download_url"])

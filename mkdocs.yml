@@ -74,6 +74,7 @@ nav:
       - Device pairing: DEVICE_PAIRING.md
       - Notifications: NOTIFICATIONS.md
       - Data retention: RETENTION.md
+      - Archive and recovery format: ARCHIVE_FORMAT.md
       - Redaction: REDACTION.md
       - Enforcement: ENFORCEMENT.md
       - Event schema: EVENT_SCHEMA.md

@@ -58,12 +58,12 @@ def test_privacy_states_plaintext_metadata_and_disk_encryption_boundary() -> Non
     assert "GuardianNode does not encrypt the whole SQLite database" in privacy
 
 
-def test_export_manifest_does_not_hard_code_raw_master_key_only() -> None:
-    storage_api = read("backend/app/api/storage.py")
+def test_archive_docs_distinguish_instance_and_portable_recovery() -> None:
+    archive_docs = read("docs/ARCHIVE_FORMAT.md")
 
-    assert "keys/master.key) with the blob_id" not in storage_api
-    assert "DPAPI-wrapped on Windows" in storage_api
-    assert "portable key backup" in storage_api
+    assert "same-instance snapshot" in archive_docs
+    assert "portable archive" in archive_docs
+    assert "recovery private keys are never written to the server" in archive_docs
 
 
 def test_alpha_release_docs_match_public_installer_scope() -> None:
