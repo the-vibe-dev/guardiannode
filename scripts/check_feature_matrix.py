@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify implemented/experimental feature-matrix source and test paths."""
+"""Verify feature-matrix source and test references."""
 from __future__ import annotations
 
 import sys
@@ -7,7 +7,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "docs" / "FEATURE_MATRIX.md"
-CHECKED_STATUSES = {"Implemented", "Experimental"}
 SENTINELS = {"Manual Windows validation", "Not implemented", "Not applicable"}
 
 
@@ -26,12 +25,19 @@ def _table_rows(text: str) -> list[list[str]]:
 def main() -> int:
     failures: list[str] = []
     for row in _table_rows(MATRIX.read_text(encoding="utf-8")):
-        if len(row) < 5:
+        if len(row) != 8:
             failures.append(f"Malformed row: {row!r}")
             continue
-        feature, status, _platform, source_module, test_reference = row[:5]
-        if status not in CHECKED_STATUSES:
+        feature, code, coverage, _qualification, _field, release, source_module, test_reference = row
+        if code == "Absent":
+            if release != "Planned":
+                failures.append(f"{feature}: absent code must be Planned, found {release!r}")
             continue
+        if code != "Present":
+            failures.append(f"{feature}: invalid code status {code!r}")
+            continue
+        if coverage == "None":
+            failures.append(f"{feature}: present code cannot claim no automated coverage")
         for column, value in (("source module", source_module), ("test reference", test_reference)):
             ref = value.strip("`")
             if ref in SENTINELS:

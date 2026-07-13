@@ -1,31 +1,28 @@
 # Feature Matrix
 
-Status definitions:
+The columns intentionally separate implementation from release qualification.
+`Qualified` means the named platform gate passed; it does not mean production
+ready. GuardianNode currently makes no production-readiness claim.
 
-- **Implemented**: shipped in source and covered by a named test or smoke check.
-- **Experimental**: present but limited, operator-focused, or not fully qualified.
-- **Planned**: documented design direction; not shipped as a usable feature.
+| Feature | Code | Automated coverage | Platform qualification | Field validation | Release status | Source module | Test reference |
+|---|---|---|---|---|---|---|---|
+| Parent dashboard | Present | Unit | Web bundle tested | Limited | Beta candidate | `dashboard/src/App.tsx` | `dashboard/src/components/Layout.test.tsx` |
+| Backend API and dashboard bundle | Present | Integration | Linux/Windows candidate | Limited | Beta candidate | `backend/app/main.py` | `backend/tests/test_readiness_apis.py` |
+| Device pairing | Present | Integration | Windows candidate | Validated | Beta candidate | `backend/app/services/pairing.py` | `backend/tests/test_device_auth.py` |
+| Local all-in-one bootstrap | Present | Integration | Windows candidate | Validated | Experimental | `backend/app/api/devices.py` | `backend/tests/test_pairing_local_bootstrap.py` |
+| Screenshot upload and classification | Present | Integration | Windows candidate | Validated | Beta candidate | `backend/app/services/screenshot_async.py` | `backend/tests/test_image_mime.py` |
+| Server-side OCR | Present | Unit | Not Docker-qualified | Limited | Experimental | `backend/app/services/screenshot_ingest.py` | `backend/tests/test_profile_resolution.py` |
+| Deterministic rule classification | Present | Corpus gate | Source qualified | Validated | Beta candidate | `backend/app/services/risk_rules.py` | `tests/test_classifier_benchmark.py` |
+| Local Ollama classification | Present | Mock integration | Windows candidate | Validated | Experimental | `backend/app/services/classifier.py` | `backend/tests/test_model_fallback.py` |
+| Encrypted retained evidence | Present | Integration | Source qualified | Limited | Beta candidate | `backend/app/services/encryption.py` | `backend/tests/test_export.py` |
+| Export list/download/delete | Present | Integration | Source qualified | Limited | Beta candidate | `backend/app/api/storage.py` | `backend/tests/test_export.py` |
+| Windows tray/status UI | Present | Partial unit | Windows candidate | Validated | Experimental | `agent-windows/src/tray_app.py` | Manual Windows validation |
+| Windows watchdog | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
+| Durable encrypted agent queue | Present | Unit | Windows candidate | Limited | Experimental | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |
+| Privileged Windows broker | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/broker_service.py` | `agent-windows/tests/test_broker_service.py` |
+| Docker Compose deployment | Present | Config/build only | Not qualified | None | Experimental | `installer/server-linux/docker-compose.yml` | `tests/test_release_workflows.py` |
+| Built-in TLS/mTLS separated mode | Absent | None | Not qualified | None | Planned | Planned transport layer | Not implemented |
+| Automatic application updates | Absent | None | Not qualified | None | Planned | Planned updater | Not implemented |
 
-| Feature | Status | Platform | Source module | Test reference |
-|---|---|---|---|---|
-| Parent dashboard | Implemented | Backend/web | `dashboard/src/App.tsx` | `dashboard/src/components/Layout.test.tsx` |
-| Backend API and dashboard bundle | Implemented | Linux/Windows | `backend/app/main.py` | `backend/tests/test_readiness_apis.py` |
-| Device pairing by six-digit code | Implemented | Backend/agent | `backend/app/services/pairing.py` | `backend/tests/test_device_auth.py` |
-| Local all-in-one bootstrap pairing | Experimental | Backend/Windows installer | `backend/app/api/devices.py` | `backend/tests/test_pairing_local_bootstrap.py` |
-| Child profiles and watch phrases | Implemented | Backend/web | `backend/app/services/profile_resolution.py` | `backend/tests/test_profile_resolution.py` |
-| Screenshot upload and async classification | Implemented | Backend/agent | `backend/app/services/screenshot_async.py` | `backend/tests/test_image_mime.py` |
-| Text event ingest | Implemented | Backend/agent | `backend/app/services/event_ingest.py` | `backend/tests/test_readiness_apis.py` |
-| PNG/JPEG evidence MIME tracking | Implemented | Backend | `backend/app/api/events.py` | `backend/tests/test_image_mime.py` |
-| Encrypted retained evidence | Implemented | Backend | `backend/app/services/encryption.py` | `backend/tests/test_export.py` |
-| Export list/download/delete | Implemented | Backend/web | `backend/app/api/storage.py` | `backend/tests/test_export.py` |
-| SMTP and webhook notification settings | Implemented | Backend/web | `backend/app/api/settings.py` | `backend/tests/test_readiness_apis.py` |
-| mDNS discovery hints | Experimental | Backend/agent | `backend/app/services/mdns_advertiser.py` | `agent-windows/tests/test_pairing_bootstrap.py` |
-| Windows tray/status UI | Experimental | Windows | `agent-windows/src/tray_app.py` | Manual Windows validation |
-| Windows watchdog | Experimental | Windows | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
-| Durable encrypted agent queue | Experimental | Windows | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |
-| Privileged Windows broker | Experimental | Windows | `agent-windows/src/broker_service.py` | `agent-windows/tests/test_broker_service.py` |
-| Clipboard collector | Planned | Windows | Planned collector | Not implemented |
-| File collector | Planned | Windows | Planned collector | Not implemented |
-| Accessibility collector | Planned | Windows | Planned collector | Not implemented |
-| Dedicated QR decoder | Planned | Backend/agent | Planned decoder | Not implemented |
-| Built-in TLS/mTLS separated mode | Planned | Backend/agent | Planned transport layer | Not implemented |
+See [Closed Beta Release Gates](RELEASE_GATES.md) for promotion requirements and
+[Version Support Policy](VERSION_SUPPORT.md) for the qualified runtime baseline.
