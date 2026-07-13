@@ -1,0 +1,22 @@
+{
+  "revision": "0001_beta_baseline",
+  "tables": [
+    "alembic_version",
+    "alerts",
+    "audit_logs",
+    "child_profiles",
+    "child_requests",
+    "devices",
+    "events",
+    "evidence_blobs",
+    "model_configs",
+    "notification_jobs",
+    "notification_logs",
+    "pairing_codes",
+    "policies",
+    "risk_results",
+    "screenshot_upload_receipts",
+    "settings",
+    "users"
+  ]
+}

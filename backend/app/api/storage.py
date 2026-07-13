@@ -18,7 +18,9 @@ from ulid import ULID
 
 from app import settings as settings_mod
 from app.api.deps import current_user, get_db_dep, require_recent_auth
+from app.db.migrations import schema_revisions
 from app.db.models import Alert, AuditLog, Event, EvidenceBlob, RiskResult, User
+from app.db.session import get_engine
 from app.services import encryption
 from app.services.audit import log_action
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
@@ -322,6 +324,7 @@ def export_storage(
                     "export_id": export_id,
                     "created_at": datetime.now(UTC).isoformat(),
                     "format": "guardiannode-full-export-v3",
+                    "schema_revision": schema_revisions(get_engine())[0],
                     "outer_encryption": "chunked-aes-256-gcm",
                     "includes_evidence_blobs": True,
                     "evidence_blob_count": included_blob_count,

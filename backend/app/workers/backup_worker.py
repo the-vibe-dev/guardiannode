@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app import settings as settings_mod
-from app.db.maintenance import backup_database, sqlite_path_from_url
+from app.db.maintenance import backup_database, backup_manifest_path, sqlite_path_from_url
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ def run_once() -> Path | None:
     keep = max(1, int(settings.database_backup_keep))
     for stale in _scheduled_backups()[keep:]:
         stale.unlink(missing_ok=True)
+        backup_manifest_path(stale).unlink(missing_ok=True)
     log.info("scheduled database backup completed: %s", destination)
     return destination
 

@@ -100,9 +100,16 @@ validation fails. `/api/health/ready` verifies database access, schema revision,
 encryption availability, disk headroom, required worker supervision, OCR/language
 data, and the model endpoints required by the active classifier mode.
 
+Historical Alembic revisions contain explicit immutable schema operations and
+do not import current ORM metadata. The beta baseline supports forward upgrades
+from the public alpha schema; destructive downgrade of that baseline is
+intentionally unsupported.
+
 Scheduled SQLite backups are stored under `backups/scheduled-*.sqlite3`. They
 are created with SQLite's online backup API, integrity checked, fsynced, and
-pruned to the configured retention count. For a manual backup or restore drill,
+paired with a `.manifest.json` containing the schema revision and checksum.
+Restore validates the manifest when present. Backups are pruned to the
+configured retention count. For a manual backup or restore drill,
 stop the backend service first for restore, then run from the backend environment:
 
 ```bash

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import sqlite3
@@ -25,6 +27,66 @@ class DatabaseMaintenanceError(RuntimeError):
 class IntegrityResult:
     ok: bool
     messages: list[str]
+
+
+BACKUP_MANIFEST_FORMAT = "guardiannode-sqlite-backup-v1"
+SUPPORTED_SCHEMA_REVISIONS = {None, "0001_beta_baseline"}
+
+
+def backup_manifest_path(database: Path) -> Path:
+    return database.with_name(database.name + ".manifest.json")
+
+
+def database_schema_revision(path: Path) -> str | None:
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alembic_version'"
+        ).fetchone()
+        if not exists:
+            return None
+        row = conn.execute("SELECT version_num FROM alembic_version LIMIT 1").fetchone()
+        return str(row[0]) if row else None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_backup_manifest(database: Path) -> None:
+    manifest = backup_manifest_path(database)
+    temporary = manifest.with_name(f".{manifest.name}.{uuid4().hex}.partial")
+    payload = {
+        "format": BACKUP_MANIFEST_FORMAT,
+        "created_at": datetime.now(UTC).isoformat(),
+        "schema_revision": database_schema_revision(database),
+        "database_sha256": _sha256(database),
+    }
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _fsync_file(temporary)
+    os.replace(temporary, manifest)
+    _fsync_dir(manifest.parent)
+
+
+def _validate_backup_manifest(database: Path) -> None:
+    manifest = backup_manifest_path(database)
+    if not manifest.is_file():
+        return
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DatabaseMaintenanceError("Backup manifest is unreadable") from exc
+    if payload.get("format") != BACKUP_MANIFEST_FORMAT:
+        raise DatabaseMaintenanceError("Backup manifest format is unsupported")
+    embedded = database_schema_revision(database)
+    declared = payload.get("schema_revision")
+    if declared != embedded or declared not in SUPPORTED_SCHEMA_REVISIONS:
+        raise DatabaseMaintenanceError("Backup manifest schema revision is invalid")
+    if payload.get("database_sha256") != _sha256(database):
+        raise DatabaseMaintenanceError("Backup does not match its manifest checksum")
 
 
 def sqlite_path_from_url(db_url: str) -> Path:
@@ -127,6 +189,7 @@ def backup_database(destination: Path, *, source: Path | None = None, overwrite:
             except OSError:
                 pass
         _fsync_dir(destination.parent)
+        _write_backup_manifest(destination)
     except Exception:
         _quarantine_file(tmp_path)
         raise
@@ -140,6 +203,7 @@ def restore_database(backup: Path, *, destination: Path | None = None) -> Path:
     backup = backup.expanduser()
     if not backup.is_file():
         raise DatabaseMaintenanceError(f"Backup not found: {backup}")
+    _validate_backup_manifest(backup)
     backup_result = integrity_check(backup)
     if not backup_result.ok:
         raise DatabaseMaintenanceError(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.maintenance import (
     backup_database,
+    backup_manifest_path,
     integrity_check,
     restore_database,
     sqlite_path_from_url,
@@ -69,6 +71,9 @@ def test_integrity_backup_and_restore_sqlite_file(tmp_path):
     backup_path = backup_database(destination, source=source)
     assert backup_path == destination
     assert destination.is_file()
+    manifest = json.loads(backup_manifest_path(destination).read_text(encoding="utf-8"))
+    assert manifest["format"] == "guardiannode-sqlite-backup-v1"
+    assert manifest["schema_revision"] is None
     assert _item_names(destination) == ["alpha"]
 
     restored_path = restore_database(destination, destination=live)
@@ -77,6 +82,18 @@ def test_integrity_backup_and_restore_sqlite_file(tmp_path):
     retained = list((tmp_path / "backups").glob("pre-restore-*-live.sqlite"))
     assert len(retained) == 1
     assert _item_names(retained[0]) == ["alpha"]
+
+
+def test_restore_rejects_backup_that_no_longer_matches_manifest(tmp_path):
+    source = tmp_path / "source.sqlite"
+    backup = tmp_path / "backup.sqlite"
+    _sqlite_file(source)
+    backup_database(backup, source=source)
+    with backup.open("ab") as stream:
+        stream.write(b"tampered")
+
+    with pytest.raises(Exception, match="manifest checksum"):
+        restore_database(backup, destination=tmp_path / "live.sqlite")
 
 
 def test_backup_refuses_to_overwrite_without_flag(tmp_path):
