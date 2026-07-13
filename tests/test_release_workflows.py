@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTALLERS = ROOT / ".github" / "workflows" / "release-installers.yml"
 SOURCE_RELEASE = ROOT / ".github" / "workflows" / "source-release.yml"
 TESTS = ROOT / ".github" / "workflows" / "test.yml"
+COMPOSE = ROOT / "installer" / "server-linux" / "docker-compose.yml"
+CANARY_COMPOSE = ROOT / "installer" / "server-linux" / "docker-compose.canary.yml"
 
 
 def test_installer_release_does_not_run_on_ordinary_source_tags() -> None:
@@ -49,3 +51,21 @@ def test_ci_checks_generated_hardware_tier_constants() -> None:
     assert "python scripts/sync_hardware_tiers.py --check" in text
     assert "python scripts/check_third_party_notices.py" in text
     assert "python scripts/check_repository_controls.py" in text
+
+
+def test_product_compose_automates_local_model_startup() -> None:
+    text = COMPOSE.read_text(encoding="utf-8")
+
+    assert 'profiles: ["llm"]' not in text
+    assert "GUARDIANNODE_CLASSIFIER_MODE:-text_llm" in text
+    assert '["guardiannode-backend", "preflight", "--pull-models", "--json"]' in text
+    assert "condition: service_healthy" in text
+
+
+def test_rules_only_canary_is_an_explicit_ci_override() -> None:
+    override = CANARY_COMPOSE.read_text(encoding="utf-8")
+    canary = (ROOT / "scripts" / "docker_canary.py").read_text(encoding="utf-8")
+
+    assert 'profiles: ["canary-llm-disabled"]' in override
+    assert 'environment["GUARDIANNODE_CLASSIFIER_MODE"] = "rules_only"' in canary
+    assert "docker-compose.canary.yml" in canary

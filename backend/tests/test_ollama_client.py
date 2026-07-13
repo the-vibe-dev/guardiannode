@@ -16,6 +16,9 @@ class _FakeTagsResponse:
 
 
 class _FakePullStream:
+    def raise_for_status(self) -> None:
+        return None
+
     async def __aenter__(self):
         return self
 

@@ -5,14 +5,16 @@ Three tiers govern what runs per screenshot:
 * **full**         — vision LLM + text LLM run in parallel. Vision LLM does OCR + visual
                      classification. Text LLM does nuanced text classification on the
                      OCR'd content. Best coverage. Requires 16+ GB VRAM total.
-* **vision_only**  — vision LLM only. Vision LLM judges both image + text. Rules engine
+* **vision**       — vision LLM only. Vision LLM judges both image + text. Rules engine
                      also runs on OCR text for fast deterministic catches. Requires
                      12+ GB VRAM.
-* **text_only**    — Tesseract OCR + small text LLM (llama3.2:1b) on CPU. NO image-only
+* **text_llm**     — Tesseract OCR + small text LLM (llama3.2:1b) on CPU. NO image-only
                      risk detection (nudity/gore/weapons). Catches all text-based risks.
                      For low-end family PCs with no GPU.
 
-The tier is chosen by `settings.classifier_tier` (env GUARDIANNODE_CLASSIFIER_TIER).
+* **rules_only**   — Tesseract OCR + deterministic rules, with no model dependency.
+
+The mode is chosen by `settings.classifier_mode_resolved`.
 The installer detects hardware and sets it at install time.
 
 Blob storage threshold: severity >= medium gets an encrypted screenshot kept; below
@@ -22,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +42,7 @@ from app.services import (
     risk_rules,
 )
 from app.services.evidence_paths import evidence_blob_path
+from app.services.ocr import OcrResult, OcrStatus, extract_tesseract
 from app.services.ollama_client import OllamaClient
 from app.services.profile_resolution import resolve_profile
 from app.settings import settings
@@ -51,7 +53,7 @@ _SCORE_BY_LEVEL = {"none": 0, "low": 20, "medium": 50, "high": 75, "critical": 9
 _STORE_THRESHOLD = "medium"  # only persist encrypted blob if severity >= this
 _SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
-VALID_TIERS = {"full", "vision_only", "text_only"}
+VALID_TIERS = {"full", "vision", "text_llm", "rules_only"}
 
 
 def _ulid() -> str:
@@ -133,44 +135,17 @@ async def _vision_available() -> tuple[bool, list[str]]:
         return False, []
 
 
-def _tesseract_extract(image_bytes: bytes) -> str:
-    """Server-side OCR. No-op if pytesseract or the Tesseract binary is unavailable."""
-    if not settings.tesseract_enabled:
-        return ""
-    try:
-        import pytesseract  # type: ignore
-        from PIL import Image, ImageOps  # type: ignore
+def _tesseract_extract(image_bytes: bytes) -> OcrResult:
+    """Return OCR text or a categorized operational failure."""
+    return extract_tesseract(image_bytes)
 
-        img = Image.open(io.BytesIO(image_bytes))
 
-        def _ocr(region: Image.Image) -> str:
-            # Terminal and browser text can be only a few pixels tall in full-screen
-            # captures. Upscaling a contrast-normalized grayscale copy materially
-            # improves exact phrase OCR while keeping the longest edge bounded.
-            gray = ImageOps.autocontrast(ImageOps.grayscale(region))
-            scale = min(3.0, 4800 / max(gray.size))
-            if scale > 1:
-                gray = gray.resize(
-                    (max(1, int(gray.width * scale)), max(1, int(gray.height * scale))),
-                    Image.Resampling.LANCZOS,
-                )
-            return pytesseract.image_to_string(gray, config="--psm 6").strip()
-
-        readings = [_ocr(img)]
-        if img.width >= img.height * 1.4:
-            # A full desktop commonly contains side-by-side windows. Overlapping
-            # pane passes prevent one column from corrupting the other's layout.
-            pane_width = int(img.width * 0.6)
-            readings.extend(
-                (
-                    _ocr(img.crop((0, 0, pane_width, img.height))),
-                    _ocr(img.crop((img.width - pane_width, 0, img.width, img.height))),
-                )
-            )
-        return _merge_ocr_text(*readings)
-    except Exception as e:
-        log.debug("tesseract fallback unavailable: %s", e)
-        return ""
+def _coerce_ocr_result(value: OcrResult | str) -> OcrResult:
+    """Keep older focused tests/embedders compatible with string fakes."""
+    if isinstance(value, OcrResult):
+        return value
+    text = (value or "").strip()
+    return OcrResult(status=OcrStatus.OK if text else OcrStatus.NO_TEXT, text=text)
 
 
 def _merge_ocr_text(*values: str) -> str:
@@ -205,7 +180,8 @@ async def ingest_screenshot(
     timestamp = timestamp or datetime.now(UTC)
     sha256 = hashlib.sha256(image_bytes).hexdigest()
     event_id = _ulid()
-    tier = settings.classifier_tier if settings.classifier_tier in VALID_TIERS else "vision_only"
+    configured_mode = settings.classifier_mode_resolved
+    tier = configured_mode if configured_mode in VALID_TIERS else "rules_only"
 
     # Register this frame as in-flight so the dashboard health widget can see it.
     pipeline_metrics.start(
@@ -268,6 +244,7 @@ async def _ingest_inner(
     text_result: dict[str, Any] = {}
     extracted_text = ""
     tesseract_used = False
+    ocr_result = OcrResult(status=OcrStatus.NO_TEXT)
 
     # Resolve the child profile the same way text-event ingest does. The
     # backend assignment is authoritative; device payload profile/age fields are
@@ -283,13 +260,13 @@ async def _ingest_inner(
     age_group = resolved.age_group
     custom_phrases = resolved.custom_phrases
 
-    if tier == "text_only":
-        # CPU path: Tesseract OCR + rules + small text LLM (e.g. llama3.2:1b)
-        log.info("screenshot %s → tier=text_only (Tesseract + text LLM)", event_id)
+    if tier in {"rules_only", "text_llm"}:
+        log.info("screenshot %s → mode=%s", event_id, tier)
         pipeline_metrics.set_stage(event_id, "tesseract")
-        extracted_text = _tesseract_extract(image_bytes)
-        tesseract_used = bool(extracted_text)
-        if extracted_text:
+        ocr_result = _coerce_ocr_result(_tesseract_extract(image_bytes))
+        extracted_text = ocr_result.text
+        tesseract_used = ocr_result.status in {OcrStatus.OK, OcrStatus.NO_TEXT}
+        if extracted_text and tier == "text_llm":
             pipeline_metrics.set_stage(event_id, "text_llm")
             text_result = await classifier.classify_text(
                 redacted_text=extracted_text,
@@ -298,10 +275,10 @@ async def _ingest_inner(
                 custom_phrases=custom_phrases,
             )
 
-    elif tier == "vision_only":
+    elif tier == "vision":
         # Run deterministic OCR alongside vision. Exact watch phrases must not
         # disappear when a reachable vision model returns empty or malformed OCR.
-        log.info("screenshot %s → tier=vision_only (vision LLM + Tesseract + rules)", event_id)
+        log.info("screenshot %s → mode=vision (vision LLM + Tesseract + rules)", event_id)
         available, vision_models = await _vision_available()
         if available:
             chosen = settings.vision_model if settings.vision_model in vision_models else vision_models[0]
@@ -315,17 +292,19 @@ async def _ingest_inner(
                 )
             )
             tess_task = asyncio.create_task(asyncio.to_thread(_tesseract_extract, image_bytes))
-            vision_result, tess_text = await asyncio.gather(vision_task, tess_task)
-            tesseract_used = bool(tess_text)
+            vision_result, raw_ocr = await asyncio.gather(vision_task, tess_task)
+            ocr_result = _coerce_ocr_result(raw_ocr)
+            tesseract_used = ocr_result.status in {OcrStatus.OK, OcrStatus.NO_TEXT}
             extracted_text = _merge_ocr_text(
                 vision_result.get("visible_text") or "",
-                tess_text,
+                ocr_result.text,
             )
         else:
-            log.warning("vision_only tier but no vision model; falling back to Tesseract")
+            log.warning("vision mode but no vision model; running deterministic OCR only")
             pipeline_metrics.set_stage(event_id, "tesseract")
-            extracted_text = _tesseract_extract(image_bytes)
-            tesseract_used = bool(extracted_text)
+            ocr_result = _coerce_ocr_result(_tesseract_extract(image_bytes))
+            extracted_text = ocr_result.text
+            tesseract_used = ocr_result.status in {OcrStatus.OK, OcrStatus.NO_TEXT}
         # Rules engine on text (free, deterministic, no LLM cost).
         # Includes any parent-configured custom watch phrases for this profile.
         if extracted_text:
@@ -356,28 +335,38 @@ async def _ingest_inner(
                 related_ocr_text="", watch_phrases=custom_phrases, model=chosen_vision,
             )
 
-        async def _text_path() -> tuple[str, dict[str, Any]]:
+        async def _text_path() -> tuple[OcrResult, dict[str, Any]]:
             # Tesseract first (~1s), then text LLM. Runs concurrently with vision call.
-            t = _tesseract_extract(image_bytes)
-            if not t:
-                return "", {}
+            result = _coerce_ocr_result(_tesseract_extract(image_bytes))
+            if not result.text:
+                return result, {}
             tr = await classifier.classify_text(
-                redacted_text=t,
+                redacted_text=result.text,
                 app_name=app_name, source_type="image",
                 age_group=age_group, timestamp=timestamp.isoformat(), url=url,
                 custom_phrases=custom_phrases,
             )
-            return t, tr
+            return result, tr
 
         vision_task = asyncio.create_task(_vision_call())
         text_task = asyncio.create_task(_text_path())
         vision_result = await vision_task
-        tess_text, text_result = await text_task
-        tesseract_used = bool(tess_text)
+        ocr_result, text_result = await text_task
+        tesseract_used = ocr_result.status in {OcrStatus.OK, OcrStatus.NO_TEXT}
         extracted_text = _merge_ocr_text(
             vision_result.get("visible_text") or "",
-            tess_text,
+            ocr_result.text,
         )
+
+    if not ocr_result.ok:
+        log.error(
+            "screenshot %s OCR failed: status=%s error_code=%s languages=%s",
+            event_id,
+            ocr_result.status,
+            ocr_result.error_code,
+            ",".join(ocr_result.languages),
+        )
+    pipeline_metrics.record_ocr(str(ocr_result.status), ocr_result.error_code)
 
     # Apply deterministic rules to the final OCR text for every tier. In the
     # full tier, Tesseract can miss text that the vision model reads correctly;
@@ -433,6 +422,7 @@ async def _ingest_inner(
             "image_bytes": len(image_bytes),
             "mime_type": mime_type if mime_type in {"image/jpeg", "image/png"} else "image/jpeg",
             "tier": tier,
+            "classifier_mode": tier,
             "capture_scope": capture_scope,
             "policy_id": policy_id,
             "policy_version": policy_version,
@@ -442,6 +432,10 @@ async def _ingest_inner(
             "text_model": text_result.get("model"),
             "vision_used": bool(vision_result),
             "tesseract_used": tesseract_used,
+            "ocr_status": ocr_result.status,
+            "ocr_error_code": ocr_result.error_code,
+            "ocr_languages": list(ocr_result.languages),
+            "ocr_duration_ms": ocr_result.duration_ms,
             "extracted_text_chars": len(extracted_text),
         },
         received_at=datetime.now(UTC),
@@ -475,8 +469,15 @@ async def _ingest_inner(
         # Reduced-protection marker: no model judged this frame (vision missing
         # or failed AND the text LLM never produced a result). Rules still ran.
         classifier_status=(
-            "ok"
-            if (vision_result.get("model") or text_result.get("model") or text_result.get("status") == "ok")
+            f"ocr_{ocr_result.status}"
+            if not ocr_result.ok
+            else "ok"
+            if (
+                tier == "rules_only"
+                or vision_result.get("model")
+                or text_result.get("model")
+                or text_result.get("status") == "ok"
+            )
             else "unclassified_model_unavailable"
         ),
     )

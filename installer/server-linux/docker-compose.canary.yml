@@ -1,0 +1,11 @@
+# CI-only override: exercise OCR and rule alerting without downloading a large
+# model. The product Compose path keeps Ollama and automated model startup on.
+services:
+  ollama:
+    profiles: ["canary-llm-disabled"]
+
+  pipeline-init:
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false

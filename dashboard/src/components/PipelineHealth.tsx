@@ -14,8 +14,17 @@ interface InFlight {
 interface Health {
   status: string;
   tier: string;
+  mode?: string;
   protection?: { level: "full" | "reduced" | "rules_only"; warnings: string[] };
   tesseract_available?: boolean;
+  ocr?: {
+    available: boolean;
+    languages: string[];
+    recent: {
+      status_counts: Record<string, number>;
+      error_counts: Record<string, number>;
+    };
+  };
   queue: {
     in_flight_count: number;
     in_flight: InFlight[];
@@ -146,7 +155,7 @@ export default function PipelineHealth() {
             <Pulse on color="bg-orange-400" label={`${backlogTotal} waiting upload`} />
           )}
           <Pulse on={ollamaOK} color="bg-green-500" label={ollamaOK ? "Ollama OK" : "Ollama down"} />
-          <span className="text-gray-500">tier=<strong>{h.tier}</strong></span>
+          <span className="text-gray-500">mode=<strong>{h.mode || h.tier}</strong></span>
         </div>
       </div>
 
@@ -202,6 +211,19 @@ export default function PipelineHealth() {
 
       {/* Ollama models */}
       <div className="mt-3 text-xs text-gray-600 space-y-0.5">
+        <div>
+          OCR: {h.ocr?.available ?? h.tesseract_available ? (
+            <span className="text-green-700">✓ ready</span>
+          ) : (
+            <span className="text-red-600">✗ unavailable</span>
+          )}
+          {h.ocr?.languages?.length ? <span> ({h.ocr.languages.join(", ")})</span> : null}
+          {h.ocr?.recent?.error_counts && Object.keys(h.ocr.recent.error_counts).length > 0 ? (
+            <span className="ml-2 text-red-600">
+              recent failures: {Object.entries(h.ocr.recent.error_counts).map(([name, count]) => `${name}=${count}`).join(", ")}
+            </span>
+          ) : null}
+        </div>
         <div>
           Ollama: <code className="bg-gray-100 px-1 rounded">{h.ollama.url}</code>
           {h.ollama.error && <span className="text-red-600 ml-2">{h.ollama.error}</span>}

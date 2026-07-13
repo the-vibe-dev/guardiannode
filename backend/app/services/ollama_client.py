@@ -155,6 +155,7 @@ class OllamaClient:
                 async with client.stream(
                     "POST", f"{self.base_url}/api/pull", json={"name": model, "stream": True}
                 ) as r:
+                    r.raise_for_status()
                     async for _ in r.aiter_lines():
                         pass
         except httpx.HTTPError as e:

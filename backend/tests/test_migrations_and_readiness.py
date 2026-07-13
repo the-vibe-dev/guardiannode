@@ -40,6 +40,7 @@ def test_readiness_checks_workers_schema_storage_and_encryption(monkeypatch, tmp
     monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("GUARDIANNODE_READINESS_MIN_FREE_BYTES", "1")
     monkeypatch.setenv("GUARDIANNODE_DATABASE_BACKUP_INTERVAL_SECONDS", "86400")
+    monkeypatch.setenv("GUARDIANNODE_CLASSIFIER_MODE", "rules_only")
     from app import settings as settings_mod
     from app.db import session as session_mod
     from app.services import worker_supervisor

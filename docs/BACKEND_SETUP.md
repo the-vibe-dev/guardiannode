@@ -20,6 +20,9 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 | `GUARDIANNODE_BIND_HOST` | `127.0.0.1` | Keep loopback for first-run setup; expose LAN only after setup is complete |
 | `GUARDIANNODE_BIND_PORT` | `8787` | |
 | `GUARDIANNODE_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama |
+| `GUARDIANNODE_CLASSIFIER_MODE` | unset | Explicit mode: `rules_only`, `text_llm`, `vision`, or `full` |
+| `GUARDIANNODE_CLASSIFIER_TIER` | `text_only` | Legacy compatibility setting; `text_only` maps to `text_llm` and `vision_only` maps to `vision` |
+| `GUARDIANNODE_OCR_LANGUAGES` | `eng` | Comma-separated Tesseract language data required for readiness |
 | `GUARDIANNODE_DB_URL` | `sqlite:///{data_dir}/guardiannode.db` | Postgres optional |
 | `GUARDIANNODE_LOG_LEVEL` | `INFO` | |
 | `GUARDIANNODE_DEV_MODE` | `0` | Disables auth-required for /dev endpoints |
@@ -32,7 +35,19 @@ After logging in as the parent, `GET /api/health/runtime-settings` returns the
 effective non-secret runtime configuration: bind host/port, classifier tier,
 model names, role-specific Ollama URLs, classifier timeouts/context settings,
 and security/runtime flags. Use this to verify an installer-written
-`server.env` was loaded as expected.
+`server.env` was loaded as expected. When both classifier variables are set,
+the explicit mode wins.
+
+Before starting a managed service, validate the active pipeline:
+
+```bash
+guardiannode-backend preflight --json
+# Installers/Compose may explicitly initialize missing configured models:
+guardiannode-backend preflight --pull-models --json
+```
+
+Exit code `0` is ready, `2` is invalid configuration, `3` is an unavailable
+runtime dependency, and `4` is a missing or failed model initialization.
 
 ## First run
 
@@ -82,7 +97,8 @@ Startup applies the Alembic migration tree before any worker starts. An existing
 SQLite database is backed up under `backups/pre-migration-*.sqlite3` before its
 revision changes, and startup fails if migration or post-migration integrity
 validation fails. `/api/health/ready` verifies database access, schema revision,
-encryption availability, disk headroom, and required worker supervision.
+encryption availability, disk headroom, required worker supervision, OCR/language
+data, and the model endpoints required by the active classifier mode.
 
 Scheduled SQLite backups are stored under `backups/scheduled-*.sqlite3`. They
 are created with SQLite's online backup API, integrity checked, fsynced, and

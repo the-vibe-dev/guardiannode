@@ -11,8 +11,17 @@ RUN cd dashboard && npm run build
 
 # ---- Stage 2: Python runtime ----
 FROM python:3.14.6-slim-bookworm@sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates sqlite3 && \
+ARG TESSERACT_LANGS="eng"
+RUN set -eux; \
+    packages="tesseract-ocr"; \
+    for language in ${TESSERACT_LANGS}; do \
+      case "$language" in (*[!a-z0-9_]*) echo "invalid Tesseract language: $language" >&2; exit 2;; esac; \
+      packages="$packages tesseract-ocr-$language"; \
+    done; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates sqlite3 $packages; \
+    tesseract --version; \
+    tesseract --list-langs; \
     find /var/lib/apt/lists -mindepth 1 -delete && \
     groupadd --system --gid 10001 guardiannode && \
     useradd --system --uid 10001 --gid guardiannode --home-dir /nonexistent --shell /usr/sbin/nologin guardiannode
@@ -30,6 +39,8 @@ COPY --from=dashboard-build /build/dashboard/dist /app/backend/app/static
 ENV GUARDIANNODE_DATA_DIR=/data
 ENV GUARDIANNODE_BIND_HOST=0.0.0.0
 ENV GUARDIANNODE_BIND_PORT=8787
+ENV GUARDIANNODE_CLASSIFIER_MODE=text_llm
+ENV GUARDIANNODE_OCR_LANGUAGES=eng
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 

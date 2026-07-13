@@ -149,3 +149,15 @@ jobs:
         working-directory: dashboard
         run: npm run build
       # No ESLint config exists yet; add `npm run lint` once one is adopted.
+
+  docker-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install canary client
+        run: python -m pip install httpx Pillow
+      - name: Prove clean Docker OCR-to-alert pipeline
+        run: python scripts/docker_canary.py

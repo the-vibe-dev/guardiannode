@@ -53,13 +53,30 @@ docker compose up -d
 ```
 
 What it does:
-- Spins up `ollama/ollama:0.13.5` for the LLM
+- Builds Tesseract plus qualified English language data into the backend
+- Runs a fail-closed pipeline initializer before starting the backend
 - Builds a backend image from explicit Node/Python base-image tags and runs it
   as non-root UID/GID `10001:10001`
 - Runs the backend with `read_only: true`, dropped Linux capabilities,
   `no-new-privileges`, a bounded `/tmp` tmpfs, a healthcheck, and resource hints
 - Spins up a `guardiannode_backend` container exposing port 8787 on loopback
-- Persists state in two Docker volumes: `ollama_models` and `gn_data`
+- Starts Ollama and automatically pulls or verifies the configured text model
+- Persists backend state in `gn_data`
+
+The default closed-beta mode is `text_llm`. A normal Compose startup starts
+Ollama automatically, and the initializer pulls or verifies the configured
+model before the backend can start and readiness can pass:
+
+```bash
+docker compose up --build -d
+```
+
+For a deterministic rules-only deployment, explicitly set
+`GUARDIANNODE_CLASSIFIER_MODE=rules_only`; this skips model classification.
+
+Docker vision/full modes remain experimental. Optional OCR packs can be built
+with `--build-arg TESSERACT_LANGS="eng spa"` and must also be listed in
+`GUARDIANNODE_OCR_LANGUAGES`; only `eng` is currently platform-qualified.
 
 The default Compose file uses normal bridge networking and publishes
 `127.0.0.1:8787:8787`. mDNS discovery is advisory only in this alpha; child
@@ -84,16 +101,18 @@ attestations.
 
 For NVIDIA GPU support: install `nvidia-container-toolkit` on the host and uncomment the `deploy.resources` block in `docker-compose.yml`.
 
-## Pulling models
+## Managing models
 
-After the backend is up, pull the default models:
+The Docker initializer automatically pulls the model required by the selected
+classifier mode. For native installs, or to prefetch an additional model
+manually, use:
 
 ```bash
 # native install
 sudo -u guardiannode ollama pull llama3.2:3b
 sudo -u guardiannode ollama pull qwen3-vl:8b-instruct
 
-# docker
+# docker (optional manual prefetch)
 docker exec guardiannode_ollama ollama pull llama3.2:3b
 docker exec guardiannode_ollama ollama pull qwen3-vl:8b-instruct
 ```

@@ -48,8 +48,8 @@ def _required_workers() -> set[str]:
 
 
 @router.get("/health/ready")
-def readiness():
-    """Fail closed unless storage, schema, encryption, and workers are ready."""
+async def readiness():
+    """Fail closed unless storage, schema, workers, and active pipeline are ready."""
     from app.db.migrations import schema_revisions
     from app.db.session import get_engine
     from app.services import encryption, worker_supervisor
@@ -86,6 +86,14 @@ def readiness():
 
     workers_ok, workers = worker_supervisor.readiness(_required_workers())
     checks["workers"] = {"ok": workers_ok, "items": workers}
+    from app.services.pipeline_readiness import dependency_checks
+
+    pipeline = await dependency_checks(settings)
+    checks["pipeline"] = {
+        "ok": all(bool(item.get("ok")) for item in pipeline.values()),
+        "mode": settings.classifier_mode_resolved,
+        "items": pipeline,
+    }
     ready = all(bool(item.get("ok")) for item in checks.values())
     body = {"status": "ready" if ready else "not_ready", "version": __version__, "checks": checks}
     return JSONResponse(body, status_code=200 if ready else 503)
@@ -137,12 +145,14 @@ def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse
         },
         classifier={
             "tier": settings.classifier_tier,
+            "mode": settings.classifier_mode_resolved,
             "text_model": settings.text_model,
             "vision_model": settings.vision_model,
             "classifier_timeout_seconds": settings.classifier_timeout_seconds,
             "vision_num_ctx": settings.vision_num_ctx,
             "vision_max_image_edge": settings.vision_max_image_edge,
             "tesseract_enabled": settings.tesseract_enabled,
+            "ocr_languages": ",".join(settings.ocr_language_list),
             "rules_version": settings.rules_version,
         },
         ollama={
@@ -198,19 +208,19 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
 
     # Parent-readable protection summary: full / reduced / rules_only.
     warnings: list[str] = []
-    tier = settings.classifier_tier
+    tier = settings.classifier_mode_resolved
     if not (vision_status.available and text_status.available):
         warnings.append("Ollama is not reachable — AI classification is offline; only deterministic rules are protecting right now.")
     else:
-        if tier in ("full", "text_only") and not text_present:
+        if tier in ("full", "text_llm") and not text_present:
             warnings.append(f"Text model {settings.text_model} is not installed.")
-        if tier in ("full", "vision_only") and not vision_present:
+        if tier in ("full", "vision") and not vision_present:
             warnings.append(f"Vision model {settings.vision_model} is not installed — image-only risks (nudity/gore/weapons) are not detected.")
-    if tier == "text_only":
-        warnings.append("text_only tier: image-only risks (nudity/gore/weapons) are not detected on this hardware.")
+    if tier in {"rules_only", "text_llm"}:
+        warnings.append(f"{tier} mode: image-only risks (nudity/gore/weapons) are not detected on this hardware.")
     if not tesseract_available:
-        if tier == "text_only":
-            warnings.append("Tesseract OCR is not available — screenshots cannot be read at all in text_only tier.")
+        if tier in {"rules_only", "text_llm"}:
+            warnings.append(f"Tesseract OCR is not available — screenshots cannot be read at all in {tier} mode.")
         else:
             warnings.append("Tesseract OCR fallback is not available — exact phrase detection depends on vision OCR.")
     if not (vision_status.available and text_status.available):
@@ -240,6 +250,12 @@ async def pipeline_health(_: User = Depends(current_user)) -> dict:
         "status": "ok",
         "version": __version__,
         "tier": settings.classifier_tier,
+        "mode": settings.classifier_mode_resolved,
+        "ocr": {
+            "available": tesseract_available,
+            "languages": settings.ocr_language_list,
+            "recent": snap.get("ocr", {}),
+        },
         "protection": {"level": protection_level, "warnings": warnings},
         "tesseract_available": tesseract_available,
         "queue": snap,

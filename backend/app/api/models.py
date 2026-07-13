@@ -1,7 +1,7 @@
 """Ollama / model status + test endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.api.deps import current_user
@@ -42,10 +42,15 @@ async def status(_: User = Depends(current_user)):
         text_client = OllamaClient(base_url=text_url)
         vision_status = await vision_client.status()
         text_status = await text_client.status()
-    tier = settings.classifier_tier
+    tier = settings.classifier_mode_resolved
     all_models = sorted(set(vision_status.models) | set(text_status.models))
     return StatusResponse(
-        ollama_available=vision_status.available and text_status.available,
+        ollama_available=(
+            text_status.available if tier == "text_llm"
+            else vision_status.available if tier == "vision"
+            else vision_status.available and text_status.available if tier == "full"
+            else True
+        ),
         ollama_url=vision_status.base_url,
         models_installed=all_models,
         error=vision_status.error or text_status.error,

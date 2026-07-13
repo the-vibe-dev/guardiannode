@@ -61,13 +61,17 @@ class Settings(BaseSettings):
     ollama_status_timeout_seconds: int = 5
     ollama_pull_timeout_seconds: int = 1800
     rules_version: str = "0.1.0-alpha.1"
-    # Classifier tier: governs which paths run per screenshot.
+    # Classifier mode: explicit capability contract for readiness and ingest.
+    # The legacy classifier_tier variable remains accepted through the beta.
+    classifier_mode: str | None = None
+    # Legacy classifier tier: governs which paths run per screenshot.
     #  "full"        — vision LLM + text LLM hot together; needs 16+ GB VRAM
     #  "vision_only" — vision LLM only; needs 12+ GB VRAM
     #  "text_only"   — Tesseract OCR + small text LLM (llama3.2:1b) on CPU; no GPU required
     classifier_tier: str = "text_only"
     # Used in text_only tier and as fallback OCR when vision LLM unavailable.
     tesseract_enabled: bool = True
+    ocr_languages: str = "eng"
     retention_cleanup_enabled: bool = True
     retention_cleanup_interval_seconds: int = 3600
     # Identical open findings (same device/profile/severity/categories) within
@@ -134,6 +138,23 @@ class Settings(BaseSettings):
     @property
     def text_ollama_url_resolved(self) -> str:
         return self.text_ollama_url or self.ollama_url
+
+    @property
+    def classifier_mode_resolved(self) -> str:
+        aliases = {
+            "rules_only": "rules_only",
+            "text_llm": "text_llm",
+            "vision": "vision",
+            "full": "full",
+            "text_only": "text_llm",
+            "vision_only": "vision",
+        }
+        configured = (self.classifier_mode or self.classifier_tier).strip().lower()
+        return aliases.get(configured, configured)
+
+    @property
+    def ocr_language_list(self) -> list[str]:
+        return list(dict.fromkeys(part.strip() for part in self.ocr_languages.split(",") if part.strip()))
 
     def effective_allowed_hosts(self) -> list[str]:
         configured = [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]

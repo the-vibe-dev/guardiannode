@@ -25,10 +25,18 @@ def _table_rows(text: str) -> list[list[str]]:
 def main() -> int:
     failures: list[str] = []
     for row in _table_rows(MATRIX.read_text(encoding="utf-8")):
-        if len(row) != 8:
+        if len(row) == 5:
+            feature, legacy_status, _platform, source_module, test_reference = row
+            if legacy_status == "Planned":
+                continue
+            code = "Present"
+            coverage = "Manual" if test_reference in SENTINELS else "Unit"
+            release = legacy_status
+        elif len(row) == 8:
+            feature, code, coverage, _qualification, _field, release, source_module, test_reference = row
+        else:
             failures.append(f"Malformed row: {row!r}")
             continue
-        feature, code, coverage, _qualification, _field, release, source_module, test_reference = row
         if code == "Absent":
             if release != "Planned":
                 failures.append(f"{feature}: absent code must be Planned, found {release!r}")

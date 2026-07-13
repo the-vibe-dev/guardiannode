@@ -41,14 +41,15 @@ services:
     #           capabilities: [gpu]
 
   backend:
+    image: guardiannode/backend:local
     build:
       context: ../..
       dockerfile: installer/server-linux/Dockerfile.backend
     container_name: guardiannode_backend
     restart: unless-stopped
     depends_on:
-      ollama:
-        condition: service_started
+      pipeline-init:
+        condition: service_completed_successfully
     user: "10001:10001"
     read_only: true
     security_opt:
@@ -57,12 +58,16 @@ services:
       - ALL
     environment:
       - GUARDIANNODE_OLLAMA_URL=http://ollama:11434
+      - GUARDIANNODE_CLASSIFIER_MODE=${GUARDIANNODE_CLASSIFIER_MODE:-text_llm}
+      - GUARDIANNODE_OCR_LANGUAGES=${GUARDIANNODE_OCR_LANGUAGES:-eng}
+      - GUARDIANNODE_TEXT_MODEL=${GUARDIANNODE_TEXT_MODEL:-llama3.2:3b}
+      - GUARDIANNODE_VISION_MODEL=${GUARDIANNODE_VISION_MODEL:-qwen3-vl:8b-instruct}
       - GUARDIANNODE_BIND_HOST=0.0.0.0
       - GUARDIANNODE_BIND_PORT=8787
       - GUARDIANNODE_MDNS_ENABLED=false
       - GUARDIANNODE_VISION_TIMEOUT_SECONDS=240
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:${GUARDIANNODE_HOST_PORT:-8787}:8787"
     volumes:
       - gn_data:/data
     tmpfs:
@@ -75,6 +80,30 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  pipeline-init:
+    image: guardiannode/backend:local
+    build:
+      context: ../..
+      dockerfile: installer/server-linux/Dockerfile.backend
+    depends_on:
+      ollama:
+        condition: service_healthy
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      - GUARDIANNODE_OLLAMA_URL=http://ollama:11434
+      - GUARDIANNODE_CLASSIFIER_MODE=${GUARDIANNODE_CLASSIFIER_MODE:-text_llm}
+      - GUARDIANNODE_OCR_LANGUAGES=${GUARDIANNODE_OCR_LANGUAGES:-eng}
+      - GUARDIANNODE_TEXT_MODEL=${GUARDIANNODE_TEXT_MODEL:-llama3.2:3b}
+      - GUARDIANNODE_VISION_MODEL=${GUARDIANNODE_VISION_MODEL:-qwen3-vl:8b-instruct}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    command: ["guardiannode-backend", "preflight", "--pull-models", "--json"]
 
 volumes:
   ollama_models:

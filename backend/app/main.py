@@ -265,6 +265,13 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     global settings
     settings = settings_mod.settings
+    # Settings are replaceable in tests and maintenance commands. Keep modules
+    # that cache the imported singleton aligned with the effective app config.
+    health_api.settings = settings
+    models_api.settings = settings
+    from app.services import screenshot_ingest
+
+    screenshot_ingest.settings = settings
     app = FastAPI(
         title="GuardianNode",
         version=__version__,
@@ -351,6 +358,26 @@ app = create_app()
 
 def cli() -> None:  # pragma: no cover
     """Console entry point used by the PyInstaller bundle and Linux installer."""
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(prog="guardiannode-backend")
+    subparsers = parser.add_subparsers(dest="command")
+    preflight_parser = subparsers.add_parser("preflight", help="validate active pipeline dependencies")
+    preflight_parser.add_argument("--pull-models", action="store_true")
+    preflight_parser.add_argument("--json", action="store_true", dest="as_json")
+    args = parser.parse_args()
+    if args.command == "preflight":
+        from app.preflight import run
+
+        code, body = asyncio.run(run(pull_models=args.pull_models))
+        if args.as_json:
+            print(json.dumps(body, sort_keys=True, default=str))
+        else:
+            for name, check in body["checks"].items():
+                print(f"{name}: {'ok' if check.get('ok') else check.get('error_code', 'failed')}")
+        raise SystemExit(code)
+
     import uvicorn
 
     uvicorn.run(
