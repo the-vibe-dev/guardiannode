@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Alert, AuditLog, EvidenceBlob, Event, RiskResult
+from app.db.models import Alert, AuditLog, Event, EvidenceBlob, RiskResult
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ DEFAULT_RETENTION_DAYS = {
 
 
 def _cutoff(days: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> dict[str, int]:

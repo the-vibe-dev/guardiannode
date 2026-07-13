@@ -11,7 +11,7 @@ and flips the status back to ``online``, so the dashboard never shows a stale
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.db.models import Device
 
@@ -19,8 +19,8 @@ from app.db.models import Device
 def _as_utc(dt: datetime) -> datetime:
     # SQLite returns naive datetimes; all GuardianNode timestamps are UTC.
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def is_device_paused(device: Device | None, *, now: datetime | None = None) -> bool:
@@ -32,7 +32,7 @@ def is_device_paused(device: Device | None, *, now: datetime | None = None) -> b
     """
     if device is None or device.paused_until is None:
         return False
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if _as_utc(device.paused_until) > now:
         return True
     # Pause has lapsed — clear it server-side.

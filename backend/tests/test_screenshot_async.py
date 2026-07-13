@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.services import screenshot_async
 
@@ -23,7 +23,7 @@ def test_requeue_pending_newest_first_and_discards_stale_backlog(monkeypatch, tm
     monkeypatch.setattr(screenshot_async.settings_mod.settings, "pending_frame_max_age_seconds", 600)
     monkeypatch.setattr(screenshot_async.settings_mod.settings, "pending_replay_max_frames", 2)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _pending_file(tmp_path, "old-fresh", stored_at=now, mtime=10)
     _pending_file(tmp_path, "newer", stored_at=now, mtime=20)
     _pending_file(tmp_path, "newest", stored_at=now, mtime=30)

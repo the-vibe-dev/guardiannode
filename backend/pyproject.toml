@@ -59,4 +59,18 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]  # FastAPI intentionally evaluates dependency markers in signatures.
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "app.services.encryption",
+  "app.services.notifications",
+  "app.services.image_safety",
+  "app.api.events",
+]
+ignore_errors = true

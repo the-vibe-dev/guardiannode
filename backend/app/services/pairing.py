@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -24,7 +24,7 @@ def generate_code() -> str:
 def issue(session: Session, *, ttl_seconds: int = _TTL_SECONDS) -> tuple[str, datetime]:
     code = generate_code()
     code_hash = _PH.hash(code)
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
     row = PairingCode(code_hash=code_hash, expires_at=expires_at, used=False)
     session.add(row)
     session.flush()
@@ -34,7 +34,7 @@ def issue(session: Session, *, ttl_seconds: int = _TTL_SECONDS) -> tuple[str, da
 def verify_and_consume(session: Session, code: str) -> bool:
     """Verify a code, mark it used. Returns True on success."""
     begin_immediate_if_sqlite(session)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = (
         session.query(PairingCode)
         .filter(PairingCode.used.is_(False), PairingCode.expires_at > now)

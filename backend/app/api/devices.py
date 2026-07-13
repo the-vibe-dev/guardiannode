@@ -1,7 +1,7 @@
 """Device management + pairing endpoints."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +11,8 @@ from ulid import ULID
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, User
 from app.db.session import begin_immediate_if_sqlite
-from app.services import device_tokens, pairing as pairing_svc, rate_limit
+from app.services import device_tokens, rate_limit
+from app.services import pairing as pairing_svc
 from app.services.audit import log_action
 from app.services.device_bootstrap_token import verify_and_consume_device_bootstrap_token
 from app.services.device_state import effective_paused_until, is_device_paused
@@ -161,7 +162,7 @@ def _create_paired_device(
         token_hash=token_hash,
         paired=True,
         status="online",
-        last_seen=datetime.now(timezone.utc),
+        last_seen=datetime.now(UTC),
     )
     db.add(device)
     log_action(
@@ -284,7 +285,7 @@ def heartbeat(
     """Agent liveness + upload-backlog report (shown in the pipeline widget)."""
     from app.services import pipeline_metrics
     paused_until = effective_paused_until(device)  # clears expired pauses
-    device.last_seen = datetime.now(timezone.utc)
+    device.last_seen = datetime.now(UTC)
     if device.status not in ("paused", "disabled"):
         device.status = "online"
     if req.agent_version:
@@ -309,8 +310,8 @@ def pause_device(
     device = db.get(Device, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
-    until = datetime.now(timezone.utc).timestamp() + req.duration_seconds
-    device.paused_until = datetime.fromtimestamp(until, tz=timezone.utc)
+    until = datetime.now(UTC).timestamp() + req.duration_seconds
+    device.paused_until = datetime.fromtimestamp(until, tz=UTC)
     device.status = "paused"
     log_action(
         db, actor=str(user.id), action="device.pause",

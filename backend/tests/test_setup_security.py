@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -14,9 +14,9 @@ def _app(monkeypatch, tmp_path):
 
     settings_mod.settings = settings_mod.Settings()
     settings_mod.settings.mdns_enabled = False
-    from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.main import create_app
 
     Base.metadata.create_all(bind=get_engine())
     return create_app()
@@ -73,7 +73,7 @@ def test_expired_setup_token_rejected(monkeypatch, tmp_path):
     token_path().write_text(
         json.dumps({
             "token": "expired-token",
-            "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+            "expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
         }),
         encoding="utf-8",
     )
@@ -84,9 +84,9 @@ def test_expired_setup_token_rejected(monkeypatch, tmp_path):
 
 def test_concurrent_setup_creates_exactly_one_admin(monkeypatch, tmp_path):
     app = _app(monkeypatch, tmp_path)
-    from app.services.setup_token import ensure_setup_token
     from app.db.models import User
     from app.db.session import get_sessionmaker
+    from app.services.setup_token import ensure_setup_token
 
     token = ensure_setup_token()
 

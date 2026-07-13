@@ -39,14 +39,19 @@ claimed**; the following inputs must be pinned to approach it:
 
 | Input | Where pinned |
 |---|---|
-| Python version + deps | `backend/requirements*.txt`, `agent-windows` venv |
-| Node version + deps | `dashboard/package.json` (committed lockfile) |
-| PyInstaller version | build environment (document in release notes) |
+| Python version + deps | Python 3.12 and committed `backend/uv.lock` / `agent-windows/uv.lock` |
+| Python resolver | `uv==0.11.28` in CI |
+| Node version + deps | Node 24, npm 11.6.2, and committed `dashboard/package-lock.json` |
+| PyInstaller version | `6.16.0` in CI |
 | Inno Setup version | `installer/build/innosetup-6.7.1.exe` |
 | WinSW version | `installer/build/WinSW-x64.exe` |
 
-Known sources of nondeterminism still to address before claiming reproducible
-builds:
+CI installs Python environments with `uv sync --frozen` and dashboard packages
+with `npm ci`. Docker's Python and Node images are pinned by manifest digest.
+Ruff, mypy, tests, dependency audits, dashboard tests/build, migrations, and the
+clean Docker canary are blocking checks.
+
+Known sources of nondeterminism that remain documented rather than hidden:
 
 - PyInstaller embeds timestamps/paths; set `SOURCE_DATE_EPOCH` and a fixed build
   path in CI.
@@ -54,10 +59,6 @@ builds:
 - Generated icons are produced at build time — commit the generated `.ico` or pin
   the generator.
 
-## Roadmap
-
-1. Move builds into public CI (GitHub Actions) so the build environment is
-   transparent and logs are public — also a prerequisite for SignPath OSS signing.
-2. Pin all toolchain versions and set `SOURCE_DATE_EPOCH`.
-3. Publish CI build logs alongside each release so a third party can reproduce and
-   diff `SHA256SUMS`.
+Release workflows publish SHA-256 checksums and a release manifest. Bit-for-bit
+installer equivalence is not claimed until PyInstaller and Inno timestamp/path
+differences are normalized and independently compared.

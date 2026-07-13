@@ -1,7 +1,7 @@
 """Child-originated requests for time/site/app exceptions."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -98,7 +98,7 @@ def review_child_request(
     row.status = req.status
     row.response_note = req.response_note
     row.reviewed_by = str(user.id)
-    row.reviewed_at = datetime.now(timezone.utc)
+    row.reviewed_at = datetime.now(UTC)
     log_action(
         db,
         actor=str(user.id),

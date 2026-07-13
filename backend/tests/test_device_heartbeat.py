@@ -14,9 +14,9 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     settings_mod.settings.mdns_enabled = False
     rate_limit._clear_all()
     pipeline_metrics.reset_for_tests()
-    from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.main import create_app
 
     Base.metadata.create_all(bind=get_engine())
     return TestClient(create_app(), client=("127.0.0.1", 50000))

@@ -32,6 +32,7 @@ def _downscale_for_vision(image_bytes: bytes, max_edge: int | None = None) -> by
         return image_bytes
     try:
         import io
+
         from PIL import Image
         img = Image.open(io.BytesIO(image_bytes))
         w, h = img.size

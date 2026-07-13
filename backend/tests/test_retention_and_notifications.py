@@ -13,7 +13,17 @@ from types import SimpleNamespace
 
 from app import settings as settings_mod
 from app.api import settings as settings_api
-from app.db.models import Alert, AuditLog, Device, Event, EvidenceBlob, NotificationLog, RiskResult, Setting, User
+from app.db.models import (
+    Alert,
+    AuditLog,
+    Device,
+    Event,
+    EvidenceBlob,
+    NotificationLog,
+    RiskResult,
+    Setting,
+    User,
+)
 from app.services import encryption, notifications, retention
 
 

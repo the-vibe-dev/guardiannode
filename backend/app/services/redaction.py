@@ -11,11 +11,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_BIP39_HINT_WORDS = {
-    # Small selection of common BIP39 words used as a heuristic — not the full list.
-    # We deliberately don't bundle the 2048-word list; we look for sequences of
-    # 12 or 24 short lowercase words which is the structural signal.
-}
+# Reserved for curated phrase hints; structural 12/24-word detection is primary.
+_BIP39_HINT_WORDS: set[str] = set()
 
 
 @dataclass

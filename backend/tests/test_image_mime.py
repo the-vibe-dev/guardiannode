@@ -5,7 +5,7 @@ import io
 import pytest
 from PIL import Image
 
-from app.db.models import Device, EvidenceBlob, Event
+from app.db.models import Device, Event, EvidenceBlob
 
 
 def _image_bytes(fmt: str) -> bytes:

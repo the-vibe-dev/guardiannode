@@ -12,9 +12,9 @@ def _app(monkeypatch, tmp_path):
 
     settings_mod.settings = settings_mod.Settings()
     settings_mod.settings.mdns_enabled = False
-    from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.main import create_app
 
     Base.metadata.create_all(bind=get_engine())
     return create_app()

@@ -1,14 +1,14 @@
 """Offline/tamper detection raises one alert per offline transition."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.db.models import Alert, Device
 from app.workers import offline_monitor
 
 
 def _device(db, *, last_seen_delta_s: int, status="online", paused_delta_s=None) -> Device:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     d = Device(
         device_id="dev1", hostname="kid-pc", platform="windows", paired=True,
         status=status, last_seen=now - timedelta(seconds=last_seen_delta_s),

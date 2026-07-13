@@ -1,7 +1,7 @@
 """Alert review + actions."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -166,7 +166,7 @@ def review_alert(
         raise HTTPException(404, "Alert not found")
     a.status = req.status
     a.reviewed_by = str(user.id)
-    a.reviewed_at = datetime.now(timezone.utc)
+    a.reviewed_at = datetime.now(UTC)
     if req.notes is not None:
         a.notes = req.notes
     log_action(
@@ -200,7 +200,7 @@ def record_feedback(
     if req.feedback_type == "false_positive":
         a.status = "false_positive"
         a.reviewed_by = str(user.id)
-        a.reviewed_at = datetime.now(timezone.utc)
+        a.reviewed_at = datetime.now(UTC)
     log_action(
         db,
         actor=str(user.id),
@@ -248,7 +248,7 @@ def take_action(
     elif req.action == "escalate":
         a.status = "escalated"
         a.reviewed_by = str(user.id)
-        a.reviewed_at = datetime.now(timezone.utc)
+        a.reviewed_at = datetime.now(UTC)
     a.action_taken = req.action
     log_action(
         db, actor=str(user.id), action="alert.action",

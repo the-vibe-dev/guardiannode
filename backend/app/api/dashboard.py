@@ -1,7 +1,7 @@
 """Aggregated dashboard data for the overview page."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -42,7 +42,7 @@ def _count_since(db: Session, severity: str, since: datetime) -> int:
 
 @router.get("/overview", response_model=Overview)
 def overview(db: Session = Depends(get_db_dep), _: User = Depends(current_user)):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     h24 = now - timedelta(hours=24)
     d7 = now - timedelta(days=7)
 

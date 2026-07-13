@@ -61,14 +61,14 @@ def merge(
             raw.append((f"[image] {e}", "vision"))
 
     # Drop UI-chrome noise — strings that look like generic browser/OS elements.
-    NOISE_PATTERNS = (
+    noise_patterns = (
         "search google", "type a url", "[image] browser tab", "[image] google search bar",
         "[image] address bar", "[image] taskbar", "[image] menu bar", "[image] window controls",
         "add shortcut", "customize chrome", "web store", "[image] start menu",
     )
     def _is_noise(s: str) -> bool:
         low = s.lower()
-        return any(p in low for p in NOISE_PATTERNS)
+        return any(p in low for p in noise_patterns)
 
     # Dedupe by case-insensitive substring containment (keep the LONGEST form).
     cleaned: list[str] = []

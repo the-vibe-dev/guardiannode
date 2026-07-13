@@ -1,22 +1,19 @@
 """Parent password + recovery code utilities."""
 from __future__ import annotations
 
-import secrets
-from dataclasses import dataclass
-
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
-
 # A BIP39-style word list for the recovery code.
 # This is NOT the official BIP39 list (which is 2048 words and licensed under
 # specific terms). It is a project-specific list of ~1,350 short, easy-to-spell
 # English words shipped as a resource file; see app/data/wordlist.txt.
 # The recovery code is 12 words drawn from it: ~124 bits of entropy
 # (12 × log2(1345) ≈ 124.7).
-
-import os
+import secrets
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
 _PH = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
 

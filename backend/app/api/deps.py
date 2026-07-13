@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Generator
 from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Request, status
@@ -16,7 +17,7 @@ from app.services import device_tokens, rate_limit
 log = logging.getLogger(__name__)
 
 
-def get_db_dep() -> Session:  # pragma: no cover - thin wrapper
+def get_db_dep() -> Generator[Session, None, None]:  # pragma: no cover - thin wrapper
     yield from get_db()
 
 
@@ -30,7 +31,7 @@ def _clear_expired_session(request: Request) -> None:
 def _session_float(request: Request, key: str) -> float | None:
     value = request.session.get(key)
     try:
-        return float(value)
+        return float(str(value))
     except (TypeError, ValueError):
         return None
 
@@ -74,7 +75,7 @@ def require_recent_auth(request: Request, _: User = Depends(current_user)) -> No
     """Require a fresh parent authentication for high-impact browser actions."""
     ts = request.session.get("reauth_at") or request.session.get("login_at")
     try:
-        authenticated_at = float(ts)
+        authenticated_at = float(str(ts))
     except (TypeError, ValueError):
         raise HTTPException(status_code=403, detail="Recent authentication required") from None
     if settings_mod.settings.recent_auth_timeout_seconds > 0:

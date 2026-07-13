@@ -5,7 +5,7 @@ import json
 import os
 import secrets
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app import settings as settings_mod
@@ -15,7 +15,7 @@ _token_lock = threading.Lock()
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def token_path() -> Path:
@@ -86,7 +86,7 @@ def _expires_at(data: dict) -> datetime:
     try:
         value = datetime.fromisoformat(str(data["expires_at"]))
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            value = value.replace(tzinfo=UTC)
         return value
     except Exception:
-        return datetime.fromtimestamp(0, tz=timezone.utc)
+        return datetime.fromtimestamp(0, tz=UTC)

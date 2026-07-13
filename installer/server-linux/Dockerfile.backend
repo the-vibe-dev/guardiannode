@@ -2,7 +2,7 @@
 # Multi-stage: build dashboard with Node, install backend Python deps, run with uvicorn.
 
 # ---- Stage 1: build dashboard ----
-FROM node:26-alpine3.22@sha256:c7932b9e5e337b0e733d6e16abc1b0e104759e8b05e59ed56586cce967d26dfe AS dashboard-build
+FROM node:24-alpine3.22@sha256:191c9f0080fcbbc6547a85dc0ff7988072214a355aabdc1d2ec55a7dae5eea8a AS dashboard-build
 WORKDIR /build
 COPY dashboard/package*.json ./dashboard/
 RUN cd dashboard && npm ci --no-audit --no-fund
@@ -10,7 +10,7 @@ COPY dashboard/ ./dashboard/
 RUN cd dashboard && npm run build
 
 # ---- Stage 2: Python runtime ----
-FROM python:3.14.6-slim-bookworm@sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9
+FROM python:3.12.13-slim-bookworm@sha256:8a7e7cc04fd3e2bd787f7f24e22d5d119aa590d429b50c95dfe12b3abe52f48b
 ARG TESSERACT_LANGS="eng"
 RUN set -eux; \
     packages="tesseract-ocr"; \

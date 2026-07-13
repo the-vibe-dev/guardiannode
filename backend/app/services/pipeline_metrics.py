@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
@@ -140,7 +140,7 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
         "in_flight": items,
         "window_seconds": window_seconds,
         "last_classified_at": (
-            datetime.fromtimestamp(last_finished, tz=timezone.utc).isoformat()
+            datetime.fromtimestamp(last_finished, tz=UTC).isoformat()
             if last_finished else None
         ),
         "throughput": {

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services import profile_policy, risk_rules
+from app.services import profile_policy
 from app.services.taxonomy import ALLOWED_CATEGORIES, SEVERITY_ORDER
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "safety_cases"

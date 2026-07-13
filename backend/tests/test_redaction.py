@@ -17,7 +17,7 @@ def test_ignores_random_16_digits_failing_luhn():
     r = redact(text)
     # Likely fails Luhn; should remain
     if "[REDACTED:card]" in r.redacted_text:
-        assert False, "should not have flagged"
+        raise AssertionError("should not have flagged")
 
 
 def test_redacts_ssn():

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import socket
-from typing import Optional
 
 from app.settings import settings
 
@@ -25,8 +24,8 @@ except ImportError:  # pragma: no cover
 
 _SERVICE_TYPE = "_guardiannode._tcp.local."
 
-_zc: Optional["Zeroconf"] = None
-_info: Optional["ServiceInfo"] = None
+_zc: Zeroconf | None = None
+_info: ServiceInfo | None = None
 
 
 def _hostname() -> str:

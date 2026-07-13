@@ -20,9 +20,9 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
     settings_mod.settings = settings_mod.Settings()
     settings_mod.settings.mdns_enabled = False
-    from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.main import create_app
     from app.services.setup_token import ensure_setup_token
 
     Base.metadata.create_all(bind=get_engine())

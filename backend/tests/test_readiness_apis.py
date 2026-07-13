@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,9 +15,9 @@ def _client(monkeypatch, tmp_path):
 
     settings_mod.settings = settings_mod.Settings()
     settings_mod.settings.mdns_enabled = False
-    from app.main import create_app
     from app.db.models import Base
     from app.db.session import get_engine
+    from app.main import create_app
     from app.services.setup_token import ensure_setup_token
 
     Base.metadata.create_all(bind=get_engine())
@@ -169,7 +169,7 @@ def test_alert_detail_includes_feed_context(monkeypatch, tmp_path):
                 source_type="image",
                 app_name="notepad.exe",
                 window_title="trigger - Notepad",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
             )
         )
         db.add(
@@ -206,7 +206,7 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
         db.add(Device(device_id="action-dev", hostname="kid-pc", paired=True))
         db.add(Event(
             event_id="action-event", device_id="action-dev", source_type="text",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         ))
         db.add(RiskResult(
             risk_id="action-risk", event_id="action-event", risk_level="high", score=80,
