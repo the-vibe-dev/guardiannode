@@ -8,13 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
+from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
-from alembic import command
 from app import settings as settings_mod
 from app.db.maintenance import backup_database, integrity_check, sqlite_path_from_url
 
