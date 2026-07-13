@@ -44,3 +44,18 @@ unsupported.
 Store recovery private keys separately from both the server and its backups.
 Anyone holding a portable archive and its passphrase or recovery private key
 can recover the family's data.
+
+## Scheduled complete backups
+
+Generate a recovery key with `guardiannode-archive keygen`, store the private
+key offline, and paste only the public PEM into **Settings → Complete recovery
+backups**. Scheduled backups are portable `.gna` archives containing the
+database, evidence, configuration, component versions, and recoverable master
+key. GuardianNode adds an instance-only verification slot so it can verify the
+finished archive without retaining the recovery private key.
+
+Backups are written to a partial file, authenticated after creation, and then
+subject to the configured retention count. The dashboard reports failed,
+successful, verified, and restore-tested timestamps separately. A backup is
+never marked verified unless its complete file inventory and evidence coverage
+pass validation.

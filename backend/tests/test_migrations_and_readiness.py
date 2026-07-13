@@ -39,8 +39,8 @@ def test_empty_database_migrates_to_snapshotted_schema(monkeypatch, tmp_path: Pa
     fixture = json.loads(
         (SCHEMA_FIXTURES / "0001_beta_baseline.json").read_text(encoding="utf-8")
     )
-    assert sorted(inspect(engine).get_table_names()) == fixture["tables"]
-    assert schema_revisions(engine)[0] == fixture["revision"]
+    assert sorted(inspect(engine).get_table_names()) == sorted([*fixture["tables"], "backup_runs"])
+    assert schema_revisions(engine)[0] == "0002_complete_backups"
 
 
 def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_path: Path):
@@ -54,7 +54,7 @@ def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_pat
     engine = get_engine()
     result = upgrade_schema(engine)
     current, head = schema_revisions(engine)
-    assert current == head == "0001_beta_baseline"
+    assert current == head == "0002_complete_backups"
     assert result["backup"] is not None
     assert Path(result["backup"]).is_file()
     assert "session_revoked_at" in {col["name"] for col in inspect(engine).get_columns("users")}
@@ -79,7 +79,7 @@ def test_interrupted_unstamped_migration_recovers_without_losing_evidence(monkey
             "'2026-01-01', NULL)"
         )
     result = upgrade_schema(engine)
-    assert result["current_revision"] == "0001_beta_baseline"
+    assert result["current_revision"] == "0002_complete_backups"
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT encrypted_path FROM evidence_blobs WHERE blob_id='blob-1'"
@@ -114,9 +114,10 @@ def test_readiness_checks_workers_schema_storage_and_encryption(monkeypatch, tmp
 def test_scheduled_backup_is_restorable_and_prunes_old_generations(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
     from app import settings as settings_mod
+    from app.archive import crypto
+    from app.archive.format import restore_archive
     from app.db import session as session_mod
-    from app.db.maintenance import backup_database, integrity_check, restore_database
-    from app.db.models import Base
+    from app.db.migrations import upgrade_schema
     from app.db.session import get_engine
     from app.workers import backup_worker
 
@@ -125,17 +126,27 @@ def test_scheduled_backup_is_restorable_and_prunes_old_generations(monkeypatch, 
     settings_mod.settings.ensure_dirs()
     session_mod._engine = None
     session_mod._SessionLocal = None
-    Base.metadata.create_all(get_engine())
-    source = tmp_path / "guardiannode.db"
-    old = settings_mod.settings.backups_dir / "scheduled-20000101T000000Z.sqlite3"
-    backup_database(old, source=source)
+    upgrade_schema(get_engine())
+    private_key = tmp_path / "recovery.pem"
+    public_key = tmp_path / "recovery.pub.pem"
+    crypto.generate_recipient_key(private_key, public_key)
+    config = {
+        **backup_worker.default_config(),
+        "enabled": True,
+        "recipient_public_key": public_key.read_text("ascii"),
+        "retention_count": 1,
+    }
 
-    scheduled = backup_worker.run_once()
+    first = backup_worker.run_once(config)
+    scheduled = backup_worker.run_once(config)
     assert scheduled is not None and scheduled.is_file()
-    assert list(settings_mod.settings.backups_dir.glob("scheduled-*.sqlite3")) == [scheduled]
-    assert not list(settings_mod.settings.backups_dir.glob(".*.partial-wal"))
-    assert not list(settings_mod.settings.backups_dir.glob(".*.partial-shm"))
+    assert first is not None and not first.exists()
+    assert list(settings_mod.settings.backups_dir.glob("complete-*.gna")) == [scheduled]
+    assert not list(settings_mod.settings.backups_dir.glob("*.partial"))
 
-    restored = tmp_path / "restore-drill.sqlite3"
-    restore_database(scheduled, destination=restored)
-    assert integrity_check(restored).ok
+    restored = tmp_path / "restore-drill"
+    result = restore_archive(
+        scheduled, restored, private_key=crypto.load_private_key(private_key)
+    )
+    assert result["ok"]
+    assert (restored / "guardiannode.db").is_file()

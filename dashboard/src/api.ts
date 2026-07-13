@@ -128,6 +128,11 @@ export const api = {
     request<any>("/settings/retention", { method: "PATCH", body: JSON.stringify(body) }),
   runRetentionCleanup: () =>
     request<any>("/settings/retention/run-cleanup", { method: "POST" }),
+  backupSettings: () => request<any>("/settings/backups"),
+  updateBackupSettings: (body: any) =>
+    request<any>("/settings/backups", { method: "PATCH", body: JSON.stringify(body) }),
+  runCompleteBackup: () =>
+    request<any>("/settings/backups/run", { method: "POST" }),
   storage: () => request<any>("/storage"),
   exports: () => request<any[]>("/storage/exports"),
   exportStorage: () => request<any>("/storage/export", { method: "POST" }),

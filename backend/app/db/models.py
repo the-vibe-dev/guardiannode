@@ -283,3 +283,24 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class BackupRun(Base):
+    __tablename__ = "backup_runs"
+    __table_args__ = (Index("ix_backup_runs_started_at", "started_at"),)
+
+    backup_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    backup_type: Mapped[str] = mapped_column(String(32), default="complete")
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    destination: Mapped[str] = mapped_column(String(4096))
+    archive_path: Mapped[str | None] = mapped_column(String(4096), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archive_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    evidence_covered: Mapped[bool] = mapped_column(Boolean, default=False)
+    recoverable_key: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    restore_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

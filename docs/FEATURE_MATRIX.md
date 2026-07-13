@@ -16,6 +16,8 @@ ready. GuardianNode currently makes no production-readiness claim.
 | Local Ollama classification | Present | Mock integration | Windows candidate | Validated | Experimental | `backend/app/services/classifier.py` | `backend/tests/test_model_fallback.py` |
 | Encrypted retained evidence | Present | Integration | Source qualified | Limited | Beta candidate | `backend/app/services/encryption.py` | `backend/tests/test_export.py` |
 | Export list/download/delete | Present | Integration | Source qualified | Limited | Beta candidate | `backend/app/api/storage.py` | `backend/tests/test_export.py` |
+| Portable `.gna` archive and clean-host restore | Present | Integration | Source qualified | Limited | Beta candidate | `backend/app/archive/format.py` | `backend/tests/test_archive_format.py` |
+| Complete scheduled recovery backup | Present | Integration | Source qualified | None | Experimental | `backend/app/workers/backup_worker.py` | `backend/tests/test_migrations_and_readiness.py` |
 | Windows tray/status UI | Present | Partial unit | Windows candidate | Validated | Experimental | `agent-windows/src/tray_app.py` | Manual Windows validation |
 | Windows watchdog | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
 | Durable encrypted agent queue | Present | Unit | Windows candidate | Limited | Experimental | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |

@@ -2,18 +2,22 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db_dep
-from app.db.models import Setting, User
+from app.api.deps import current_user, get_db_dep, require_recent_auth
+from app.db.models import BackupRun, Setting, User
 from app.services import encryption, retention
 from app.services.audit import log_action
 from app.services.notifications import run_test
+from app.workers import backup_worker
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -182,6 +186,11 @@ def update_retention(
     user: User = Depends(current_user),
 ):
     data = req.model_dump()
+    if data["incremental_evidence"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Incremental evidence chains are not enabled in this release; use complete backups",
+        )
     _set_json(db, "retention_settings", data)
     log_action(
         db,
@@ -211,3 +220,136 @@ def run_retention_cleanup(
     )
     db.commit()
     return result
+
+
+class BackupSettings(BaseModel):
+    enabled: bool = False
+    destination: str = Field(min_length=1, max_length=4096)
+    recipient_public_key: str = Field(default="", max_length=8192)
+    retention_count: int = Field(default=7, ge=1, le=365)
+    interval_seconds: int = Field(default=86400, ge=300, le=31_536_000)
+    incremental_evidence: bool = False
+    hook_argv: list[str] = Field(default_factory=list, max_length=16)
+
+
+def _backup_public(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **config,
+        "recipient_configured": bool(config.get("recipient_public_key")),
+    }
+
+
+@router.get("/backups")
+def get_backups(
+    db: Session = Depends(get_db_dep),
+    _: User = Depends(current_user),
+):
+    config = backup_worker.load_config(db)
+    latest = db.query(BackupRun).order_by(BackupRun.started_at.desc()).limit(20).all()
+    return {
+        "config": _backup_public(config),
+        "runs": [
+            {
+                "backup_id": row.backup_id,
+                "status": row.status,
+                "destination": row.destination,
+                "archive_path": row.archive_path,
+                "size_bytes": row.size_bytes,
+                "evidence_covered": row.evidence_covered,
+                "recoverable_key": row.recoverable_key,
+                "error_code": row.error_code,
+                "error_detail": row.error_detail,
+                "started_at": row.started_at,
+                "completed_at": row.completed_at,
+                "verified_at": row.verified_at,
+                "restore_tested_at": row.restore_tested_at,
+            }
+            for row in latest
+        ],
+    }
+
+
+@router.patch("/backups")
+def update_backups(
+    req: BackupSettings,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
+):
+    from cryptography.hazmat.primitives import serialization
+
+    data = req.model_dump()
+    if any(not item or len(item) > 1024 for item in data["hook_argv"]):
+        raise HTTPException(status_code=422, detail="Backup hook arguments must be 1-1024 characters")
+    if data["recipient_public_key"]:
+        try:
+            key = backup_worker._public_key(data["recipient_public_key"])
+            data["recipient_fingerprint"] = hashlib.sha256(key.public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )).hexdigest()
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    elif data["enabled"]:
+        raise HTTPException(status_code=422, detail="A recovery public key is required")
+    destination = Path(data["destination"]).expanduser()
+    if not destination.is_absolute():
+        raise HTTPException(status_code=422, detail="Backup destination must be an absolute path")
+    data["destination"] = str(destination)
+    _set_json(db, "complete_backup_config", data)
+    log_action(
+        db,
+        actor=str(user.id),
+        action="settings.backups.update",
+        details={
+            "enabled": data["enabled"],
+            "destination": data["destination"],
+            "recipient_fingerprint": data.get("recipient_fingerprint", ""),
+            "retention_count": data["retention_count"],
+        },
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return _backup_public(data)
+
+
+@router.post("/backups/run")
+def run_complete_backup(
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
+):
+    config = backup_worker.load_config(db)
+    if not config.get("enabled"):
+        raise HTTPException(status_code=409, detail="Complete backups are not enabled")
+    try:
+        archive = backup_worker.run_once(config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Complete backup failed: {exc}") from exc
+    log_action(
+        db, actor=str(user.id), action="backup.run", target=str(archive),
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return {"ok": True, "archive": str(archive)}
+
+
+@router.post("/backups/{backup_id}/restore-tested")
+def mark_restore_tested(
+    backup_id: str,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+    _: None = Depends(require_recent_auth),
+):
+    row = db.get(BackupRun, backup_id)
+    if row is None or row.status != "verified":
+        raise HTTPException(status_code=404, detail="Verified backup not found")
+    row.restore_tested_at = datetime.now(UTC)
+    log_action(
+        db, actor=str(user.id), action="backup.restore_tested", target=backup_id,
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return {"ok": True, "restore_tested_at": row.restore_tested_at}

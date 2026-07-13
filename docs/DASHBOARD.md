@@ -31,7 +31,7 @@ Output to `dist/`, which the backend serves as static files.
 - `/risks/:id` — alert detail
 - `/policies` — per-profile policy editor
 - `/models` — Ollama model status + test
-- `/settings` — notifications, retention, and local encrypted exports
+- `/settings` — notifications, retention, complete recovery backups, and local encrypted exports
 
 ## API client
 

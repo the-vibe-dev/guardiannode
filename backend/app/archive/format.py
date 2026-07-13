@@ -165,6 +165,7 @@ def _zip_payload(payload: Path, destination: Path) -> None:
 def create_archive(
     destination: Path, *, data_dir: Path, db_url: str, mode: str = "portable",
     passphrase: str | None = None, recipient_key: X25519PublicKey | None = None,
+    include_instance_key_slot: bool = False,
 ) -> dict[str, Any]:
     """Create a complete GNA v1 recovery archive."""
     if mode not in {"portable", "instance_snapshot"}:
@@ -182,7 +183,7 @@ def create_archive(
         slots.append(crypto.passphrase_slot(archive_key, passphrase))
     if recipient_key is not None:
         slots.append(crypto.recipient_slot(archive_key, recipient_key))
-    if mode == "instance_snapshot":
+    if mode == "instance_snapshot" or include_instance_key_slot:
         slots.append(crypto.instance_slot(archive_key, encryption.get_master_key()))
 
     with tempfile.TemporaryDirectory(prefix="guardiannode-archive-") as temporary:

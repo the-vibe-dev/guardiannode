@@ -41,22 +41,25 @@ export default function Settings() {
   const [notifications, setNotifications] = useState<any>(null);
   const [retention, setRetention] = useState<any>(null);
   const [storage, setStorage] = useState<any>(null);
+  const [backups, setBackups] = useState<any>(null);
   const [exportsList, setExportsList] = useState<any[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   async function reload() {
-    const [n, r, s, e] = await Promise.all([
+    const [n, r, s, e, b] = await Promise.all([
       api.notificationSettings(),
       api.retentionSettings(),
       api.storage(),
       api.exports(),
+      api.backupSettings(),
     ]);
     setNotifications({ ...n, password: "" });
     setRetention(r);
     setStorage(s);
     setExportsList(e);
+    setBackups(b);
   }
 
   useEffect(() => {
@@ -89,7 +92,7 @@ export default function Settings() {
     return payload;
   }
 
-  if (!notifications || !retention || !storage) {
+  if (!notifications || !retention || !storage || !backups) {
     return <div className="text-gray-500">Loading settings…</div>;
   }
 
@@ -236,6 +239,62 @@ export default function Settings() {
       </section>
 
       <section className="bg-white shadow rounded p-4 space-y-3">
+        <h2 className="font-semibold">Complete recovery backups</h2>
+        <p className="text-xs text-gray-500">
+          Includes the database, evidence, configuration, versions, and recoverable key material. Keep the recovery private key offline.
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={Boolean(backups.config.enabled)}
+            onChange={(e) => setBackups({ ...backups, config: { ...backups.config, enabled: e.target.checked } })}
+          />
+          Scheduled complete backups enabled
+        </label>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label="Destination path" value={backups.config.destination} onChange={(destination) => setBackups({ ...backups, config: { ...backups.config, destination } })} />
+          <Field label="Retention count" type="number" value={String(backups.config.retention_count)} onChange={(value) => setBackups({ ...backups, config: { ...backups.config, retention_count: Number(value) } })} />
+          <Field label="Interval (seconds)" type="number" value={String(backups.config.interval_seconds)} onChange={(value) => setBackups({ ...backups, config: { ...backups.config, interval_seconds: Number(value) } })} />
+        </div>
+        <label className="block text-sm">
+          <span className="text-xs text-gray-500">Offline X25519 recovery public key (PEM)</span>
+          <textarea
+            className="mt-1 w-full border rounded px-2 py-1 font-mono text-xs"
+            rows={4}
+            value={backups.config.recipient_public_key || ""}
+            onChange={(e) => setBackups({ ...backups, config: { ...backups.config, recipient_public_key: e.target.value } })}
+          />
+        </label>
+        <div className="grid gap-2 text-sm md:grid-cols-4">
+          <Stat label="Recovery key" value={backups.config.recipient_configured ? "Configured" : "Missing"} />
+          <Stat label="Last complete" value={backups.runs[0]?.completed_at ? fmtDate(backups.runs[0].completed_at) : "Never"} />
+          <Stat label="Last verified" value={backupDate(backups.runs, "verified_at")} />
+          <Stat label="Last restore test" value={backupDate(backups.runs, "restore_tested_at")} />
+        </div>
+        {backups.runs[0]?.status === "failed" && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded p-2 text-sm">
+            Last backup failed: {backups.runs[0].error_detail || backups.runs[0].error_code}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => run("save-backups", () => api.updateBackupSettings(backups.config), "Complete backup settings saved.")}
+            disabled={busy !== null}
+            className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
+          >
+            Save backup settings
+          </button>
+          <button
+            onClick={() => run("run-backup", api.runCompleteBackup, "Complete backup created and verified.")}
+            disabled={busy !== null || !backups.config.enabled}
+            className="bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-800 px-3 py-2 rounded text-sm"
+          >
+            Back up now
+          </button>
+        </div>
+      </section>
+
+      <section className="bg-white shadow rounded p-4 space-y-3">
         <h2 className="font-semibold">Storage</h2>
         <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
           <Stat label="Alerts" value={storage.alerts} />
@@ -343,4 +402,9 @@ function fmtBytes(n: number) {
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleString();
+}
+
+function backupDate(runs: any[], field: string) {
+  const value = runs.find((run) => run[field])?.[field];
+  return value ? fmtDate(value) : "Never";
 }
