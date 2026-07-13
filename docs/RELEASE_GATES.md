@@ -36,7 +36,7 @@ make its deployment mode supported.
 | Deployment | Current status | Promotion requirement |
 |---|---|---|
 | Native all-in-one Windows | Closed-beta candidate | Current Windows golden install/reboot/upgrade/uninstall gate. |
-| Docker Compose | Experimental | Clean OCR-to-alert canary becomes a required CI and release gate. |
+| Docker Compose | Closed-beta candidate | Keep the required clean OCR-to-alert CI gate green; qualify optional languages and vision modes separately. |
 | Source evaluation on loopback | Technical evaluation | Locked install plus backend, agent, dashboard, and migration suites. |
 | Separated private network | Restricted | Plan 2 secure-transport and network qualification. |
 | Public internet exposure | Unsupported | No promotion path in this plan. |

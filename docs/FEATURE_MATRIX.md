@@ -11,7 +11,7 @@ ready. GuardianNode currently makes no production-readiness claim.
 | Device pairing | Present | Integration | Windows candidate | Validated | Beta candidate | `backend/app/services/pairing.py` | `backend/tests/test_device_auth.py` |
 | Local all-in-one bootstrap | Present | Integration | Windows candidate | Validated | Experimental | `backend/app/api/devices.py` | `backend/tests/test_pairing_local_bootstrap.py` |
 | Screenshot upload and classification | Present | Integration | Windows candidate | Validated | Beta candidate | `backend/app/services/screenshot_async.py` | `backend/tests/test_image_mime.py` |
-| Server-side OCR | Present | Unit | Not Docker-qualified | Limited | Experimental | `backend/app/services/screenshot_ingest.py` | `backend/tests/test_profile_resolution.py` |
+| Server-side OCR | Present | Clean-container canary | Docker qualified | Limited | Beta candidate | `backend/app/services/ocr.py` | `scripts/docker_canary.py` |
 | Deterministic rule classification | Present | Corpus gate | Source qualified | Validated | Beta candidate | `backend/app/services/risk_rules.py` | `tests/test_classifier_benchmark.py` |
 | Local Ollama classification | Present | Mock integration | Windows candidate | Validated | Experimental | `backend/app/services/classifier.py` | `backend/tests/test_model_fallback.py` |
 | Encrypted retained evidence | Present | Integration | Source qualified | Limited | Beta candidate | `backend/app/services/encryption.py` | `backend/tests/test_export.py` |
@@ -20,7 +20,7 @@ ready. GuardianNode currently makes no production-readiness claim.
 | Windows watchdog | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
 | Durable encrypted agent queue | Present | Unit | Windows candidate | Limited | Experimental | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |
 | Privileged Windows broker | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/broker_service.py` | `agent-windows/tests/test_broker_service.py` |
-| Docker Compose deployment | Present | Config/build only | Not qualified | None | Experimental | `installer/server-linux/docker-compose.yml` | `tests/test_release_workflows.py` |
+| Docker Compose deployment | Present | Clean OCR-to-alert canary | Linux CI qualified | CI validated | Closed-beta candidate | `installer/server-linux/docker-compose.yml` | `scripts/docker_canary.py` |
 | Built-in TLS/mTLS separated mode | Absent | None | Not qualified | None | Planned | Planned transport layer | Not implemented |
 | Automatic application updates | Absent | None | Not qualified | None | Planned | Planned updater | Not implemented |
 

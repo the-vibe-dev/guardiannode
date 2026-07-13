@@ -74,7 +74,9 @@ docker compose up --build -d
 For a deterministic rules-only deployment, explicitly set
 `GUARDIANNODE_CLASSIFIER_MODE=rules_only`; this skips model classification.
 
-Docker vision/full modes remain experimental. Optional OCR packs can be built
+The default English text-LLM Compose path is a closed-beta candidate and its
+clean OCR-to-alert canary is required in CI. Docker vision/full modes remain
+experimental. Optional OCR packs can be built
 with `--build-arg TESSERACT_LANGS="eng spa"` and must also be listed in
 `GUARDIANNODE_OCR_LANGUAGES`; only `eng` is currently platform-qualified.
 
