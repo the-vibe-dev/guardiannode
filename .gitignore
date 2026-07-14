@@ -47,6 +47,7 @@ yarn-error.log*
 .yarn-integrity
 
 # Build outputs
+site/
 dashboard/dist/
 agent-windows/dist/
 agent-windows/build/

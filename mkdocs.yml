@@ -53,6 +53,15 @@ exclude_docs: |
 
 nav:
   - Home: index.md
+  - Build Week 2026:
+      - Baseline: build-week/BASELINE.md
+      - Changelog: build-week/CHANGELOG.md
+      - Guardian Review specification: build-week/GUARDIAN_REVIEW_SPEC.md
+      - Privacy model: build-week/PRIVACY_MODEL.md
+      - Evaluation plan: build-week/EVALUATION_PLAN.md
+      - Codex collaboration: build-week/CODEX_COLLABORATION.md
+      - Submission checklist: build-week/SUBMISSION_CHECKLIST.md
+      - Preliminary Devpost draft: build-week/DEVPOST_DRAFT.md
   - For Parents:
       - Install on one PC: PARENT_GUIDES/install-on-one-pc.md
       - Install a server + child PC: PARENT_GUIDES/install-server-and-child.md

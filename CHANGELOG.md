@@ -4,7 +4,17 @@ All notable changes to GuardianNode are documented here.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+- Established an immutable Build Week baseline and dedicated Guardian Review
+  branch.
+- Added Build Week evidence, privacy, evaluation, collaboration, submission,
+  and preliminary Devpost documents.
+- Added the versioned Guardian Review strict assessment schema and README
+  existing-project disclosure.
+- Sanitized current release-validation infrastructure labels and added a safe
+  sample environment file.
+
+Guardian Review runtime, UI, and OpenAI integration remain planned rather than
+implemented in this entry.
 
 ## [0.1.0-alpha.1] - 2026-06-19
 

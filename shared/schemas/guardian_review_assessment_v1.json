@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardiannode.org/schemas/guardian-review-assessment-v1.json",
+  "title": "Guardian Review Assessment v1",
+  "description": "Strict model-produced assessment for a parent-requested Guardian Review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "assessment",
+    "category",
+    "severity",
+    "confidence",
+    "plain_language_summary",
+    "supporting_evidence",
+    "possible_benign_explanations",
+    "missing_context",
+    "questions_parent_should_answer",
+    "recommended_parent_tone",
+    "suggested_opening_language",
+    "questions_to_ask_child",
+    "phrases_or_approaches_to_avoid",
+    "immediate_actions",
+    "follow_up_actions",
+    "escalation_indicators",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "assessment": {
+      "type": "string",
+      "enum": ["concerning", "ambiguous", "likely_benign"]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "none",
+        "self_harm",
+        "grooming",
+        "sexual_content",
+        "sexual_exploitation",
+        "child_sexual_content",
+        "nudity",
+        "bullying",
+        "threat",
+        "scam",
+        "phishing",
+        "private_info",
+        "private_info_request",
+        "private_info_visible",
+        "off_platform_contact",
+        "secrecy_request",
+        "drugs",
+        "weapons",
+        "gore",
+        "hate_symbol",
+        "dangerous_challenge",
+        "profanity",
+        "unknown_link",
+        "custom_watch",
+        "monitoring_gap",
+        "unknown"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["none", "low", "medium", "high", "critical"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "plain_language_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "supporting_evidence": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "observation", "relevance"],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "observation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "relevance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    "possible_benign_explanations": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "missing_context": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "questions_parent_should_answer": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "recommended_parent_tone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tone", "rationale"],
+      "properties": {
+        "tone": {
+          "type": "string",
+          "enum": [
+            "calm_and_curious",
+            "supportive_and_direct",
+            "urgent_and_reassuring",
+            "safety_first"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "suggested_opening_language": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1500
+    },
+    "questions_to_ask_child": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "phrases_or_approaches_to_avoid": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "immediate_actions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["priority", "action", "rationale"],
+        "properties": {
+          "priority": {
+            "type": "string",
+            "enum": ["now", "today", "when_practical"]
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    "follow_up_actions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["timeframe", "action", "rationale"],
+        "properties": {
+          "timeframe": {
+            "type": "string",
+            "enum": ["within_24_hours", "within_one_week", "ongoing"]
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    "escalation_indicators": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    }
+  },
+  "$defs": {
+    "guidance_list": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    }
+  }
+}
