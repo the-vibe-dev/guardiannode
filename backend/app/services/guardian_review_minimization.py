@@ -18,6 +18,10 @@ _PHONE = re.compile(r"(?<!\w)(?:\+?1[ .-]?)?(?:\(?\d{3}\)?[ .-]?)\d{3}[ .-]?\d{4
 _URL = re.compile(r"\bhttps?://[^\s]+", re.I)
 _IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _HANDLE = re.compile(r"(?<!\w)@[A-Za-z0-9_.-]{2,32}\b")
+_STREET_ADDRESS = re.compile(
+    r"\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s+){0,5}(?:street|st|avenue|ave|road|rd|lane|ln|drive|dr|court|ct|boulevard|blvd|way)\b",
+    re.I,
+)
 
 
 class InvalidIncidentError(ValueError):
@@ -46,7 +50,7 @@ def minimize_text(value: str, *, profile: ChildProfile | None) -> tuple[str, dic
     secret_result = redaction.redact(value)
     value = secret_result.redacted_text
     counts.update(secret_result.summary)
-    for pattern, tag in ((_EMAIL, "email"), (_PHONE, "phone"), (_URL, "url"), (_IP, "ip"), (_HANDLE, "handle")):
+    for pattern, tag in ((_EMAIL, "email"), (_PHONE, "phone"), (_URL, "url"), (_IP, "ip"), (_HANDLE, "handle"), (_STREET_ADDRESS, "address")):
         value = _replace(pattern, tag, value, counts)
     if profile is not None:
         sensitive_phrases = [profile.display_name, *(profile.custom_watch_phrases or [])]
@@ -131,7 +135,7 @@ def build_minimized_incident(
             "classifier_status": risk.classifier_status,
         },
         "minimized_evidence": minimized_evidence,
-        "approximate_child_age_group": profile.age_group if profile else "unknown",
+        "approximate_child_age_group": profile.age_group if profile and profile.age_group in {"under_10", "10_13", "14_17"} else "unknown",
         "known_relationship_context": context.relationship_context,
         "behavior_repeated": context.repeated_behavior,
         "local_repeat_count": max(1, int(alert.repeat_count or 1)),

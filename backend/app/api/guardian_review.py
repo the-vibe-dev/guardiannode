@@ -32,7 +32,7 @@ def _error(exc: workflow.WorkflowError) -> JSONResponse:
 
 
 @router.get("/guardian-review/providers")
-def providers(user: User = Depends(parent_user)) -> dict:
+def providers(_: User = Depends(parent_user)) -> dict:
     settings = settings_mod.settings
     codex = codex_auth.status(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
     return {
@@ -44,7 +44,6 @@ def providers(user: User = Depends(parent_user)) -> dict:
             "codex": {"available": codex["installed"], **codex},
             "openai": {"available": bool((settings.openai_api_key or os.getenv("OPENAI_API_KEY")) and settings.guardian_review_zdr_confirmed), "api_key_configured": bool(settings.openai_api_key or os.getenv("OPENAI_API_KEY")), "zdr_confirmed": settings.guardian_review_zdr_confirmed},
         },
-        "actor": str(user.id),
     }
 
 

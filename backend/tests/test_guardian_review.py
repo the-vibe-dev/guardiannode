@@ -77,7 +77,7 @@ def _seed_incident() -> None:
     try:
         db.add(ChildProfile(profile_id="profile-1", display_name="Avery", age_group="10_13", custom_watch_phrases=["Example Middle School"]))
         db.add(Device(device_id="device-1", hostname="family-pc", platform="windows", paired=True, profile_id="profile-1"))
-        text = "Avery contact me at child@example.test or https://private.test Example Middle School"
+        text = "Avery contact me at child@example.test or https://private.test near 123 Main Street Example Middle School"
         db.add(Event(event_id="event-1", device_id="device-1", profile_id="profile-1", source_type="image", app_name="private.exe", window_title="private", url="https://never-send.test", timestamp=datetime.now(UTC), redacted_text_enc=encryption.encrypt_text(text)))
         db.add(RiskResult(risk_id="risk-1", event_id="event-1", risk_level="high", score=82, categories=["grooming"], summary=text, evidence=[text], recommended_action="parent_review", rules_triggered=["secrecy_request"], confidence=0.8, classifier_status="ok"))
         db.flush()
@@ -154,10 +154,20 @@ def test_preview_loads_server_incident_and_redacts_sensitive_fields(monkeypatch,
     assert "Avery" not in outbound
     assert "example.test" not in outbound
     assert "Example Middle School" not in outbound
+    assert "123 Main Street" not in outbound
     assert "private.exe" not in outbound
     assert "never-send" not in outbound
-    assert {"email", "profile_term", "url"}.issubset(preview["redactions_applied"])
+    assert {"address", "email", "profile_term", "url"}.issubset(preview["redactions_applied"])
     assert preview["outbound_payload"]["approximate_child_age_group"] == "10_13"
+
+
+def test_preview_rejects_unbounded_or_invalid_evidence_ids(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/alerts/alert-1/guardian-review/preview",
+        json={"selected_evidence_ids": ["x" * 129]},
+    )
+    assert response.status_code == 422
 
 
 def test_complete_mock_route_persists_encrypted_result_and_deduplicates(monkeypatch, tmp_path):
@@ -285,6 +295,28 @@ async def test_missing_codex_executable_is_safely_unavailable(tmp_path):
     with pytest.raises(ProviderError, match="provider_unavailable") as exc:
         await provider.assess(payload={}, prompt="x", model="gpt-5.6", timeout=1)
     assert exc.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_codex_policy_error_is_not_retried_or_exposed(tmp_path):
+    executable = tmp_path / "codex-test"
+    executable.write_text("#!/bin/sh\necho 'invalid_request_error: model not supported' >&2\nexit 1\n", encoding="utf-8")
+    executable.chmod(0o700)
+    provider = CodexProvider(executable=str(executable), codex_home=tmp_path / "home")
+    with pytest.raises(ProviderError, match="upstream_policy_or_validation") as exc:
+        await provider.assess(payload={"synthetic": True}, prompt="x", model="gpt-5.6", timeout=1)
+    assert exc.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_codex_timeout_terminates_process_group(tmp_path):
+    executable = tmp_path / "codex-slow"
+    executable.write_text("#!/bin/sh\nsleep 10\n", encoding="utf-8")
+    executable.chmod(0o700)
+    provider = CodexProvider(executable=str(executable), codex_home=tmp_path / "home")
+    with pytest.raises(ProviderError, match="upstream_timeout") as exc:
+        await provider.assess(payload={"synthetic": True}, prompt="x", model="gpt-5.6-sol", timeout=0.05)
+    assert exc.value.retryable is True
 
 
 class _SequenceProvider:

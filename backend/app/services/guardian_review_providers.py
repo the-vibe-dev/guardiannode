@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import tempfile
 import time
 from dataclasses import dataclass
@@ -180,6 +181,8 @@ class CodexProvider:
         if not executable:
             raise ProviderError("provider_unavailable")
         self.codex_home.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            os.chmod(self.codex_home, 0o700)
         env = os.environ.copy()
         env["CODEX_HOME"] = str(self.codex_home)
         started = time.monotonic()
@@ -194,28 +197,64 @@ class CodexProvider:
                 "--output-schema", str(schema_path), "--output-last-message", str(output_path),
                 "-c", 'approval_policy="never"', "-",
             ]
+            process_options: dict[str, Any] = {}
+            if os.name == "nt":
+                process_options["creationflags"] = 0x00000200  # CREATE_NEW_PROCESS_GROUP
+            else:
+                process_options["start_new_session"] = True
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=root,
                 env=env,
                 stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                **process_options,
             )
             request_text = prompt + "\n\nINCIDENT_DATA\n" + json.dumps(payload, sort_keys=True)
             try:
-                await asyncio.wait_for(process.communicate(request_text.encode("utf-8")), timeout=timeout)
+                console_output = await asyncio.wait_for(process.communicate(request_text.encode("utf-8")), timeout=timeout)
             except TimeoutError:
-                process.kill()
-                await process.wait()
+                await _terminate_process_tree(process)
                 raise ProviderError("upstream_timeout", retryable=True) from None
             if process.returncode != 0 or not output_path.exists():
-                raise ProviderError("provider_unavailable", retryable=True)
+                raise _codex_failure(console_output)
             try:
                 assessment = GuardianReviewAssessment.model_validate_json(output_path.read_text("utf-8"))
             except Exception:
                 raise ProviderError("invalid_model_output") from None
         return ProviderResult(assessment, model, None, int((time.monotonic() - started) * 1000))
+
+
+async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
+    if os.name == "nt":
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill", "/PID", str(process.pid), "/T", "/F",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await killer.wait()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    await process.wait()
+
+
+def _codex_failure(console_output: tuple[bytes | None, bytes | None]) -> ProviderError:
+    # Inspect in memory only. Console output can echo the prompt and must never
+    # be logged, persisted, returned, or included in an exception message.
+    combined = b" ".join(part or b"" for part in console_output).decode("utf-8", errors="ignore").lower()
+    if any(marker in combined for marker in ("not logged in", "unauthorized", '"status":401', '"status":403')):
+        return ProviderError("provider_auth_required")
+    if any(marker in combined for marker in ("not supported", "invalid_request_error", "policy_violation")):
+        return ProviderError("upstream_policy_or_validation")
+    if "rate limit" in combined or '"status":429' in combined:
+        return ProviderError("rate_limited", retryable=True)
+    return ProviderError("provider_unavailable", retryable=True)
 
 
 def provider_for(settings, *, provider_name: str | None = None, client: httpx.AsyncClient | None = None):

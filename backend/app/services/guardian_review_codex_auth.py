@@ -70,6 +70,8 @@ def start(*, executable: str, codex_home: Path) -> dict[str, Any]:
 def _run(session_id: str, executable: str, codex_home: Path) -> None:
     try:
         codex_home.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            os.chmod(codex_home, 0o700)
         process = subprocess.Popen(
             [executable, "login", "--device-auth"],
             env=_env(codex_home),
@@ -105,6 +107,8 @@ def _run(session_id: str, executable: str, codex_home: Path) -> None:
             if session:
                 session["status"] = "connected" if return_code == 0 else "failed"
                 session["process"] = None
+                session["verification_url"] = None
+                session["user_code"] = None
     except Exception:
         with _lock:
             if session_id in _sessions:

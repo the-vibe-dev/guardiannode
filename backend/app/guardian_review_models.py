@@ -47,6 +47,7 @@ class FollowUpAction(StrictModel):
 
 GuidanceItem = Annotated[str, Field(min_length=1, max_length=1000)]
 Guidance = list[GuidanceItem]
+EvidenceId = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9:_-]+$")]
 
 
 class GuardianReviewAssessment(StrictModel):
@@ -84,7 +85,7 @@ class GuardianReviewContext(StrictModel):
     ] = "understand_context"
     parent_goal_details: str | None = Field(default=None, max_length=500)
     parent_context: str | None = Field(default=None, max_length=4000)
-    selected_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
+    selected_evidence_ids: list[EvidenceId] = Field(default_factory=list, max_length=20)
     fresh_assessment: bool = False
 
 
