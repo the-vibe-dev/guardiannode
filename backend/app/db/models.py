@@ -180,6 +180,61 @@ class Alert(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class GuardianReviewPreview(Base):
+    __tablename__ = "guardian_review_previews"
+    __table_args__ = (
+        Index("ix_guardian_review_previews_alert_time", "alert_id", "created_at"),
+    )
+
+    preview_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    alert_id: Mapped[str] = mapped_column(String(64), ForeignKey("alerts.alert_id"))
+    actor_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    provider: Mapped[str] = mapped_column(String(32))
+    model_requested: Mapped[str] = mapped_column(String(128))
+    schema_version: Mapped[str] = mapped_column(String(32))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    payload_digest: Mapped[str] = mapped_column(String(64), index=True)
+    incident_fingerprint: Mapped[str] = mapped_column(String(64))
+    payload_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    fresh_assessment: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class GuardianReview(Base):
+    __tablename__ = "guardian_reviews"
+    __table_args__ = (
+        Index("ux_guardian_reviews_dedup_key", "dedup_key", unique=True),
+        Index("ix_guardian_reviews_status_time", "status", "created_at"),
+        Index("ix_guardian_reviews_alert_time", "alert_id", "created_at"),
+    )
+
+    review_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    preview_id: Mapped[str] = mapped_column(String(64), ForeignKey("guardian_review_previews.preview_id"))
+    alert_id: Mapped[str] = mapped_column(String(64), ForeignKey("alerts.alert_id"))
+    requester_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    provider: Mapped[str] = mapped_column(String(32))
+    dedup_key: Mapped[str] = mapped_column(String(64))
+    schema_version: Mapped[str] = mapped_column(String(32))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    model_requested: Mapped[str] = mapped_column(String(128))
+    model_returned: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_response_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    assessment_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class EvidenceBlob(Base):
     __tablename__ = "evidence_blobs"
 

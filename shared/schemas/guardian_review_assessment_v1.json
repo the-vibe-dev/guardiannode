@@ -12,6 +12,8 @@
     "severity",
     "confidence",
     "plain_language_summary",
+    "observed_facts",
+    "inferences",
     "supporting_evidence",
     "possible_benign_explanations",
     "missing_context",
@@ -28,7 +30,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.0.0"
+      "const": "1.1.0"
     },
     "assessment": {
       "type": "string",
@@ -78,6 +80,12 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 2000
+    },
+    "observed_facts": {
+      "$ref": "#/$defs/guidance_list"
+    },
+    "inferences": {
+      "$ref": "#/$defs/guidance_list"
     },
     "supporting_evidence": {
       "type": "array",

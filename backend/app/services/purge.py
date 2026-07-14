@@ -12,7 +12,14 @@ from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Alert, Event, EvidenceBlob, RiskResult
+from app.db.models import (
+    Alert,
+    Event,
+    EvidenceBlob,
+    GuardianReview,
+    GuardianReviewPreview,
+    RiskResult,
+)
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
 
 log = logging.getLogger(__name__)
@@ -37,7 +44,7 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
     Returns counts per record type. Does not commit.
     """
     ids = [e for e in event_ids if e]
-    deleted = {"events": 0, "risk_results": 0, "alerts": 0, "blobs": 0}
+    deleted = {"events": 0, "risk_results": 0, "alerts": 0, "blobs": 0, "guardian_reviews": 0}
     if not ids:
         return deleted
 
@@ -49,6 +56,21 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
             r[0] for r in session.query(RiskResult.risk_id).filter(RiskResult.event_id.in_(chunk)).all()
         ]
         if risk_ids:
+            alert_ids = [
+                row[0] for row in session.query(Alert.alert_id).filter(Alert.risk_id.in_(risk_ids)).all()
+            ]
+            if alert_ids:
+                preview_ids = [
+                    row[0] for row in session.query(GuardianReviewPreview.preview_id)
+                    .filter(GuardianReviewPreview.alert_id.in_(alert_ids)).all()
+                ]
+                deleted["guardian_reviews"] += session.query(GuardianReview).filter(
+                    GuardianReview.alert_id.in_(alert_ids)
+                ).delete(synchronize_session=False)
+                if preview_ids:
+                    session.query(GuardianReviewPreview).filter(
+                        GuardianReviewPreview.preview_id.in_(preview_ids)
+                    ).delete(synchronize_session=False)
             deleted["alerts"] += (
                 session.query(Alert).filter(Alert.risk_id.in_(risk_ids)).delete(synchronize_session=False)
             )
