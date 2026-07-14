@@ -54,7 +54,13 @@ def test_delete_events_cascades_risk_alert_blob(db_session, tmp_path):
     counts = purge.delete_events(s, [event_id])
     s.commit()
 
-    assert counts == {"events": 1, "risk_results": 1, "alerts": 1, "blobs": 1}
+    assert counts == {
+        "events": 1,
+        "risk_results": 1,
+        "alerts": 1,
+        "blobs": 1,
+        "guardian_reviews": 0,
+    }
     assert s.get(Event, event_id) is None
     assert s.get(RiskResult, risk_id) is None
     assert s.query(Alert).filter_by(risk_id=risk_id).first() is None
