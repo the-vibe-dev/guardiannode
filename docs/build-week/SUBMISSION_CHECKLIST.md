@@ -35,16 +35,19 @@ Remaining public/submission caveats:
 
 ## Guardian Review implementation gates
 
-- [ ] Implement migrations, durable job worker, service client, routes, and UI.
-- [ ] Keep live mode disabled unless ZDR is contractually/configurationally
-      confirmed and an API key is present.
-- [ ] Implement local minimization/redaction and exact outbound preview.
-- [ ] Require per-review consent bound to the preview digest.
-- [ ] Validate every result against schema `1.0.0`; reject uncontrolled output.
-- [ ] Add deterministic mock mode and synthetic judge scenarios.
+- [x] Implement migration, durable job worker, provider clients, and backend
+      routes; add parent-friendly provider connection UI.
+- [x] Keep direct API mode disabled unless ZDR is confirmed and a server-side
+      API key is present; disclose ChatGPT workspace controls for Codex OAuth.
+- [x] Implement local minimization/redaction and exact outbound preview.
+- [x] Require per-review consent bound to the preview digest.
+- [x] Validate every result against schema `1.1.0`; reject uncontrolled output.
+- [x] Add deterministic mock mode and two synthetic harness scenarios.
 - [ ] Add Guardian Review-specific feedback and evaluation reporting.
-- [ ] Complete privacy, auth, retry, timeout, idempotency, injection, audit, and
-      accessibility tests from the evaluation plan.
+- [x] Complete backend privacy, auth, retry, timeout, idempotency, prompt
+      injection boundary, and audit-data tests.
+- [ ] Add alert-page preview/result/feedback accessibility tests and expand the
+      frozen judge scenario set.
 
 ## Final submission gates
 

@@ -28,16 +28,18 @@ new database fields do not become outbound fields automatically.
 
 ## Preview and consent
 
-The dashboard shows the exact canonical outbound JSON, field/character counts,
-redaction labels, model/purpose disclosure, and ZDR requirement. Consent is a
-literal affirmative action for every review.
+The API returns the exact canonical outbound JSON, field/character counts,
+redaction labels, provider/model purpose disclosure, and provider-specific
+retention notice. Consent is a literal affirmative action for every review.
+The alert-page presentation is still being implemented; the backend contract is
+complete and exercised by the synthetic harness.
 
 Consent is bound to SHA-256 of the exact payload, schema version, and prompt
 version. The preview expires after 15 minutes. Changed context, evidence,
 redaction, or versions require a new preview and consent. Consent is recorded in
 the local audit log, not sent as evidence to the model.
 
-## OpenAI controls
+## OpenAI Responses API controls
 
 Live mode fails closed unless the operator confirms that the OpenAI project is
 approved for Zero Data Retention. Every request also uses `store: false`, does
@@ -45,9 +47,24 @@ not use response chaining or background mode, and supplies no tools or web
 access. An API key is read from process environment/secret storage and is never
 placed in the database, response, audit details, or logs.
 
-The ZDR requirement applies to all Guardian Review live requests, not only to a
-specific age group. If ZDR eligibility is removed or cannot be verified, live
-mode must be disabled while mock mode remains available.
+The ZDR requirement applies to every direct Responses API Guardian Review, not
+only to a specific age group. If ZDR eligibility is removed or cannot be
+verified, the `openai` provider fails closed while mock mode remains available.
+
+## ChatGPT and Codex controls
+
+The parent-friendly Windows path uses the official Codex CLI and “Sign in with
+ChatGPT,” not copied desktop-app credentials. The backend owns a protected
+`CODEX_HOME` and the dashboard exposes only the temporary device-login URL and
+code. OAuth tokens remain server-side.
+
+Codex requests use an ephemeral session, isolated temporary directory,
+read-only sandbox, no user/project rules, no approval prompts, a strict output
+schema, and stdin rather than process arguments for incident data. Codex CLI
+does not expose the direct Responses API `store` flag, so this mode clearly
+discloses that the connected ChatGPT plan/workspace retention and data controls
+apply. The parent chose this disclosed-consent path for ordinary-family
+usability; it is not represented as ZDR.
 
 ## Storage and retention
 
@@ -75,7 +92,8 @@ mode must be disabled while mock mode remains available.
 | Stale consent | Expiring digest regenerated at submission |
 | Raw data in logs | Structured audit allowlist and sensitive-data regression tests |
 | API key exposure | Environment/secret store only, redacted exception handling |
-| Cloud retention | ZDR hard gate plus `store: false`; mock fallback |
+| Direct API cloud retention | ZDR hard gate plus `store: false`; mock fallback |
+| Codex OAuth retention | Exact preview, ChatGPT-workspace disclosure, per-review consent, ephemeral local session |
 | Duplicate billing/transmission | Durable idempotency identity and existing-job response |
 | Child data used for training/evaluation | Synthetic fixtures only; no production export path |
 

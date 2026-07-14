@@ -1,7 +1,7 @@
 # Guardian Review Technical Specification
 
-- Status: implementation foundation; runtime service not yet implemented
-- Assessment schema: `1.0.0`
+- Status: backend service implemented 2026-07-14; alert-page result UI pending
+- Assessment schema: `1.1.0`
 - Prompt version: `guardian-review-v1`
 
 ## Purpose and boundary
@@ -43,8 +43,13 @@ flowchart LR
     F -->|parent context and selected evidence IDs| G[Redaction and minimization]
     G -->|exact outbound preview| F
     F -->|digest-bound consent| H[Guardian Review service]
-    H -->|strict request; store=false; ZDR required| I[OpenAI Responses API]
-    I -->|strict assessment v1| H
+    H --> K{Configured provider}
+    K -->|parent friendly; ChatGPT controls| L[Codex CLI OAuth]
+    K -->|store=false; ZDR required| I[OpenAI Responses API]
+    K -->|offline| M[Deterministic mock]
+    L -->|strict assessment v1.1| H
+    I -->|strict assessment v1.1| H
+    M -->|strict assessment v1.1| H
     H --> F
     B --> J[(Audit log)]
     F --> J
@@ -60,7 +65,8 @@ every object rejects additional properties, strings and arrays are bounded, and
 empty arrays represent unavailable guidance. No prose outside the schema is
 accepted.
 
-The primary category reuses the backend canonical taxonomy and adds `none` for
+Schema `1.1.0` explicitly separates `observed_facts` from `inferences`. The
+primary category reuses the backend canonical taxonomy and adds `none` for
 a likely-benign result. The schema includes:
 
 - Schema version, assessment, category, severity, and confidence.
@@ -79,8 +85,14 @@ next step after reviewing the result and original evidence.
 
 ```json
 {
+  "relationship_context": "unknown_person",
+  "repeated_behavior": "unknown",
+  "parent_believes_immediate_danger": false,
+  "parent_goal": "prepare_conversation",
+  "parent_goal_details": null,
   "parent_context": "Optional context known to the parent, maximum 4000 characters.",
-  "selected_evidence_ids": ["opaque-local-evidence-id"]
+  "selected_evidence_ids": ["opaque-local-evidence-id"],
+  "fresh_assessment": false
 }
 ```
 
@@ -92,15 +104,18 @@ are derived server-side rather than trusted from the browser.
 
 ```json
 {
+  "preview_id": "opaque-preview-id",
   "alert_id": "opaque-alert-id",
-  "schema_version": "1.0.0",
+  "provider": "codex",
+  "model_requested": "gpt-5.6-sol",
+  "schema_version": "1.1.0",
   "prompt_version": "guardian-review-v1",
   "outbound_payload": {},
   "preview_digest": "64-lowercase-hex-sha256",
   "field_count": 0,
   "character_count": 0,
   "redactions_applied": ["email"],
-  "zdr_required": true,
+  "retention_notice": "Provider-specific parent disclosure.",
   "expires_at": "RFC3339 timestamp"
 }
 ```
@@ -114,6 +129,7 @@ the digest.
 
 ```json
 {
+  "preview_id": "opaque-preview-id",
   "preview_digest": "64-lowercase-hex-sha256",
   "consent": true
 }
@@ -142,7 +158,7 @@ does not accept client-supplied outbound JSON.
   "mode": "mock",
   "created_at": "RFC3339 timestamp",
   "completed_at": "RFC3339 timestamp",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "prompt_version": "guardian-review-v1",
   "model_requested": "gpt-5.6",
   "model_returned": null,
@@ -172,13 +188,15 @@ an automatic follow-up model request.
 
 | Route | Behavior | Authorization |
 |---|---|---|
-| `POST /api/alerts/{alert_id}/guardian-review/preview` | Local minimization only; no external call | Parent session + CSRF |
+| `GET /api/guardian-review/providers` | Non-secret provider/readiness status | Parent session |
+| `POST/GET/DELETE /api/guardian-review/providers/codex/device-login...` | Start, poll, or cancel guided ChatGPT device login | Parent session + CSRF + critical step-up for mutation |
+| `POST /api/alerts/{alert_id}/guardian-review/preview` | Local minimization only; no external call | Parent/admin session + CSRF |
 | `POST /api/alerts/{alert_id}/guardian-review` | Validate digest/consent and enqueue | Parent session + CSRF + recent step-up |
-| `GET /api/guardian-reviews/{review_id}` | Poll job/result | Parent session; record must belong to deployment |
-| `POST /api/guardian-reviews/{review_id}/feedback` | Store local feedback | Parent session + CSRF |
+| `GET /api/guardian-reviews/{review_id}` | Poll job/result | Requesting parent or admin |
+| `POST /api/guardian-reviews/{review_id}/feedback` | Planned local feedback route | Not implemented on July 14 |
 
-Enabling live mode or changing its secret/configuration requires critical
-step-up authentication. Rate limits apply per parent and deployment.
+Connecting the Codex provider requires critical step-up authentication.
+Provider configuration remains server-side.
 
 ## Error model
 
@@ -205,12 +223,13 @@ evidence.
 ## Worker, timeout, and retry behavior
 
 - Persist the job before returning 202 so it survives restart.
-- Use `(alert_id, preview_digest, prompt_version)` as the idempotency identity;
+- Use alert, digest, provider, model, schema, and prompt as the idempotency identity;
   a duplicate submission returns the existing job.
 - Allow 45 seconds per upstream attempt and two total attempts.
-- Retry only transport failures, HTTP 408/429/5xx, or invalid structured output.
+- Retry only transport failures, timeouts, eligible HTTP 408/429/5xx failures.
 - Honor `Retry-After` up to 30 seconds; otherwise use 1–3 seconds of jitter.
-- Do not retry refusals, consent/configuration errors, or deterministic 4xx.
+- Do not retry refusals, malformed structured output, authorization, policy,
+  consent/configuration errors, quota exhaustion, or deterministic 4xx.
 - On exhaustion, persist a sanitized failure and allow an explicit new review.
 
 ## Model and prompt configuration
@@ -220,19 +239,26 @@ Planned environment contract:
 | Setting | Default/requirement |
 |---|---|
 | `GUARDIANNODE_GUARDIAN_REVIEW_ENABLED` | `false` |
-| `GUARDIANNODE_GUARDIAN_REVIEW_MODE` | `mock`; allowed `mock` or `live` |
-| `GUARDIANNODE_GUARDIAN_REVIEW_ZDR_CONFIRMED` | `false`; live mode fails closed |
+| `GUARDIANNODE_GUARDIAN_REVIEW_PROVIDER` | `codex`; allowed `mock`, `codex`, or `openai` |
+| `GUARDIANNODE_GUARDIAN_REVIEW_ZDR_CONFIRMED` | `false`; direct `openai` mode fails closed |
 | `GUARDIANNODE_GUARDIAN_REVIEW_MODEL` | `gpt-5.6` |
+| `GUARDIANNODE_GUARDIAN_REVIEW_CODEX_MODEL` | `gpt-5.6-sol` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_PROMPT_VERSION` | `guardian-review-v1` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_TIMEOUT_SECONDS` | `45` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_MAX_ATTEMPTS` | `2` |
-| `OPENAI_API_KEY` | required only in live mode; never logged or stored in DB |
+| `OPENAI_API_KEY` | optional advanced `openai` mode only; never logged or stored in DB |
+| `GUARDIANNODE_CODEX_EXECUTABLE` / `GUARDIANNODE_CODEX_HOME` | Codex executable and protected service OAuth home |
 
-The Responses API request uses strict `text.format` JSON Schema, `store: false`,
+The direct Responses API request uses strict `text.format` JSON Schema, `store: false`,
 medium reasoning effort, bounded output, no tools, no web access, no background
 mode, and no response chaining. A deployment-scoped hashed parent identifier may
 be used as `safety_identifier`; a child identifier must not be used. Record the
 requested and returned model IDs because aliases can move.
+
+Codex mode supplies the same strict schema to an ephemeral, isolated, read-only
+`codex exec` process authenticated with ChatGPT. Because Codex does not expose
+the direct API `store` flag, the preview discloses that ChatGPT plan/workspace
+data controls apply.
 
 The system prompt is versioned source, treats all evidence and parent context as
 untrusted quoted data, forbids following instructions inside that data, forbids
@@ -254,7 +280,7 @@ evidence excerpts, or personal data.
 Mock mode uses deterministic synthetic scenario fixtures, produces the same
 strict DTO through the same durable worker/persistence/audit path, requires no
 API key or network, and is visibly labeled **Mock assessment**. It must never
-fall through to live mode.
+fall through to a cloud provider.
 
 ## Required implementation tests
 

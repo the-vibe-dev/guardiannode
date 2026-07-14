@@ -37,19 +37,26 @@ consistent attribution metadata to independently prove that complete split.
   documents.
 - A versioned, machine-readable Guardian Review assessment schema.
 - A submission-focused README shell and repository public-readiness audit.
+- A dedicated durable Guardian Review service, encrypted preview/result models,
+  migration, worker, authorization, audit events, deduplication, and deliberate
+  fresh-assessment path.
+- Strict schema `1.1.0` with explicit observed-fact/inference separation and
+  prompt version `guardian-review-v1`.
+- Server-authoritative incident loading, local minimization/redaction, exact
+  outbound preview, digest-bound consent, and sanitized failure handling.
+- Deterministic mock, ChatGPT-authenticated Codex, and optional direct OpenAI
+  Responses API providers. Direct API requests use model alias `gpt-5.6`,
+  `store: false`, strict Structured Outputs, and a ZDR hard gate.
+- Parent-friendly Codex device-login support and dashboard connection status;
+  no API-key entry is shown to families.
+- A synthetic developer harness. A live synthetic Codex run completed through
+  `gpt-5.6-sol` and encrypted local persistence on July 14.
 
 ## Planned during Build Week
 
-- Guardian Review service
-- GPT-5.6 runtime integration
-- Strict structured assessment schema integration
-- Parent context input
-- Local minimization and redaction
-- Outbound-data preview and per-review consent
-- Parent-child conversation guidance
-- Synthetic judge demo scenarios
+- Expanded synthetic judge demo scenarios
 - Guardian Review parent feedback
-- Evaluation harness
+- Full parent-facing preview/result display
 - Beta onboarding and reliability improvements directly supporting Guardian
   Review
 
@@ -66,3 +73,4 @@ tested, and entered in the Build Week changelog.
 - [Evaluation plan](docs/build-week/EVALUATION_PLAN.md)
 - [Submission checklist](docs/build-week/SUBMISSION_CHECKLIST.md)
 - [Preliminary Devpost draft](docs/build-week/DEVPOST_DRAFT.md)
+- [July 14 daily completion report](docs/build-week/DAILY_2026-07-14.md)

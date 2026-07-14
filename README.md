@@ -65,15 +65,17 @@ keeping normal operation local and under the parent's control.
 
 ### What Guardian Review adds
 
-Guardian Review is the Build Week feature planned as an optional second opinion
-for an existing local alert. A parent will add context, inspect the exact
+Guardian Review is the Build Week optional second opinion for an existing local
+alert. A parent can add context, inspect the exact
 locally minimized/redacted JSON proposed for transmission, consent to that one
 request, and receive a strict structured assessment with uncertainty,
 conversation guidance, actions, escalation indicators, and limitations.
 
-The runtime service and dashboard flow are not complete in the baseline-day
-commit. Guardian Review will not silently upload screenshots or directly drive
-enforcement.
+The backend service, durable worker, strict schema, provider integration,
+synthetic harness, and parent-friendly ChatGPT connection flow were implemented
+on July 14. The alert-page preview/result/feedback presentation remains in
+progress. Guardian Review does not silently upload screenshots or directly
+drive enforcement.
 
 ### Existing-project disclosure
 
@@ -97,13 +99,15 @@ contract, and implement reviewed Build Week changes. No production child data
 is used for this collaboration. Details are recorded in the
 [collaboration log](docs/build-week/CODEX_COLLABORATION.md).
 
-### How GPT-5.6 will be used at runtime
+### How GPT-5.6 is used at runtime
 
-GPT-5.6 is planned only for a parent-triggered Guardian Review through the
-OpenAI Responses API. Live mode will require verified Zero Data Retention,
-`store: false`, strict structured output, local minimization/redaction, and
-per-review consent bound to the exact outbound preview. Local detection remains
-functional without it. See the [technical specification](docs/build-week/GUARDIAN_REVIEW_SPEC.md)
+Guardian Review has a parent-friendly Codex provider and an optional advanced
+direct Responses API provider. Codex uses “Sign in with ChatGPT” and currently
+requests `gpt-5.6-sol`; the direct API defaults to alias `gpt-5.6`, requires
+verified Zero Data Retention, and sends `store: false`. Both paths use strict
+schema `1.1.0`, local minimization/redaction, and consent bound to the exact
+outbound preview. Local detection remains functional without either provider.
+See the [technical specification](docs/build-week/GUARDIAN_REVIEW_SPEC.md)
 and [privacy model](docs/build-week/PRIVACY_MODEL.md).
 
 ### Current setup and demo
@@ -117,16 +121,28 @@ use the source instructions for development. The current demonstrable path is:
 4. Open the Risk Feed, inspect the persisted alert/evidence, and record existing
    review or feedback.
 
-Guardian Review preview, consent, and structured-result steps remain planned and
-must not be represented as working until their implementation tests pass.
+For the implemented synthetic backend demonstration:
+
+```bash
+cd backend
+python -m app.guardian_review_harness --provider mock --scenario unknown-contact
+```
+
+To use a ChatGPT subscription instead of an API key, install the official Codex
+CLI, run `codex login`, and add `--provider codex --confirm-live`. Only synthetic
+fixtures are permitted in the harness. The dashboard Settings page also exposes
+a guided “Connect with ChatGPT” device-login flow when Guardian Review is
+enabled. Direct API-key mode is an advanced server option and is not shown to
+families.
 
 ### Current known limitations
 
 GuardianNode is alpha software, can miss or overstate risks, and can capture
 sensitive visible content. Windows 11 x64 is the promoted child-device path;
 Windows 10 has not been promoted. Installers are unsigned, separated deployments
-need a trusted VPN/TLS design, and Guardian Review is not yet a shipped emergency
-or diagnostic service. See [Known limitations](KNOWN_LIMITATIONS.md) and the
+need a trusted VPN/TLS design, and Guardian Review remains a fallible second
+opinion rather than an emergency or diagnostic service. The alert-page review
+UI and feedback are not complete. See [Known limitations](KNOWN_LIMITATIONS.md) and the
 [submission checklist](docs/build-week/SUBMISSION_CHECKLIST.md).
 
 ## Deployment Shapes

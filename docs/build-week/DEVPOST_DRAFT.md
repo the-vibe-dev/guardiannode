@@ -1,7 +1,7 @@
 # Preliminary Devpost Draft
 
-> Draft status: baseline-day content. Guardian Review runtime claims must be
-> updated only after implementation and recorded evaluation.
+> Draft status: July 14 implementation content. Parent alert-page presentation,
+> feedback, and expanded judge evaluation remain incomplete.
 
 ## Project
 
@@ -12,7 +12,7 @@ and the parent dashboard already existed before Build Week.
 
 ## What Build Week adds
 
-Guardian Review is the planned opt-in second-opinion layer. A parent will be able
+Guardian Review is the implemented opt-in backend second-opinion layer. A parent can
 to add context, inspect the exact minimized/redacted JSON proposed for upload,
 consent to that one request, and receive a strict structured assessment with
 possible benign explanations, missing context, conversation guidance, actions,
@@ -41,13 +41,14 @@ test/release/security suite, audited public-repository risks, and helped define
 the privacy architecture, API, strict schema, evaluation plan, and submission
 evidence. No production child data was used.
 
-## How GPT-5.6 will be used
+## How GPT-5.6 is used
 
-GPT-5.6 is planned through the OpenAI Responses API for a parent-triggered
-Guardian Review. The request will contain only locally minimized/redacted text,
-will require per-review preview and consent, will use strict structured output
-and `store: false`, and will fail closed unless the OpenAI project has verified
-Zero Data Retention. Model output will be guidance, never an enforcement input.
+The direct OpenAI Responses API provider defaults to `gpt-5.6`, sends only
+locally minimized/redacted text, requires preview and consent, uses strict
+schema `1.1.0` and `store: false`, and fails closed unless ZDR is confirmed. The
+parent-friendly provider uses the official Codex CLI, “Sign in with ChatGPT,”
+and `gpt-5.6-sol`; it discloses that ChatGPT plan/workspace controls apply.
+Model output is guidance, never an enforcement input.
 
 ## Architecture
 
@@ -56,27 +57,30 @@ evidence and alert → parent dashboard → local minimization/redaction → exa
 outbound preview/consent → asynchronous Guardian Review → strict structured
 result → parent feedback and local audit.
 
-## Planned demo
+## Current backend demo
 
 1. Show a healthy synthetic Windows device.
 2. Generate a synthetic incident.
 3. Show local detection and persisted alert in the dashboard.
-4. Add parent context and select supporting evidence.
-5. Inspect the exact outbound JSON and explicitly consent.
-6. Poll the asynchronous review and display the strict assessment.
-7. Show calm parent-child conversation guidance and record feedback.
-8. Inspect the privacy-preserving audit trail.
+4. Run the synthetic Guardian Review harness in deterministic mock mode or an
+   explicitly confirmed Codex live mode.
+5. Inspect the exact outbound preview and digest-bound consent record.
+6. Process the durable job and retrieve the strict assessment.
+7. Verify the encrypted local result and privacy-preserving audit trail.
 
-The offline judge path will use deterministic mock mode unless live ZDR
-eligibility is verified.
+The alert-page preview/result display and Guardian Review-specific feedback are
+the next UI step. The offline judge path uses deterministic mock mode. A live
+Codex demonstration uses only synthetic data and discloses ChatGPT workspace
+controls; a direct API live step requires ZDR.
 
 ## Current limitations
 
 GuardianNode is alpha software and can miss risks or create false positives.
 Windows 11 x64 is the current promoted client path. Installers are unsigned.
-OCR/local-model results depend on hardware and content. Guardian Review is not
-yet implemented at baseline-day commit and, once implemented, will still be a
-fallible second opinion rather than a diagnosis or emergency response.
+OCR/local-model results depend on hardware and content. Guardian Review remains
+a fallible second opinion rather than a diagnosis or emergency response. The
+Codex device-login UI has not yet been qualified on a Windows installer build,
+and the direct live API path was not exercised without an API key.
 
 ## License
 
