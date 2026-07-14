@@ -112,6 +112,7 @@ recovery.txt
 .coverage
 htmlcov/
 test-results/
+.guardian-review-harness/
 playwright-report/
 .claude/
 HANDOFF.md

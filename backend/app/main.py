@@ -40,6 +40,7 @@ from app.api import (
 from app.api import (
     events as events_api,
 )
+from app.api import guardian_review as guardian_review_api
 from app.api import (
     health as health_api,
 )
@@ -69,7 +70,13 @@ from app.services import mdns_advertiser
 from app.services.device_bootstrap_token import ensure_device_bootstrap_token
 from app.services.setup_token import ensure_setup_token
 from app.settings import settings
-from app.workers import backup_worker, cleanup_worker, notification_worker, offline_monitor
+from app.workers import (
+    backup_worker,
+    cleanup_worker,
+    guardian_review_worker,
+    notification_worker,
+    offline_monitor,
+)
 
 log = logging.getLogger("guardiannode")
 
@@ -243,6 +250,12 @@ async def lifespan(app: FastAPI):
         background_tasks.append(
             asyncio.create_task(worker_supervisor.supervise("backup", backup_worker.loop))
         )
+    if settings.guardian_review_enabled:
+        background_tasks.append(
+            asyncio.create_task(
+                worker_supervisor.supervise("guardian_review", guardian_review_worker.loop)
+            )
+        )
     log.info("GuardianNode backend %s listening on %s:%s", __version__, settings.bind_host, settings.bind_port)
     if settings.binds_beyond_loopback():
         log.warning(
@@ -314,6 +327,7 @@ def create_app() -> FastAPI:
     app.include_router(events_api.router, prefix="/api")
     app.include_router(risks_api.router, prefix="/api")
     app.include_router(alerts_api.router, prefix="/api")
+    app.include_router(guardian_review_api.router, prefix="/api")
     app.include_router(models_api.router, prefix="/api")
     app.include_router(dashboard_api.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")

@@ -130,6 +130,13 @@ def require_critical_auth(
     )
 
 
+def parent_user(user: User = Depends(current_user)) -> User:
+    """Allow safety-review access only to decision-making parent roles."""
+    if user.role not in {"admin", "parent"}:
+        raise HTTPException(status_code=403, detail="Parent role required")
+    return user
+
+
 def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Device:
     """Authenticate a device via Authorization: Bearer <token>.
 
