@@ -38,7 +38,7 @@ def providers(user: User = Depends(parent_user)) -> dict:
     return {
         "enabled": settings.guardian_review_enabled,
         "selected": settings.guardian_review_provider,
-        "model": settings.guardian_review_model,
+        "model": workflow.configured_model(settings.guardian_review_provider),
         "providers": {
             "mock": {"available": settings.dev_mode or settings.guardian_review_provider == "mock"},
             "codex": {"available": codex["installed"], **codex},

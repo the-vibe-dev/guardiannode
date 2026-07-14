@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     guardian_review_enabled: bool = False
     guardian_review_provider: str = "codex"
     guardian_review_model: str = "gpt-5.6"
+    guardian_review_codex_model: str = "gpt-5.6-sol"
     guardian_review_prompt_version: str = "guardian-review-v1"
     guardian_review_timeout_seconds: int = 45
     guardian_review_max_attempts: int = 2

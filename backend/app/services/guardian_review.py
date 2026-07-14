@@ -76,6 +76,12 @@ def _settings():
     return settings_mod.settings
 
 
+def configured_model(provider: str) -> str:
+    if provider == "codex":
+        return _settings().guardian_review_codex_model
+    return _settings().guardian_review_model
+
+
 def _ensure_enabled() -> None:
     if not _settings().guardian_review_enabled:
         raise WorkflowError("feature_disabled", status_code=503)
@@ -102,7 +108,7 @@ def create_preview(
             schema_version=schema_version,
             prompt_version=prompt_version,
             provider=provider,
-            model=_settings().guardian_review_model,
+            model=configured_model(provider),
         )
     except InvalidIncidentError as exc:
         raise WorkflowError("not_found", status_code=404) from exc
@@ -119,7 +125,7 @@ def create_preview(
         alert_id=alert_id,
         actor_user_id=user.id,
         provider=provider,
-        model_requested=_settings().guardian_review_model,
+        model_requested=configured_model(provider),
         schema_version=schema_version,
         prompt_version=prompt_version,
         payload_digest=incident.digest,

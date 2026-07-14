@@ -179,6 +179,7 @@ def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse
             "enabled": settings.guardian_review_enabled,
             "provider": settings.guardian_review_provider,
             "model": settings.guardian_review_model,
+            "codex_model": settings.guardian_review_codex_model,
             "prompt_version": settings.guardian_review_prompt_version,
             "timeout_seconds": settings.guardian_review_timeout_seconds,
             "max_attempts": settings.guardian_review_max_attempts,
