@@ -44,6 +44,8 @@ def _required_workers() -> set[str]:
         required.add("notifications")
     if settings.database_backup_enabled:
         required.add("backup")
+    if settings.guardian_review_enabled:
+        required.add("guardian_review")
     return required
 
 
@@ -108,6 +110,7 @@ class RuntimeSettingsResponse(BaseModel):
     retention: dict[str, int | bool]
     device_offline: dict[str, int | bool]
     database: dict[str, str]
+    guardian_review: dict[str, str | int | bool]
 
 
 def _database_driver() -> str:
@@ -172,6 +175,17 @@ def runtime_settings(_: User = Depends(current_user)) -> RuntimeSettingsResponse
             "check_interval_seconds": settings.device_offline_check_interval_seconds,
         },
         database={"driver": _database_driver()},
+        guardian_review={
+            "enabled": settings.guardian_review_enabled,
+            "provider": settings.guardian_review_provider,
+            "model": settings.guardian_review_model,
+            "codex_model": settings.guardian_review_codex_model,
+            "prompt_version": settings.guardian_review_prompt_version,
+            "timeout_seconds": settings.guardian_review_timeout_seconds,
+            "max_attempts": settings.guardian_review_max_attempts,
+            "openai_key_configured": bool(settings.openai_api_key),
+            "zdr_confirmed": settings.guardian_review_zdr_confirmed,
+        },
     )
 
 

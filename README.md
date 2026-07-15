@@ -54,6 +54,97 @@ administer for their own children. It is not stealthware, employee monitoring
 software, a keylogger, or a tool for credential theft. The Windows agent is
 visible through its tray/status UI and the backend is operated by the parent.
 
+## Build Week 2026
+
+### What GuardianNode is
+
+GuardianNode is the existing local-first foundation described above: a visible
+Windows agent, parent-owned backend, local detection pipeline, encrypted
+evidence store, and parent dashboard. It creates reviewable safety signals while
+keeping normal operation local and under the parent's control.
+
+### What Guardian Review adds
+
+Guardian Review is the Build Week optional second opinion for an existing local
+alert. A parent can add context, inspect the exact
+locally minimized/redacted JSON proposed for transmission, consent to that one
+request, and receive a strict structured assessment with uncertainty,
+conversation guidance, actions, escalation indicators, and limitations.
+
+The backend service, durable worker, strict schema, provider integration,
+synthetic harness, and parent-friendly ChatGPT connection flow were implemented
+on July 14. The alert-page preview/result/feedback presentation remains in
+progress. Guardian Review does not silently upload screenshots or directly
+drive enforcement.
+
+### Existing-project disclosure
+
+The last verified repository state before the official Build Week cutoff is
+commit `36b2a547056d40eff32f00aa59b7820f7d3e98d5`, protected by tag
+`pre-build-week-2026`. New work is isolated on
+`build-week/guardian-review`. The pre-existing project includes the agent,
+backend, dashboard, local detection, encrypted evidence, installers,
+authentication/security controls, and 353 passing unique tests.
+
+The repository owner describes the existing dashboard/visual UI as
+Claude-assisted and the existing agent, backend, security, installer, and
+platform hardening as Codex-built. Git metadata cannot independently verify the
+complete historical split. See the [baseline evidence](docs/build-week/BASELINE.md).
+
+### How Codex is being used
+
+Codex is being used to preserve and audit the baseline, trace the actual
+application flow, run verification, define the Guardian Review schema/privacy
+contract, and implement reviewed Build Week changes. No production child data
+is used for this collaboration. Details are recorded in the
+[collaboration log](docs/build-week/CODEX_COLLABORATION.md).
+
+### How GPT-5.6 is used at runtime
+
+Guardian Review has a parent-friendly Codex provider and an optional advanced
+direct Responses API provider. Codex uses “Sign in with ChatGPT” and currently
+requests `gpt-5.6-sol`; the direct API defaults to alias `gpt-5.6`, requires
+verified Zero Data Retention, and sends `store: false`. Both paths use strict
+schema `1.1.0`, local minimization/redaction, and consent bound to the exact
+outbound preview. Local detection remains functional without either provider.
+See the [technical specification](docs/build-week/GUARDIAN_REVIEW_SPEC.md)
+and [privacy model](docs/build-week/PRIVACY_MODEL.md).
+
+### Current setup and demo
+
+Use the Windows 11 installer path below for a technical-parent alpha setup, or
+use the source instructions for development. The current demonstrable path is:
+
+1. Start the local backend and complete parent setup.
+2. Pair a Windows test agent with a synthetic child profile.
+3. Run the repository's synthetic event test or Docker OCR-to-alert canary.
+4. Open the Risk Feed, inspect the persisted alert/evidence, and record existing
+   review or feedback.
+
+For the implemented synthetic backend demonstration:
+
+```bash
+cd backend
+python -m app.guardian_review_harness --provider mock --scenario unknown-contact
+```
+
+To use a ChatGPT subscription instead of an API key, install the official Codex
+CLI, run `codex login`, and add `--provider codex --confirm-live`. Only synthetic
+fixtures are permitted in the harness. The dashboard Settings page also exposes
+a guided “Connect with ChatGPT” device-login flow when Guardian Review is
+enabled. Direct API-key mode is an advanced server option and is not shown to
+families.
+
+### Current known limitations
+
+GuardianNode is alpha software, can miss or overstate risks, and can capture
+sensitive visible content. Windows 11 x64 is the promoted child-device path;
+Windows 10 has not been promoted. Installers are unsigned, separated deployments
+need a trusted VPN/TLS design, and Guardian Review remains a fallible second
+opinion rather than an emergency or diagnostic service. The alert-page review
+UI and feedback are not complete. See [Known limitations](KNOWN_LIMITATIONS.md) and the
+[submission checklist](docs/build-week/SUBMISSION_CHECKLIST.md).
+
 ## Deployment Shapes
 
 ### All-in-one
@@ -110,8 +201,9 @@ information. Evidence is stored locally and encrypted for parent/admin review.
 
 ## System Requirements
 
-Windows 10/11 64-bit is the current child-device target. The server side runs on
-Windows or Linux. Ollama model performance depends heavily on CPU/GPU/RAM.
+Windows 11 64-bit is the promoted alpha child-device target. Windows 10 remains
+an unpromoted source/qualification target. The server side runs on Windows or
+Linux. Ollama model performance depends heavily on CPU/GPU/RAM.
 
 | Tier | Hardware | What it catches |
 |---|---|---|
@@ -144,7 +236,8 @@ must review the license and performance of any Ollama model they install. See
 - npm with `npm ci`
 - Ollama for model-backed classification
 - Linux, macOS, or Windows for backend/dashboard development
-- Windows 10/11 for source-agent testing
+- Windows 11 for the promoted source-agent path; Windows 10 only for explicit
+  qualification testing
 
 ### Windows 11 Installer Alpha
 

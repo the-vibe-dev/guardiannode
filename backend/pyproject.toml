@@ -45,6 +45,7 @@ dev = [
 guardiannode-backend = "app.main:cli"
 guardiannode-db = "app.db.maintenance:cli"
 guardiannode-archive = "app.archive.cli:main"
+guardiannode-review-harness = "app.guardian_review_harness:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

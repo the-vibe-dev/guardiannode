@@ -39,8 +39,10 @@ def test_empty_database_migrates_to_snapshotted_schema(monkeypatch, tmp_path: Pa
     fixture = json.loads(
         (SCHEMA_FIXTURES / "0001_beta_baseline.json").read_text(encoding="utf-8")
     )
-    assert sorted(inspect(engine).get_table_names()) == sorted([*fixture["tables"], "backup_runs"])
-    assert schema_revisions(engine)[0] == "0002_complete_backups"
+    assert sorted(inspect(engine).get_table_names()) == sorted(
+        [*fixture["tables"], "backup_runs", "guardian_review_previews", "guardian_reviews"]
+    )
+    assert schema_revisions(engine)[0] == "0003_guardian_reviews"
 
 
 def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_path: Path):
@@ -54,7 +56,7 @@ def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_pat
     engine = get_engine()
     result = upgrade_schema(engine)
     current, head = schema_revisions(engine)
-    assert current == head == "0002_complete_backups"
+    assert current == head == "0003_guardian_reviews"
     assert result["backup"] is not None
     assert Path(result["backup"]).is_file()
     assert "session_revoked_at" in {col["name"] for col in inspect(engine).get_columns("users")}
@@ -79,7 +81,7 @@ def test_interrupted_unstamped_migration_recovers_without_losing_evidence(monkey
             "'2026-01-01', NULL)"
         )
     result = upgrade_schema(engine)
-    assert result["current_revision"] == "0002_complete_backups"
+    assert result["current_revision"] == "0003_guardian_reviews"
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT encrypted_path FROM evidence_blobs WHERE blob_id='blob-1'"

@@ -95,6 +95,10 @@ export const api = {
     return request<any[]>(`/alerts${q ? `?${q}` : ""}`);
   },
   alert: (id: string) => request<any>(`/alerts/${id}`),
+  guardianReviewProviders: () => request<any>("/guardian-review/providers"),
+  startCodexLogin: () => request<any>("/guardian-review/providers/codex/device-login", { method: "POST" }),
+  codexLoginStatus: (session_id: string) => request<any>(`/guardian-review/providers/codex/device-login/${session_id}`),
+  cancelCodexLogin: (session_id: string) => request<any>(`/guardian-review/providers/codex/device-login/${session_id}`, { method: "DELETE" }),
   reviewAlert: (id: string, status: string, notes?: string) =>
     request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes }) }),
   feedbackAlert: (id: string, feedback_type: string, notes?: string) =>

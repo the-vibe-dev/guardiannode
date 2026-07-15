@@ -1,0 +1,13 @@
+# Reviewed 2026-07-13. These exact historical fingerprints are cryptographic
+# parameter names or deliberately fake test fixtures, not credentials. Keep the
+# allowlist fingerprint-specific so new matches still fail.
+07a9c394bacb1eb3074c4cf3d36e8132ed85cd75:backend/app/archive/identity.py:generic-api-key:25
+07a9c394bacb1eb3074c4cf3d36e8132ed85cd75:backend/app/archive/crypto.py:generic-api-key:91
+07a9c394bacb1eb3074c4cf3d36e8132ed85cd75:backend/app/archive/format.py:generic-api-key:276
+07a9c394bacb1eb3074c4cf3d36e8132ed85cd75:backend/app/archive/format.py:generic-api-key:346
+07a9c394bacb1eb3074c4cf3d36e8132ed85cd75:backend/app/archive/format.py:generic-api-key:363
+07a9c394bacb1eb3074c4cf3d36e8132ed85cd75:backend/app/archive/format.py:generic-api-key:389
+55834a54551a9c677d69f4dd56d5622819059324:backend/tests/test_encryption.py:generic-api-key:85
+fc2209c22351c89695f8853ec675eb09e056d2c4:backend/app/services/encryption.py:generic-api-key:220
+fc2209c22351c89695f8853ec675eb09e056d2c4:backend/app/services/encryption.py:generic-api-key:458
+958c46f5401ef2d416b55db90acaa6cd3d3e5b22:backend/tests/test_redaction.py:private-key:58

@@ -8,8 +8,8 @@ conditional on signing and release-artifact reputation checks.
 
 | Role | System | Relevant hardware |
 |---|---|---|
-| Windows clean-install target | `wingpu` / Windows 11 `10.0.22000` | NVIDIA RTX 3060, 12 GB VRAM |
-| Separated parent server | `staging-backend` | NVIDIA RTX 3090, 24 GB VRAM |
+| Windows clean-install target | Isolated Windows 11 lab host, build `10.0.22000` | NVIDIA RTX 3060, 12 GB VRAM |
+| Separated parent server | Isolated parent-server lab host | NVIDIA RTX 3090, 24 GB VRAM |
 
 The Windows bundles and both Inno Setup installers were built natively with
 Python 3.12 and Inno Setup 6.7.1. Installer-source qualification ended at
@@ -24,7 +24,7 @@ Python 3.12 and Inno Setup 6.7.1. Installer-source qualification ended at
 | All-in-one repair | Pass | Configuration, device identity, and database history survived; the installer created a pre-upgrade backup |
 | Injected failed all-in-one upgrade | Pass | Installer exit `1`; prior application and device hashes restored; services restarted; readiness returned; maintenance marker cleared |
 | Clean server-only install | Pass | Only the backend service was installed; private-LAN bind/allowed-host configuration and firewall rule were correct |
-| Server LAN access | Pass | A separate Linux host reached `http://192.168.1.123:8787/api/health/ready` |
+| Server LAN access | Pass | A separate Linux host reached the readiness endpoint over the isolated private lab network |
 | Server-only repair | Pass | Exit `0`; `server.env` preserved; database, environment, and complete prior application tree backed up |
 | Clean separated child install | Pass | Only broker/watchdog services and agent/tray tasks were installed; no backend or `server.env`; one-time pairing completed and was consumed |
 | Remote child capture/classification | Pass | Staging received the Windows frame and classified it `critical` with `self_harm`, `secrecy_request`, and `threat` categories on the RTX 3090 |
@@ -97,5 +97,5 @@ the Windows executables broadly, complete these release-operations gates:
   recovery were covered here; remote suspend was not attempted because the lab
   had no guaranteed wake mechanism.
 
-Raw, credential-scrubbed evidence is stored outside the repository at
-`/mnt/nas_ai/shared/droppoints/guardiannode/20260709-beta-validation/`.
+Raw, credential-scrubbed evidence is stored in maintainer-controlled evidence
+storage outside the repository.

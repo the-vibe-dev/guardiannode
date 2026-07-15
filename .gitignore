@@ -47,6 +47,7 @@ yarn-error.log*
 .yarn-integrity
 
 # Build outputs
+site/
 dashboard/dist/
 agent-windows/dist/
 agent-windows/build/
@@ -111,6 +112,7 @@ recovery.txt
 .coverage
 htmlcov/
 test-results/
+.guardian-review-harness/
 playwright-report/
 .claude/
 HANDOFF.md

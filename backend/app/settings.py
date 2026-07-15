@@ -105,6 +105,20 @@ class Settings(BaseSettings):
     vision_timeout_seconds: int = 240
     pending_frame_max_age_seconds: int = 600
     pending_replay_max_frames: int = 50
+    guardian_review_enabled: bool = False
+    guardian_review_provider: str = "codex"
+    guardian_review_model: str = "gpt-5.6"
+    guardian_review_codex_model: str = "gpt-5.6-sol"
+    guardian_review_prompt_version: str = "guardian-review-v1"
+    guardian_review_timeout_seconds: int = 45
+    guardian_review_max_attempts: int = 2
+    guardian_review_worker_interval_seconds: int = 2
+    guardian_review_preview_ttl_seconds: int = 15 * 60
+    guardian_review_zdr_confirmed: bool = False
+    guardian_review_openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = None
+    codex_executable: str = "codex"
+    codex_home: Path | None = None
 
     @property
     def keys_dir(self) -> Path:
@@ -125,6 +139,10 @@ class Settings(BaseSettings):
     @property
     def backups_dir(self) -> Path:
         return self.data_dir / "backups"
+
+    @property
+    def codex_home_resolved(self) -> Path:
+        return self.codex_home or self.data_dir / "codex"
 
     @property
     def db_url_resolved(self) -> str:
@@ -192,6 +210,7 @@ class Settings(BaseSettings):
             self.evidence_dir,
             self.logs_dir,
             self.backups_dir,
+            self.codex_home_resolved,
         ):
             d.mkdir(parents=True, exist_ok=True)
 
