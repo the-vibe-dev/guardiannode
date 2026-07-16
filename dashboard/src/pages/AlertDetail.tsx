@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import SeverityBadge from "../components/SeverityBadge";
+import GuardianReviewPanel from "../components/GuardianReviewPanel";
 import { formatDateTime } from "../utils/datetime";
 
 export default function AlertDetail() {
@@ -129,6 +130,8 @@ export default function AlertDetail() {
           </details>
         )}
       </div>
+
+      <GuardianReviewPanel alertId={id!} detail={detail} />
 
       {/* Event + Classification */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

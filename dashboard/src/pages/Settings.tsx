@@ -135,8 +135,8 @@ export default function Settings() {
       <section className="bg-white shadow rounded p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold">Guardian Review</h2>
-          <span className={`text-xs font-semibold rounded-full px-2 py-1 ${guardianReview.enabled ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
-            {guardianReview.enabled ? "Enabled" : "Not enabled"}
+          <span className={`text-xs font-semibold rounded-full px-2 py-1 ${guardianReview.ready ? "bg-green-100 text-green-800" : guardianReview.enabled ? "bg-amber-100 text-amber-800" : "bg-gray-100 text-gray-600"}`}>
+            {guardianReview.ready ? "Ready" : guardianReview.enabled ? "Setup required" : "Not enabled"}
           </span>
         </div>
         <p className="text-sm text-gray-600">
@@ -180,6 +180,10 @@ export default function Settings() {
         <p className="text-xs text-gray-500">
           ChatGPT-connected reviews follow your ChatGPT plan or workspace data controls. Direct API mode is an advanced server option and is not shown to families.
         </p>
+        <div className="rounded border bg-gray-50 p-3 text-xs text-gray-700 space-y-1">
+          <p>{guardianReview.disclosure}</p>
+          <p>{guardianReview.retention_notice}</p>
+        </div>
       </section>
 
       <section className="bg-white shadow rounded p-4 space-y-3">

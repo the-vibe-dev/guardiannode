@@ -12,6 +12,7 @@ import AlertDetail from "./pages/AlertDetail";
 import ModelStatus from "./pages/ModelStatus";
 import Settings from "./pages/Settings";
 import Audit from "./pages/Audit";
+import GuardianReviewHistory from "./pages/GuardianReviewHistory";
 
 type AuthState = "unknown" | "needs_setup" | "logged_out" | "logged_in";
 
@@ -85,6 +86,7 @@ export default function App() {
         <Route path="/models" element={<ModelStatus />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/audit" element={<Audit />} />
+        <Route path="/guardian-reviews" element={<GuardianReviewHistory />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
