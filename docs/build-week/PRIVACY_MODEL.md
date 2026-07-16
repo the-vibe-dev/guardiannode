@@ -23,6 +23,21 @@ record. Before preview it applies existing redaction plus Guardian Review rules:
 - Use opaque local evidence IDs so displayed support can be traced without
   exporting storage identifiers.
 
+Redaction contract `guardian-review-redaction-v2` normalizes Unicode, removes
+zero-width/bidirectional controls, recognizes common obfuscated identifiers,
+and applies incident-scoped HMAC placeholders so repeated identities remain
+understandable within one review without becoming cross-incident identifiers.
+The child's authoritative profile name becomes `[CHILD]` and the authoritative
+device hostname becomes `[DEVICE]`.
+
+Detector-selected evidence is included by default. Additional full extracted
+screen text is optional and excluded by default. Evidence is deduplicated and
+bounded to eight 800-character excerpts and 4,800 evidence characters; parent
+context is limited to 1,500 characters and the canonical outbound object to
+12,000 characters. Screenshots, local incident IDs, exact detector scores,
+classifier state, device/profile IDs, and exact repeat counts are never in the
+outbound DTO.
+
 The minimizer is an allowlist serializer followed by deterministic redaction;
 new database fields do not become outbound fields automatically.
 
@@ -31,13 +46,43 @@ new database fields do not become outbound fields automatically.
 The API returns the exact canonical outbound JSON, field/character counts,
 redaction labels, provider/model purpose disclosure, and provider-specific
 retention notice. Consent is a literal affirmative action for every review.
-The alert-page presentation is still being implemented; the backend contract is
-complete and exercised by the synthetic harness.
+The alert page displays locally stored material separately from transmitted
+context. Optional age, evidence, goal details, and parent context can be removed
+with guided controls. The exact read-only JSON appears before an unchecked
+consent control. A visible cancel action deletes the unconsumed preview and
+sends nothing.
 
-Consent is bound to SHA-256 of the exact payload, schema version, and prompt
-version. The preview expires after 15 minutes. Changed context, evidence,
-redaction, or versions require a new preview and consent. Consent is recorded in
-the local audit log, not sent as evidence to the model.
+Consent is bound to SHA-256 of the exact payload, schema version, prompt
+version, redaction version, provider, and model. The preview expires after 15
+minutes. Changed context, evidence, redaction, provider, model, or versions
+require a new preview and consent. Consent is recorded in the local audit log,
+not sent as evidence to the model.
+
+```mermaid
+flowchart LR
+    A[Windows agent] -->|visible-screen event| B[Local backend]
+    B --> C[Local detectors and models]
+    C --> D[(Encrypted local evidence)]
+    C --> E[(Alert and risk records)]
+    D --> F[Parent dashboard]
+    E --> F
+    F -->|guided optional selections| G[Deterministic minimizer and redactor v2]
+    G -->|exact JSON; no network call| F
+    F -->|cancel| X[Delete unconsumed preview]
+    F -->|unchecked consent + explicit continue| H[Guardian Review service]
+    H --> I{Configured provider}
+    I -->|external; ChatGPT controls| J[Codex and OpenAI model]
+    I -->|external; store=false + verified ZDR gate| K[OpenAI Responses API]
+    I -->|local only| L[Deterministic mock]
+    J --> M[(Encrypted local assessment)]
+    K --> M
+    L --> M
+    M --> F
+    B --> N[(Sanitized audit log)]
+    F --> N
+    G --> N
+    H --> N
+```
 
 ## OpenAI Responses API controls
 
@@ -46,6 +91,11 @@ approved for Zero Data Retention. Every request also uses `store: false`, does
 not use response chaining or background mode, and supplies no tools or web
 access. An API key is read from process environment/secret storage and is never
 placed in the database, response, audit details, or logs.
+
+OpenAI's current [data controls documentation](https://developers.openai.com/api/docs/guides/your-data#v1responses)
+describes Responses API application-state retention and Zero Data Retention as
+distinct controls. GuardianNode therefore never presents `store: false` alone
+as proof of zero retention.
 
 The ZDR requirement applies to every direct Responses API Guardian Review, not
 only to a specific age group. If ZDR eligibility is removed or cannot be
@@ -80,6 +130,10 @@ usability; it is not represented as ZDR.
 - Deleting an alert or reaching its retention deadline deletes its review
   payload, feedback, and derived preview records while retaining the minimum
   audit event required by policy.
+- A parent can delete a completed or failed assessment from either history
+  view. GuardianNode nulls the encrypted preview/context and assessment plus the
+  provider response identifier, while retaining versions, timestamps, status,
+  information categories, and a deletion audit tombstone.
 
 ## Threats and controls
 
@@ -96,6 +150,16 @@ usability; it is not represented as ZDR.
 | Codex OAuth retention | Exact preview, ChatGPT-workspace disclosure, per-review consent, ephemeral local session |
 | Duplicate billing/transmission | Durable idempotency identity and existing-job response |
 | Child data used for training/evaluation | Synthetic fixtures only; no production export path |
+
+## Known minimization limits
+
+Deterministic redaction cannot prove that every identity or location has been
+removed. Novel obfuscation, unsupported international address formats,
+image-only private information, and ordinary words used as names can evade or
+confuse pattern matching. For URL-relevant phishing/scam incidents, the
+normalized destination hostname is intentionally retained while paths, queries,
+fragments, credentials, and ports are removed. The exact parent preview is the
+final control before transmission.
 
 ## Parent and child safety boundary
 

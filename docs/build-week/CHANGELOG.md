@@ -58,3 +58,30 @@ Still planned:
   Review-specific parent feedback.
 - Broader frozen judge-scenario rubric and Windows installer qualification of
   the Codex device-login flow.
+
+## 2026-07-15 — Privacy, redaction, consent, and auditability
+
+Implemented:
+
+- Redaction contract `guardian-review-redaction-v2` with Unicode normalization,
+  invisible-control removal, obfuscated identifier handling, incident-scoped
+  stable placeholders, path/device/account/location masking, and relevance-aware
+  URL minimization.
+- A stricter outbound allowlist that excludes screenshots, local incident and
+  device/profile IDs, exact scores/counts, classifier state, unselected context,
+  and full event text by default. Evidence and total payload sizes are bounded.
+- Provider readiness gates, exact provider/retention disclosures, digest binding
+  to the redaction contract, and sanitized versioned audit metadata.
+- Alert-page guided optional-field controls, separate local/transmitted views,
+  exact read-only JSON, unchecked consent, cancel-without-send, result display,
+  per-alert history, and global history.
+- Parent-controlled deletion that scrubs encrypted preview/context/assessment
+  content and provider response identifiers while retaining a minimal audit
+  tombstone.
+- Alembic revision `0004_guardian_review_privacy` plus backend and dashboard
+  privacy, cancellation, deletion, history, authorization, and bypass tests.
+
+Still planned:
+
+- Guardian Review-specific parent feedback/evaluation reporting.
+- Expanded international address/identifier coverage and frozen judge scenarios.

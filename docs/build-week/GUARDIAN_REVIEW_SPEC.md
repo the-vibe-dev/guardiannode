@@ -1,8 +1,9 @@
 # Guardian Review Technical Specification
 
-- Status: backend service implemented 2026-07-14; alert-page result UI pending
+- Status: backend and parent privacy/consent/history experience implemented through 2026-07-15
 - Assessment schema: `1.1.0`
 - Prompt version: `guardian-review-v1`
+- Redaction version: `guardian-review-redaction-v2`
 
 ## Purpose and boundary
 
@@ -40,9 +41,10 @@ flowchart LR
     C --> E[(Alert and risk records)]
     E --> F[Parent dashboard]
     D -->|parent reveal only| F
-    F -->|parent context and selected evidence IDs| G[Redaction and minimization]
-    G -->|exact outbound preview| F
-    F -->|digest-bound consent| H[Guardian Review service]
+    F -->|guided optional context and evidence IDs| G[Deterministic redaction and minimization v2]
+    G -->|exact outbound JSON; local only| F
+    F -->|cancel; send nothing| N[Delete unconsumed preview]
+    F -->|unchecked consent + explicit continue| H[Guardian Review service]
     H --> K{Configured provider}
     K -->|parent friendly; ChatGPT controls| L[Codex CLI OAuth]
     K -->|store=false; ZDR required| I[OpenAI Responses API]
@@ -51,6 +53,7 @@ flowchart LR
     I -->|strict assessment v1.1| H
     M -->|strict assessment v1.1| H
     H --> F
+    F -->|delete local assessment| O[Scrub encrypted preview and result]
     B --> J[(Audit log)]
     F --> J
     G --> J
@@ -90,8 +93,10 @@ next step after reviewing the result and original evidence.
   "parent_believes_immediate_danger": false,
   "parent_goal": "prepare_conversation",
   "parent_goal_details": null,
-  "parent_context": "Optional context known to the parent, maximum 4000 characters.",
+  "parent_context": "Optional context known to the parent, maximum 1500 outbound characters.",
   "selected_evidence_ids": ["opaque-local-evidence-id"],
+  "include_evidence": true,
+  "include_age_group": true,
   "fresh_assessment": false
 }
 ```
@@ -110,20 +115,24 @@ are derived server-side rather than trusted from the browser.
   "model_requested": "gpt-5.6-sol",
   "schema_version": "1.1.0",
   "prompt_version": "guardian-review-v1",
+  "redaction_version": "guardian-review-redaction-v2",
   "outbound_payload": {},
   "preview_digest": "64-lowercase-hex-sha256",
   "field_count": 0,
   "character_count": 0,
   "redactions_applied": ["email"],
+  "information_categories": ["local_detector_findings"],
+  "external_processing": true,
+  "disclosure": "This exact preview will be sent to an external OpenAI model.",
   "retention_notice": "Provider-specific parent disclosure.",
   "expires_at": "RFC3339 timestamp"
 }
 ```
 
 `outbound_payload` is the exact canonical JSON proposed for transmission, not a
-summary. The digest covers that JSON plus schema and prompt versions. Previews
-expire after 15 minutes. Re-minimization or any input/version change invalidates
-the digest.
+summary. The digest covers that JSON plus schema, prompt, redaction, provider,
+and model versions. Previews expire after 15 minutes. Re-minimization or any
+input/version/configuration change invalidates the digest.
 
 ### Submit input and accepted output
 
@@ -160,14 +169,16 @@ does not accept client-supplied outbound JSON.
   "completed_at": "RFC3339 timestamp",
   "schema_version": "1.1.0",
   "prompt_version": "guardian-review-v1",
+  "redaction_version": "guardian-review-redaction-v2",
   "model_requested": "gpt-5.6",
   "model_returned": null,
   "assessment": {}
 }
 ```
 
-Status is `queued`, `running`, `completed`, or `failed`. `assessment` is present
-only when completed; a sanitized `error` is present only when failed.
+Status is `queued`, `running`, `completed`, `failed`, or `deleted`. `assessment`
+is present only when completed; a sanitized `error` is present only when failed.
+A deleted record retains only non-content metadata and `deleted_at`.
 
 ### Feedback input
 
@@ -192,7 +203,10 @@ an automatic follow-up model request.
 | `POST/GET/DELETE /api/guardian-review/providers/codex/device-login...` | Start, poll, or cancel guided ChatGPT device login | Parent session + CSRF + critical step-up for mutation |
 | `POST /api/alerts/{alert_id}/guardian-review/preview` | Local minimization only; no external call | Parent/admin session + CSRF |
 | `POST /api/alerts/{alert_id}/guardian-review` | Validate digest/consent and enqueue | Parent session + CSRF + recent step-up |
+| `DELETE /api/guardian-review/previews/{preview_id}` | Cancel and delete an unconsumed local preview; no provider call | Requesting parent/admin + CSRF |
+| `GET /api/guardian-reviews` | Sanitized global or per-alert history | Requesting parent/admin |
 | `GET /api/guardian-reviews/{review_id}` | Poll job/result | Requesting parent or admin |
+| `DELETE /api/guardian-reviews/{review_id}` | Scrub encrypted preview/context/result and retain an audit tombstone | Requesting parent/admin + CSRF + critical step-up |
 | `POST /api/guardian-reviews/{review_id}/feedback` | Planned local feedback route | Not implemented on July 14 |
 
 Connecting the Codex provider requires critical step-up authentication.
@@ -216,7 +230,8 @@ All failures use:
 Allowed codes are `feature_disabled`, `zdr_not_confirmed`,
 `configuration_error`, `consent_required`, `preview_stale`, `not_found`,
 `already_running`, `rate_limited`, `upstream_timeout`,
-`upstream_unavailable`, `upstream_refusal`, and `invalid_model_output`.
+`upstream_unavailable`, `upstream_refusal`, `invalid_model_output`,
+`cannot_cancel`, `review_in_progress`, and `payload_too_large`.
 Messages never include an API key, raw upstream body, prompt, parent context, or
 evidence.
 
@@ -244,6 +259,7 @@ Planned environment contract:
 | `GUARDIANNODE_GUARDIAN_REVIEW_MODEL` | `gpt-5.6` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_CODEX_MODEL` | `gpt-5.6-sol` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_PROMPT_VERSION` | `guardian-review-v1` |
+| Redaction contract | `guardian-review-redaction-v2`; code-versioned, not configurable at runtime |
 | `GUARDIANNODE_GUARDIAN_REVIEW_TIMEOUT_SECONDS` | `45` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_MAX_ATTEMPTS` | `2` |
 | `OPENAI_API_KEY` | optional advanced `openai` mode only; never logged or stored in DB |
@@ -266,11 +282,12 @@ unsupported identity/intent claims, and requires uncertainty and limitations.
 
 ## Audit events
 
-Emit `guardian_review.previewed`, `.consented`, `.queued`, `.sent`, `.completed`,
-`.failed`, and `.feedback_recorded`. The versioned audit details contain event,
-actor, alert/review IDs, mode, prompt/schema versions, requested/returned model,
-preview digest, minimized field names, outbound character count, consent time,
-status, duration, attempt count, and sanitized error code.
+Emit `guardian_review.previewed`, `.cancelled`, `.consented`, `.queued`, `.sent`,
+`.completed`, `.failed`, `.viewed`, `.deleted`, and eventually
+`.feedback_recorded`. The versioned audit details contain actor, incident/review
+IDs, provider, prompt/schema/redaction versions, requested/returned model,
+information categories, preview digest, outbound character count, status,
+duration, attempt count, parent action, and sanitized error code.
 
 Never audit raw outbound data, prompts, responses, API keys, parent notes,
 evidence excerpts, or personal data.

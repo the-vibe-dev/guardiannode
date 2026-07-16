@@ -73,16 +73,19 @@ conversation guidance, actions, escalation indicators, and limitations.
 
 The backend service, durable worker, strict schema, provider integration,
 synthetic harness, and parent-friendly ChatGPT connection flow were implemented
-on July 14. The alert-page preview/result/feedback presentation remains in
-progress. Guardian Review does not silently upload screenshots or directly
+on July 14. On July 15, the alert page gained guided minimization controls, an
+exact read-only outbound preview, explicit consent and cancel actions,
+structured result display, review history, and privacy-preserving local
+deletion. Guardian Review does not silently upload screenshots or directly
 drive enforcement.
 
 ### Existing-project disclosure
 
 The last verified repository state before the official Build Week cutoff is
 commit `36b2a547056d40eff32f00aa59b7820f7d3e98d5`, protected by tag
-`pre-build-week-2026`. New work is isolated on
-`build-week/guardian-review`. The pre-existing project includes the agent,
+`pre-build-week-2026`. Build Week work is isolated on
+`build-week/guardian-review` and the July 15 continuation
+`build-week/guardian-review-privacy`. The pre-existing project includes the agent,
 backend, dashboard, local detection, encrypted evidence, installers,
 authentication/security controls, and 353 passing unique tests.
 
@@ -105,8 +108,12 @@ Guardian Review has a parent-friendly Codex provider and an optional advanced
 direct Responses API provider. Codex uses “Sign in with ChatGPT” and currently
 requests `gpt-5.6-sol`; the direct API defaults to alias `gpt-5.6`, requires
 verified Zero Data Retention, and sends `store: false`. Both paths use strict
-schema `1.1.0`, local minimization/redaction, and consent bound to the exact
-outbound preview. Local detection remains functional without either provider.
+schema `1.1.0`, deterministic redaction contract
+`guardian-review-redaction-v2`, and consent bound to the exact outbound preview.
+`store: false` is not described as a zero-retention guarantee; direct API mode
+also fails closed unless the operator confirms the project has approved Zero
+Data Retention controls. Local detection remains functional without either
+provider.
 See the [technical specification](docs/build-week/GUARDIAN_REVIEW_SPEC.md)
 and [privacy model](docs/build-week/PRIVACY_MODEL.md).
 
@@ -118,8 +125,11 @@ use the source instructions for development. The current demonstrable path is:
 1. Start the local backend and complete parent setup.
 2. Pair a Windows test agent with a synthetic child profile.
 3. Run the repository's synthetic event test or Docker OCR-to-alert canary.
-4. Open the Risk Feed, inspect the persisted alert/evidence, and record existing
-   review or feedback.
+4. Open the Risk Feed and select an alert.
+5. Choose optional context/evidence, inspect the exact outbound JSON, and either
+   cancel or explicitly consent.
+6. View the structured result and local review history; optionally delete the
+   encrypted preview/result while retaining minimal audit metadata.
 
 For the implemented synthetic backend demonstration:
 
@@ -141,8 +151,11 @@ GuardianNode is alpha software, can miss or overstate risks, and can capture
 sensitive visible content. Windows 11 x64 is the promoted child-device path;
 Windows 10 has not been promoted. Installers are unsigned, separated deployments
 need a trusted VPN/TLS design, and Guardian Review remains a fallible second
-opinion rather than an emergency or diagnostic service. The alert-page review
-UI and feedback are not complete. See [Known limitations](KNOWN_LIMITATIONS.md) and the
+opinion rather than an emergency or diagnostic service. Deterministic
+redaction is defense-in-depth rather than a guarantee: unusual international
+addresses, novel obfuscation, image-only private data, or relevant URL domains
+can still carry identifying context. Guardian Review-specific feedback remains
+planned. See [Known limitations](KNOWN_LIMITATIONS.md) and the
 [submission checklist](docs/build-week/SUBMISSION_CHECKLIST.md).
 
 ## Deployment Shapes
@@ -198,6 +211,10 @@ or other sensitive material visible on the child device.
 GuardianNode may apply basic text filtering/redaction in some ingest paths, but
 parents should assume captured evidence can contain sensitive on-screen
 information. Evidence is stored locally and encrypted for parent/admin review.
+Guardian Review is disabled by default and never sends a live request until a
+parent sees the exact minimized JSON, acknowledges external OpenAI processing,
+and explicitly continues. Full screenshots, local file paths, device names, and
+unselected context remain local.
 
 ## System Requirements
 

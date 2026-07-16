@@ -31,6 +31,29 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 | `GUARDIANNODE_DATABASE_BACKUP_KEEP` | `7` | Scheduled generations retained |
 | `GUARDIANNODE_READINESS_MIN_FREE_BYTES` | `268435456` | Minimum free disk space required by `/api/health/ready` |
 
+### Guardian Review configuration
+
+Guardian Review is disabled by default. Local detection and the dashboard work
+normally without it. To enable the parent-friendly Windows path, install the
+official Codex CLI, set `GUARDIANNODE_GUARDIAN_REVIEW_ENABLED=true` and
+`GUARDIANNODE_GUARDIAN_REVIEW_PROVIDER=codex`, restart the backend, then use
+**Settings → Guardian Review → Connect with ChatGPT**. The alert-page review
+button remains unavailable until Codex reports an authenticated connection.
+
+Advanced server deployments may select `openai`, supply
+`GUARDIANNODE_OPENAI_API_KEY` through the service environment, and set
+`GUARDIANNODE_GUARDIAN_REVIEW_ZDR_CONFIRMED=true` only after verifying that the
+OpenAI project has approved Zero Data Retention controls. Requests use
+`store=false`, but GuardianNode does not claim that this parameter alone means
+zero retention. Never place the key in the dashboard, database, logs, or a
+committed environment file.
+
+Before every live request, the parent chooses optional evidence/context, sees
+the exact minimized JSON and provider disclosure, and must check an unchecked
+consent control. Cancelling deletes the unconsumed local preview and sends
+nothing. Completed previews/results are encrypted locally and can be scrubbed
+from review history while minimal audit metadata remains.
+
 After logging in as the parent, `GET /api/health/runtime-settings` returns the
 effective non-secret runtime configuration: bind host/port, classifier tier,
 model names, role-specific Ollama URLs, classifier timeouts/context settings,

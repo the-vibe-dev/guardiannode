@@ -10,6 +10,15 @@ GuardianNode is alpha/developer-preview software.
 - Vision models may misclassify images or miss important context.
 - Local models vary by license, hardware requirements, speed, and quality.
 - Screenshot capture may include sensitive on-screen information.
+- Guardian Review is a fallible external-model second opinion, not a finding of
+  intent, wrongdoing, diagnosis, or legal status.
+- Guardian Review redaction is deterministic defense-in-depth, not a guarantee.
+  Novel obfuscation, unsupported international identifiers/addresses,
+  image-only private information, and relevant destination hostnames may still
+  reveal context; the parent must inspect the exact outbound preview.
+- ChatGPT/Codex processing follows the connected plan or workspace controls.
+  Direct Responses API mode uses `store=false` but is disabled unless the
+  operator separately confirms approved Zero Data Retention controls.
 - LAN mode may require additional TLS, VPN, or reverse-proxy protection.
 - Windows is the current child-device focus. The planned platform order is
   macOS next, then Android, then iOS; those platforms are not current features.

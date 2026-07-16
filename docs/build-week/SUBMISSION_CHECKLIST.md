@@ -46,8 +46,10 @@ Remaining public/submission caveats:
 - [ ] Add Guardian Review-specific feedback and evaluation reporting.
 - [x] Complete backend privacy, auth, retry, timeout, idempotency, prompt
       injection boundary, and audit-data tests.
-- [ ] Add alert-page preview/result/feedback accessibility tests and expand the
-      frozen judge scenario set.
+- [x] Add alert-page preview, consent, cancel, result, history, deletion, and
+      accessibility-oriented interaction tests.
+- [ ] Add Guardian Review-specific feedback and expand the frozen judge
+      scenario set.
 
 ## Final submission gates
 
