@@ -193,9 +193,11 @@ class GuardianReviewPreview(Base):
     model_requested: Mapped[str] = mapped_column(String(128))
     schema_version: Mapped[str] = mapped_column(String(32))
     prompt_version: Mapped[str] = mapped_column(String(64))
+    redaction_version: Mapped[str] = mapped_column(String(64), default="guardian-review-redaction-v2")
+    information_categories: Mapped[list] = mapped_column(JSON, default=list)
     payload_digest: Mapped[str] = mapped_column(String(64), index=True)
     incident_fingerprint: Mapped[str] = mapped_column(String(64))
-    payload_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    payload_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     fresh_assessment: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -220,6 +222,7 @@ class GuardianReview(Base):
     dedup_key: Mapped[str] = mapped_column(String(64))
     schema_version: Mapped[str] = mapped_column(String(32))
     prompt_version: Mapped[str] = mapped_column(String(64))
+    redaction_version: Mapped[str] = mapped_column(String(64), default="guardian-review-redaction-v2")
     model_requested: Mapped[str] = mapped_column(String(128))
     model_returned: Mapped[str | None] = mapped_column(String(128), nullable=True)
     provider_response_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -230,6 +233,7 @@ class GuardianReview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )

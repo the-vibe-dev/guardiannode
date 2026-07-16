@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = "1.1.0"
 PROMPT_VERSION = "guardian-review-v1"
+REDACTION_VERSION = "guardian-review-redaction-v2"
 
 Category = Literal[
     "none", "self_harm", "grooming", "sexual_content", "sexual_exploitation",
@@ -48,6 +49,7 @@ class FollowUpAction(StrictModel):
 GuidanceItem = Annotated[str, Field(min_length=1, max_length=1000)]
 Guidance = list[GuidanceItem]
 EvidenceId = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9:_-]+$")]
+ReviewStatus = Literal["queued", "running", "completed", "failed", "deleted"]
 
 
 class GuardianReviewAssessment(StrictModel):
@@ -86,7 +88,38 @@ class GuardianReviewContext(StrictModel):
     parent_goal_details: str | None = Field(default=None, max_length=500)
     parent_context: str | None = Field(default=None, max_length=4000)
     selected_evidence_ids: list[EvidenceId] = Field(default_factory=list, max_length=20)
+    include_evidence: bool = True
+    include_age_group: bool = True
     fresh_assessment: bool = False
+
+
+class LocalDetectorFindings(StrictModel):
+    severity: Literal["none", "low", "medium", "high", "critical"]
+    categories: list[Category] = Field(max_length=10)
+    summary: str = Field(min_length=1, max_length=800)
+    rules_triggered: list[EvidenceId] = Field(max_length=20)
+
+
+class MinimizedEvidence(StrictModel):
+    evidence_id: EvidenceId
+    text: str = Field(min_length=1, max_length=800)
+
+
+class GuardianReviewOutboundPayload(StrictModel):
+    local_detector_findings: LocalDetectorFindings
+    minimized_evidence: list[MinimizedEvidence] = Field(max_length=8)
+    approximate_child_age_group: Literal["under_10", "10_13", "14_17", "unknown"] | None = None
+    known_relationship_context: Literal[
+        "unknown_person", "known_peer", "known_adult", "family_member",
+        "school_or_activity_contact", "other", "unknown",
+    ]
+    behavior_repeated: Literal["yes", "no", "unknown"]
+    parent_believes_immediate_danger: bool
+    parent_goal: Literal[
+        "understand_context", "assess_urgency", "prepare_conversation", "plan_follow_up", "other",
+    ]
+    parent_goal_details: str | None = Field(default=None, max_length=300)
+    parent_supplied_context: str | None = Field(default=None, max_length=1500)
 
 
 class ReviewPreviewResponse(StrictModel):
@@ -96,11 +129,15 @@ class ReviewPreviewResponse(StrictModel):
     model_requested: str
     schema_version: str
     prompt_version: str
-    outbound_payload: dict
+    redaction_version: str
+    outbound_payload: GuardianReviewOutboundPayload
     preview_digest: str
     field_count: int
     character_count: int
     redactions_applied: list[str]
+    information_categories: list[str]
+    external_processing: bool
+    disclosure: str
     retention_notice: str
     expires_at: datetime
 
@@ -113,14 +150,14 @@ class ReviewSubmitRequest(StrictModel):
 
 class ReviewAccepted(StrictModel):
     review_id: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: ReviewStatus
     status_url: str
 
 
 class ReviewResult(StrictModel):
     review_id: str
     alert_id: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: ReviewStatus
     provider: str
     created_at: datetime
     completed_at: datetime | None
@@ -129,8 +166,27 @@ class ReviewResult(StrictModel):
     model_requested: str
     model_returned: str | None
     latency_ms: int | None
+    redaction_version: str
+    deleted_at: datetime | None
     assessment: GuardianReviewAssessment | None
     error: dict | None
+
+
+class ReviewSummary(StrictModel):
+    review_id: str
+    alert_id: str
+    status: ReviewStatus
+    provider: str
+    model_requested: str
+    model_returned: str | None
+    schema_version: str
+    prompt_version: str
+    redaction_version: str
+    created_at: datetime
+    completed_at: datetime | None
+    deleted_at: datetime | None
+    latency_ms: int | None
+    has_assessment: bool
 
 
 def strict_output_schema() -> dict:

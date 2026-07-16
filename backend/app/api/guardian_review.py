@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from app.guardian_review_models import (
     ReviewPreviewResponse,
     ReviewResult,
     ReviewSubmitRequest,
+    ReviewSummary,
 )
 from app.services import guardian_review as workflow
 from app.services import guardian_review_codex_auth as codex_auth
@@ -35,10 +36,17 @@ def _error(exc: workflow.WorkflowError) -> JSONResponse:
 def providers(_: User = Depends(parent_user)) -> dict:
     settings = settings_mod.settings
     codex = codex_auth.status(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
+    readiness = workflow.provider_readiness(settings.guardian_review_provider)
     return {
         "enabled": settings.guardian_review_enabled,
+        "configured": readiness["ready"],
+        "ready": readiness["ready"],
+        "blocking_reason": readiness.get("blocking_reason"),
         "selected": settings.guardian_review_provider,
         "model": workflow.configured_model(settings.guardian_review_provider),
+        "external_processing": settings.guardian_review_provider != "mock",
+        "disclosure": workflow.DISCLOSURES.get(settings.guardian_review_provider, "Guardian Review is not configured correctly."),
+        "retention_notice": workflow.RETENTION_NOTICES.get(settings.guardian_review_provider, "No provider retention information is available."),
         "providers": {
             "mock": {"available": settings.dev_mode or settings.guardian_review_provider == "mock"},
             "codex": {"available": codex["installed"], **codex},
@@ -79,7 +87,7 @@ def cancel_codex_login(
     return {"status": "cancelled"}
 
 
-@router.post("/alerts/{alert_id}/guardian-review/preview", response_model=ReviewPreviewResponse)
+@router.post("/alerts/{alert_id}/guardian-review/preview", response_model=ReviewPreviewResponse, response_model_exclude_none=True)
 def preview(
     alert_id: str,
     request: GuardianReviewContext,
@@ -114,5 +122,42 @@ def result(
 ):
     try:
         return workflow.get_result(db, review_id=review_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+
+
+@router.delete("/guardian-review/previews/{preview_id}", status_code=204)
+def cancel_preview(
+    preview_id: str,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    try:
+        workflow.cancel_preview(db, preview_id=preview_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+    return Response(status_code=204)
+
+
+@router.get("/guardian-reviews", response_model=list[ReviewSummary])
+def history(
+    alert_id: str | None = None,
+    status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    return workflow.list_reviews(db, user=user, alert_id=alert_id, status=status, limit=limit)
+
+
+@router.delete("/guardian-reviews/{review_id}", response_model=ReviewSummary)
+def delete_review(
+    review_id: str,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+    _: None = Depends(require_critical_auth),
+):
+    try:
+        return workflow.delete_review(db, review_id=review_id, user=user)
     except workflow.WorkflowError as exc:
         return _error(exc)
