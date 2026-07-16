@@ -459,6 +459,7 @@ def test_synthetic_harness_mock_mode_needs_no_key(monkeypatch, tmp_path):
         (r"Open C:\\Users\\Avery\\family.txt", "Avery", "path"),
         ("Open /home/avery/private/family.txt", "avery/private", "path"),
         ("Account ID: 550e8400-e29b-41d4-a716-446655440000", "550e8400", "account_id"),
+        ("Username: Δανάη_17", "Δανάη_17", "username"),
         ("Meet at 40.712800, -74.006000", "40.712800", "location"),
         ("Meet near 123 Main Street", "123 Main", "address"),
     ],

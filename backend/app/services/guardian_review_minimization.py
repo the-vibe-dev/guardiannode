@@ -40,6 +40,9 @@ _WINDOWS_SID = re.compile(r"\bS-1-(?:\d+-){2,14}\d+\b", re.I)
 _LABELED_ACCOUNT_ID = re.compile(
     r"(?i)\b(?:account|acct|user|profile|member)[ _-]?(?:id|number)\s*[:=#-]?\s*[\w.-]{4,128}\b"
 )
+_LABELED_USERNAME = re.compile(
+    r"(?i)\b(?:user(?:name)?|screen[ _-]?name|handle|login)\s*[:=#-]\s*[\w.-]{2,64}\b"
+)
 _COORDINATES = re.compile(r"(?<!\d)[+-]?(?:\d{1,2}|1[0-7]\d)\.\d{3,}\s*[,;/ ]\s*[+-]?(?:\d{1,2}|1[0-7]\d)\.\d{3,}(?!\d)")
 _STREET_ADDRESS = re.compile(
     r"\b\d{1,6}\s+(?:[^\W_]+[ .'-]+){0,5}(?:street|st|avenue|ave|road|rd|lane|ln|drive|dr|court|ct|boulevard|blvd|way|place|pl)\b",
@@ -135,6 +138,7 @@ class _PrivacyRedactor:
         value = self.replace_pattern(_WINDOWS_SID, "account_id", value)
         value = self.replace_pattern(_UUID, "account_id", value)
         value = self.replace_pattern(_LABELED_ACCOUNT_ID, "account_id", value)
+        value = self.replace_pattern(_LABELED_USERNAME, "username", value)
         value = self.replace_pattern(_HANDLE, "handle", value)
         value = self.replace_pattern(_COORDINATES, "location", value)
         value = _PHONE_CANDIDATE.sub(self._replace_phone, value)
