@@ -2,7 +2,7 @@
 # Multi-stage: build dashboard with Node, install backend Python deps, run with uvicorn.
 
 # ---- Stage 1: build dashboard ----
-FROM node:24-alpine3.22@sha256:191c9f0080fcbbc6547a85dc0ff7988072214a355aabdc1d2ec55a7dae5eea8a AS dashboard-build
+FROM node:26-alpine3.22@sha256:c7932b9e5e337b0e733d6e16abc1b0e104759e8b05e59ed56586cce967d26dfe AS dashboard-build
 WORKDIR /build
 COPY dashboard/package*.json ./dashboard/
 RUN cd dashboard && npm ci --no-audit --no-fund
