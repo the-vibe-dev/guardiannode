@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = "1.1.0"
-PROMPT_VERSION = "guardian-review-v1"
+PROMPT_VERSION = "guardian-review-v2"
 REDACTION_VERSION = "guardian-review-redaction-v2"
 
 Category = Literal[
@@ -50,6 +50,14 @@ GuidanceItem = Annotated[str, Field(min_length=1, max_length=1000)]
 Guidance = list[GuidanceItem]
 EvidenceId = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9:_-]+$")]
 ReviewStatus = Literal["queued", "running", "completed", "failed", "deleted"]
+FeedbackLabel = Literal[
+    "helpful",
+    "inaccurate",
+    "too_alarmist",
+    "too_dismissive",
+    "missing_context",
+    "needs_follow_up",
+]
 
 
 class GuardianReviewAssessment(StrictModel):
@@ -166,10 +174,48 @@ class ReviewResult(StrictModel):
     model_requested: str
     model_returned: str | None
     latency_ms: int | None
+    usage: ModelUsage | None = None
+    guidance_context: GuidanceContextSnapshot | None = None
     redaction_version: str
     deleted_at: datetime | None
     assessment: GuardianReviewAssessment | None
     error: dict | None
+
+
+class ModelUsage(StrictModel):
+    input_tokens: int | None = Field(default=None, ge=0)
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+
+
+class GuidanceContextSnapshot(StrictModel):
+    approximate_child_age_group: Literal["under_10", "10_13", "14_17", "unknown"] | None
+    relationship_context: Literal[
+        "unknown_person", "known_peer", "known_adult", "family_member",
+        "school_or_activity_contact", "other", "unknown",
+    ]
+    repeated_behavior: Literal["yes", "no", "unknown"]
+    parent_believes_immediate_danger: bool
+    parent_goal: Literal[
+        "understand_context", "assess_urgency", "prepare_conversation", "plan_follow_up", "other",
+    ]
+
+
+class ReviewFeedbackRequest(StrictModel):
+    labels: list[FeedbackLabel] = Field(min_length=1, max_length=6)
+
+
+class ReviewFeedbackResponse(StrictModel):
+    review_id: str
+    labels: list[FeedbackLabel]
+    schema_version: str
+    prompt_version: str
+    redaction_version: str
+    model: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class ReviewSummary(StrictModel):

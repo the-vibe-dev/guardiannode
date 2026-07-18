@@ -13,6 +13,8 @@ from app.db.models import User
 from app.guardian_review_models import (
     GuardianReviewContext,
     ReviewAccepted,
+    ReviewFeedbackRequest,
+    ReviewFeedbackResponse,
     ReviewPreviewResponse,
     ReviewResult,
     ReviewSubmitRequest,
@@ -122,6 +124,31 @@ def result(
 ):
     try:
         return workflow.get_result(db, review_id=review_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+
+
+@router.get("/guardian-reviews/{review_id}/feedback", response_model=ReviewFeedbackResponse | None)
+def feedback(
+    review_id: str,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    try:
+        return workflow.get_feedback(db, review_id=review_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+
+
+@router.put("/guardian-reviews/{review_id}/feedback", response_model=ReviewFeedbackResponse)
+def save_feedback(
+    review_id: str,
+    request: ReviewFeedbackRequest,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    try:
+        return workflow.put_feedback(db, review_id=review_id, request=request, user=user)
     except workflow.WorkflowError as exc:
         return _error(exc)
 

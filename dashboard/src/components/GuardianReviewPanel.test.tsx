@@ -12,6 +12,8 @@ vi.mock("../api", () => ({
     cancelGuardianReviewPreview: vi.fn(),
     submitGuardianReview: vi.fn(),
     guardianReview: vi.fn(),
+    guardianReviewFeedback: vi.fn(),
+    saveGuardianReviewFeedback: vi.fn(),
     deleteGuardianReview: vi.fn(),
   },
 }));
@@ -45,6 +47,8 @@ beforeEach(() => {
   vi.mocked(api.guardianReviewHistory).mockResolvedValue([]);
   vi.mocked(api.guardianReviewPreview).mockResolvedValue(preview);
   vi.mocked(api.cancelGuardianReviewPreview).mockResolvedValue(undefined);
+  vi.mocked(api.guardianReviewFeedback).mockResolvedValue(null);
+  vi.mocked(api.saveGuardianReviewFeedback).mockResolvedValue({ labels: ["helpful"] });
 });
 
 afterEach(() => {
@@ -101,10 +105,17 @@ describe("Guardian Review privacy flow", () => {
       model_returned: "gpt-5.6-sol", schema_version: "1.1.0", prompt_version: "guardian-review-v1",
       redaction_version: "guardian-review-redaction-v2",
       assessment: {
-        assessment: "ambiguous", severity: "medium", plain_language_summary: "Context is incomplete.",
+        assessment: "ambiguous", category: "unknown", severity: "medium", confidence: 0.64,
+        plain_language_summary: "Context is incomplete.",
         observed_facts: ["A local detector found an excerpt."], possible_benign_explanations: ["It may be a quote."],
+        inferences: ["The excerpt may warrant a calm check-in."],
+        supporting_evidence: [{ evidence_id: "risk:0", observation: "A detector-selected excerpt.", relevance: "It triggered a local rule." }],
         missing_context: ["Who was involved."], suggested_opening_language: "Can you help me understand?",
+        questions_parent_should_answer: ["Is this isolated or repeated?"],
+        recommended_parent_tone: { tone: "calm_and_curious", rationale: "The facts are incomplete." },
         questions_to_ask_child: ["What happened?"], phrases_or_approaches_to_avoid: ["Avoid accusations."],
+        immediate_actions: [{ priority: "today", action: "Check in calmly.", rationale: "More context is needed." }],
+        follow_up_actions: [{ timeframe: "within_one_week", action: "Follow up.", rationale: "Confirm the situation is resolved." }],
         escalation_indicators: ["Imminent danger."], limitations: ["This is a second opinion."],
       },
     });
@@ -115,6 +126,13 @@ describe("Guardian Review privacy flow", () => {
     fireEvent.click(screen.getByLabelText(/I reviewed the exact content/i));
     fireEvent.click(screen.getByText("Send for Guardian Review"));
     expect(await screen.findByText("Context is incomplete.")).toBeTruthy();
+    expect(screen.getByText("How to approach your child")).toBeTruthy();
+    expect(screen.getByText(/Do not punish or accuse/i)).toBeTruthy();
     expect(api.submitGuardianReview).toHaveBeenCalledWith("alert-1", "preview-1", "a".repeat(64));
+
+    fireEvent.click(screen.getByLabelText("Helpful"));
+    fireEvent.click(screen.getByText("Save feedback"));
+    await waitFor(() => expect(api.saveGuardianReviewFeedback).toHaveBeenCalledWith("review-1", ["helpful"]));
+    expect(await screen.findByText(/will not automatically train/i)).toBeTruthy();
   });
 });

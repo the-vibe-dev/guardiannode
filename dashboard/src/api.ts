@@ -9,8 +9,9 @@ async function getCsrfToken(): Promise<string> {
   if (cachedCsrfToken) return cachedCsrfToken;
   const res = await fetch(`${API_BASE}/auth/csrf`, { credentials: "same-origin" });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    const body = await res.clone().json().catch(() => null);
+    const message = body?.error?.message || body?.detail?.message || body?.detail || `Request failed (${res.status})`;
+    throw new Error(String(message));
   }
   const data = await res.json();
   cachedCsrfToken = String(data.csrf_token);
@@ -116,6 +117,13 @@ export const api = {
   },
   deleteGuardianReview: (review_id: string) =>
     request<any>(`/guardian-reviews/${review_id}`, { method: "DELETE" }),
+  guardianReviewFeedback: (review_id: string) =>
+    request<any | null>(`/guardian-reviews/${review_id}/feedback`),
+  saveGuardianReviewFeedback: (review_id: string, labels: string[]) =>
+    request<any>(`/guardian-reviews/${review_id}/feedback`, {
+      method: "PUT",
+      body: JSON.stringify({ labels }),
+    }),
   reviewAlert: (id: string, status: string, notes?: string) =>
     request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes }) }),
   feedbackAlert: (id: string, feedback_type: string, notes?: string) =>

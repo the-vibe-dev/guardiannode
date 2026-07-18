@@ -51,7 +51,12 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
 
   useEffect(() => {
     Promise.all([api.guardianReviewProviders(), api.guardianReviewHistory({ alert_id: alertId, limit: "25" })])
-      .then(([status, rows]) => { setProvider(status); setHistory(rows); })
+      .then(([status, rows]) => {
+        setProvider(status);
+        setHistory(rows);
+        const active = rows.find((row: any) => ["queued", "running"].includes(row.status));
+        if (active) pollReview(active.review_id).catch((e) => setError(e.message));
+      })
       .catch((e) => setError(e.message));
     return () => {
       if (pollTimer.current !== null) window.clearTimeout(pollTimer.current);
@@ -281,29 +286,110 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
 }
 
 export function AssessmentResult({ result }: { result: any }) {
-  if (["queued", "running"].includes(result.status)) return <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Guardian Review is {result.status}. You can leave this page; the local history will keep its status.</div>;
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const [feedback, setFeedback] = useState<Set<string>>(new Set());
+  const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
+  const [savingFeedback, setSavingFeedback] = useState(false);
+
+  useEffect(() => {
+    if (result.status === "completed") {
+      headingRef.current?.focus();
+      api.guardianReviewFeedback(result.review_id)
+        .then((row) => { if (row?.labels) setFeedback(new Set(row.labels)); })
+        .catch(() => undefined);
+    }
+  }, [result.review_id, result.status]);
+
+  async function saveFeedback() {
+    if (feedback.size === 0) return;
+    setSavingFeedback(true);
+    setFeedbackStatus(null);
+    try {
+      await api.saveGuardianReviewFeedback(result.review_id, Array.from(feedback));
+      setFeedbackStatus("Feedback saved locally. It will not automatically train or change Guardian Review.");
+    } catch (error: any) {
+      setFeedbackStatus(error.message || "Feedback could not be saved.");
+    } finally {
+      setSavingFeedback(false);
+    }
+  }
+
+  function toggleFeedback(label: string) {
+    setFeedback((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label); else next.add(label);
+      return next;
+    });
+  }
+
+  if (["queued", "running"].includes(result.status)) return <div role="status" aria-live="polite" className="rounded border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900"><span className="font-medium">Guardian Review is {result.status}.</span><span className="block mt-1">You can leave or refresh this page. The durable local history will resume this review.</span></div>;
   if (result.status === "deleted") return <div className="rounded border bg-gray-50 p-3 text-sm text-gray-700">This local assessment and its outbound preview were deleted. Minimal audit metadata remains.</div>;
   if (result.status === "failed") return <div role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{result.error?.message || "Guardian Review failed safely."}</div>;
   const a = result.assessment;
   if (!a) return null;
   return (
-    <div className="rounded border border-brand-200 bg-brand-50 p-4 space-y-3" aria-live="polite">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold">Guardian Review result</h3>
-        <span className="text-xs uppercase font-semibold">{a.assessment.replace("_", " ")} · {a.severity}</span>
+    <div className="rounded border border-brand-200 bg-brand-50 p-4 space-y-5" aria-live="polite">
+      <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+        <strong>A second opinion, not a finding of fact.</strong> Do not punish or accuse a child based only on an AI assessment. Review the local evidence, begin with curiosity when facts are incomplete, and keep the final decision with the parent.
       </div>
-      <p>{a.plain_language_summary}</p>
-      <ResultList title="Observed facts" items={a.observed_facts} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 ref={headingRef} tabIndex={-1} className="font-semibold text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Guardian Review communication plan</h3>
+        <span className="text-xs uppercase font-semibold rounded-full bg-white px-3 py-1 border">{a.assessment.replace("_", " ")} · {a.severity}</span>
+      </div>
+      <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+        <Metric label="Assessment" value={a.assessment.replace("_", " ")} />
+        <Metric label="Severity" value={a.severity} />
+        <Metric label="Confidence" value={`${Math.round(Number(a.confidence || 0) * 100)}%`} />
+        <Metric label="Category" value={String(a.category || "unknown").replaceAll("_", " ")} />
+      </dl>
+      <div><h4 className="font-medium">Assessment summary</h4><p className="mt-1 text-sm">{a.plain_language_summary}</p></div>
+      <ResultList title="What was observed" items={a.observed_facts} />
+      <ResultList title="Why this may be concerning" items={a.inferences} />
+      <EvidenceList items={a.supporting_evidence} />
       <ResultList title="Possible benign explanations" items={a.possible_benign_explanations} />
-      <ResultList title="Missing context" items={a.missing_context} />
-      <div><h4 className="font-medium">Suggested opening</h4><p className="mt-1 text-sm">{a.suggested_opening_language}</p></div>
-      <ResultList title="Questions to ask your child" items={a.questions_to_ask_child} />
-      <ResultList title="Approaches to avoid" items={a.phrases_or_approaches_to_avoid} />
+      <ResultList title="What is still unknown" items={a.missing_context} />
+      <ResultList title="Questions to consider first" items={a.questions_parent_should_answer} />
+
+      <section className="rounded border bg-white p-4 space-y-3" aria-labelledby={`conversation-${result.review_id}`}>
+        <h4 id={`conversation-${result.review_id}`} className="font-semibold">How to approach your child</h4>
+        <div><h5 className="font-medium text-sm">Recommended tone</h5><p className="text-sm mt-1 capitalize">{String(a.recommended_parent_tone?.tone || "calm and curious").replaceAll("_", " ")}</p><p className="text-xs text-gray-600 mt-1">{a.recommended_parent_tone?.rationale}</p></div>
+        <div><h5 className="font-medium text-sm">Suggested opening words</h5><blockquote className="mt-1 border-l-4 border-brand-300 pl-3 text-sm">{a.suggested_opening_language}</blockquote></div>
+        <ResultList title="Questions to ask" items={a.questions_to_ask_child} />
+        <ResultList title="Approaches or phrases to avoid" items={a.phrases_or_approaches_to_avoid} />
+        <p className="text-xs text-gray-600">Separate immediate safety from later discipline. Preserve trust where possible, and seek qualified professional assistance when the situation exceeds this product's role.</p>
+      </section>
+
+      <ActionList title="Immediate actions" items={a.immediate_actions} timingKey="priority" />
+      <ActionList title="Follow-up actions" items={a.follow_up_actions} timingKey="timeframe" />
       <ResultList title="Escalation indicators" items={a.escalation_indicators} />
-      <ResultList title="Limitations" items={a.limitations} />
-      <p className="text-xs text-gray-500">Model {result.model_returned || result.model_requested} · schema {result.schema_version} · prompt {result.prompt_version} · redaction {result.redaction_version}</p>
+      <ResultList title="Model limitations" items={a.limitations} />
+
+      <fieldset className="rounded border bg-white p-4">
+        <legend className="px-1 font-medium">Was this Guardian Review useful?</legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {feedbackOptions.map(([key, label]) => <label key={key} className="flex items-center gap-2 rounded border p-2 text-sm focus-within:ring-2 focus-within:ring-brand-500"><input type="checkbox" checked={feedback.has(key)} onChange={() => toggleFeedback(key)} />{label}</label>)}
+        </div>
+        <button type="button" onClick={saveFeedback} disabled={savingFeedback || feedback.size === 0} className="mt-3 rounded bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2">{savingFeedback ? "Saving locally…" : "Save feedback"}</button>
+        {feedbackStatus && <p role="status" className="mt-2 text-xs text-gray-700">{feedbackStatus}</p>}
+      </fieldset>
+
+      <p className="text-xs text-gray-500">Model {result.model_returned || result.model_requested} · schema {result.schema_version} · prompt {result.prompt_version} · redaction {result.redaction_version}{result.usage?.total_tokens != null ? ` · ${result.usage.total_tokens} tokens` : ""}</p>
     </div>
   );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded bg-white p-2 border"><dt className="text-xs text-gray-500">{label}</dt><dd className="font-medium capitalize">{value}</dd></div>;
+}
+
+function EvidenceList({ items }: { items: any[] }) {
+  if (!items?.length) return null;
+  return <div><h4 className="font-medium">Supporting evidence</h4><ul className="mt-1 space-y-2 text-sm">{items.map((item, index) => <li key={`${item.evidence_id}-${index}`} className="rounded border bg-white p-2"><span className="font-mono text-xs text-gray-500">{item.evidence_id}</span><span className="block">{item.observation}</span><span className="block text-xs text-gray-600">Why it matters: {item.relevance}</span></li>)}</ul></div>;
+}
+
+function ActionList({ title, items, timingKey }: { title: string; items: any[]; timingKey: "priority" | "timeframe" }) {
+  if (!items?.length) return null;
+  return <div><h4 className="font-medium">{title}</h4><ul className="mt-1 space-y-2 text-sm">{items.map((item, index) => <li key={`${title}-${index}`} className="rounded border bg-white p-2"><span className="text-xs font-semibold uppercase text-brand-700">{String(item[timingKey] || "").replaceAll("_", " ")}</span><span className="block font-medium">{item.action}</span><span className="block text-xs text-gray-600">{item.rationale}</span></li>)}</ul></div>;
 }
 
 function ResultList({ title, items }: { title: string; items: string[] }) {
@@ -318,3 +404,4 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 const relationshipOptions: Array<[string, string]> = [["unknown", "Not sure"], ["unknown_person", "Unknown person"], ["known_peer", "Known peer"], ["known_adult", "Known adult"], ["family_member", "Family member"], ["school_or_activity_contact", "School or activity contact"], ["other", "Other"]];
 const repeatOptions: Array<[string, string]> = [["unknown", "Not sure"], ["yes", "Yes"], ["no", "No"]];
 const goalOptions: Array<[string, string]> = [["understand_context", "Understand the context"], ["assess_urgency", "Assess urgency"], ["prepare_conversation", "Prepare a conversation"], ["plan_follow_up", "Plan follow-up"], ["other", "Other"]];
+const feedbackOptions: Array<[string, string]> = [["helpful", "Helpful"], ["inaccurate", "Inaccurate"], ["too_alarmist", "Too alarmist"], ["too_dismissive", "Too dismissive"], ["missing_context", "Missing context"], ["needs_follow_up", "Needs follow-up"]];

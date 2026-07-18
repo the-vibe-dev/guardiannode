@@ -18,6 +18,7 @@ from app.db.models import (
     Device,
     Event,
     GuardianReview,
+    GuardianReviewFeedback,
     GuardianReviewPreview,
     RiskResult,
     User,
@@ -136,15 +137,15 @@ def test_strict_schema_closes_every_object_and_rejects_extra_fields():
 
 
 def test_prompt_contract_contains_required_safety_boundaries():
-    prompt = (Path(__file__).parents[1] / "app" / "prompts" / "guardian_review_v1.txt").read_text("utf-8").lower()
+    prompt = (Path(__file__).parents[1] / "app" / "prompts" / "guardian_review_v2.txt").read_text("utf-8").lower()
     for phrase in (
         "observed facts",
         "definitive accusations",
         "benign explanations",
-        "medical, psychological, or legal",
+        "medical, psychological, clinical, or legal",
         "imminent danger",
         "parent as final decision-maker",
-        "untrusted quoted data",
+        "untrusted quoted evidence",
     ):
         assert phrase in prompt
 
@@ -239,7 +240,18 @@ async def test_responses_api_uses_store_false_and_strict_schema():
     seen = {}
     def handler(request: httpx.Request) -> httpx.Response:
         seen.update(json.loads(request.content))
-        return httpx.Response(200, json={"id": "resp_1", "model": "gpt-5.6-2026-07-01", "output": [{"content": [{"type": "output_text", "text": _valid_assessment().model_dump_json()}]}]})
+        return httpx.Response(200, json={
+            "id": "resp_1",
+            "model": "gpt-5.6-2026-07-01",
+            "usage": {
+                "input_tokens": 120,
+                "input_tokens_details": {"cached_tokens": 20},
+                "output_tokens": 80,
+                "output_tokens_details": {"reasoning_tokens": 10},
+                "total_tokens": 200,
+            },
+            "output": [{"content": [{"type": "output_text", "text": _valid_assessment().model_dump_json()}]}],
+        })
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         result = await OpenAIResponsesProvider(api_key="test-only", base_url="https://api.openai.test/v1", client=client).assess(payload={"incident_id": "synthetic"}, prompt="contract", model="gpt-5.6", timeout=1)
@@ -250,6 +262,14 @@ async def test_responses_api_uses_store_false_and_strict_schema():
     assert seen["tools"] == []
     assert seen["text"]["format"]["strict"] is True
     assert result.model_returned == "gpt-5.6-2026-07-01"
+    assert result.usage is not None
+    assert result.usage.model_dump() == {
+        "input_tokens": 120,
+        "cached_input_tokens": 20,
+        "output_tokens": 80,
+        "reasoning_tokens": 10,
+        "total_tokens": 200,
+    }
 
 
 @pytest.mark.asyncio
@@ -414,6 +434,73 @@ def test_audit_log_never_contains_raw_context(monkeypatch, tmp_path):
         assert accepted["review_id"] in {row.target for row in db.query(AuditLog).all()}
     finally:
         db.close()
+
+
+def test_parent_feedback_is_local_versioned_and_replaceable(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    accepted = _submit(client, _preview(client))
+    from app.db.models import AuditLog
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        asyncio.run(guardian_review.process_one(db))
+    finally:
+        db.close()
+
+    review_id = accepted["review_id"]
+    assert client.get(f"/api/guardian-reviews/{review_id}/feedback").json() is None
+    first = client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["helpful", "missing_context", "helpful"]},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["labels"] == ["helpful", "missing_context"]
+    assert first.json()["prompt_version"] == "guardian-review-v2"
+
+    replaced = client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["too_alarmist"]},
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()["labels"] == ["too_alarmist"]
+
+    db = get_sessionmaker()()
+    try:
+        assert db.query(GuardianReviewFeedback).count() == 1
+        audit = db.query(AuditLog).filter(AuditLog.action == "guardian_review.feedback").all()
+        assert len(audit) == 2
+        assert all(row.details["local_only"] is True for row in audit)
+        assert all(row.details["training_use"] is False for row in audit)
+        assert "parent@example.test" not in json.dumps([row.details for row in audit])
+    finally:
+        db.close()
+
+
+def test_feedback_requires_completed_authorized_review(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    accepted = _submit(client, _preview(client))
+    review_id = accepted["review_id"]
+    pending = client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["helpful"]},
+    )
+    assert pending.status_code == 409
+    assert pending.json()["error"]["code"] == "feedback_unavailable"
+
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        db.query(User).filter(User.display_name == "Parent").one().role = "viewer"
+        db.commit()
+    finally:
+        db.close()
+    assert client.get(f"/api/guardian-reviews/{review_id}/feedback").status_code == 403
+    assert client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["helpful"]},
+    ).status_code == 403
 
 
 def test_preview_rows_are_encrypted(monkeypatch, tmp_path):

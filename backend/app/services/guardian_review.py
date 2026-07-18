@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import settings as settings_mod
-from app.db.models import GuardianReview, GuardianReviewPreview, User
+from app.db.models import GuardianReview, GuardianReviewFeedback, GuardianReviewPreview, User
 from app.guardian_review_models import (
     PROMPT_VERSION,
     REDACTION_VERSION,
@@ -24,7 +24,11 @@ from app.guardian_review_models import (
     GuardianReviewAssessment,
     GuardianReviewContext,
     GuardianReviewOutboundPayload,
+    GuidanceContextSnapshot,
+    ModelUsage,
     ReviewAccepted,
+    ReviewFeedbackRequest,
+    ReviewFeedbackResponse,
     ReviewPreviewResponse,
     ReviewResult,
     ReviewStatus,
@@ -75,8 +79,11 @@ def _review_aad(review_id: str) -> bytes:
     return f"guardian-review-assessment:{review_id}".encode()
 
 
-def _prompt() -> str:
-    return (Path(__file__).resolve().parents[1] / "prompts" / "guardian_review_v1.txt").read_text("utf-8")
+def _prompt(version: str) -> str:
+    if version not in {"guardian-review-v1", "guardian-review-v2"}:
+        raise WorkflowError("configuration_error", status_code=503)
+    filename = f"{version.replace('-', '_')}.txt"
+    return (Path(__file__).resolve().parents[1] / "prompts" / filename).read_text("utf-8")
 
 
 def _settings():
@@ -376,7 +383,22 @@ def get_result(db: Session, *, review_id: str, user: User) -> ReviewResult:
         details={"incident_id": row.alert_id, "status": row.status},
     )
     db.commit()
-    error = None if not row.error_code else {"code": row.error_code, "message": _error_message(row.error_code), "retryable": row.error_code in {"upstream_timeout", "upstream_unavailable", "rate_limited"}, "review_id": row.review_id}
+    error = None if not row.error_code else {"code": row.error_code, "message": _error_message(row.error_code), "retryable": row.error_code in {"upstream_timeout", "upstream_unavailable", "rate_limited", "database_busy"}, "review_id": row.review_id}
+    usage_values = (
+        row.input_tokens,
+        row.cached_input_tokens,
+        row.output_tokens,
+        row.reasoning_tokens,
+        row.total_tokens,
+    )
+    usage = ModelUsage(
+        input_tokens=row.input_tokens,
+        cached_input_tokens=row.cached_input_tokens,
+        output_tokens=row.output_tokens,
+        reasoning_tokens=row.reasoning_tokens,
+        total_tokens=row.total_tokens,
+    ) if any(value is not None for value in usage_values) else None
+    guidance_context = _guidance_context(db.get(GuardianReviewPreview, row.preview_id))
     return ReviewResult(
         review_id=row.review_id,
         alert_id=row.alert_id,
@@ -389,10 +411,108 @@ def get_result(db: Session, *, review_id: str, user: User) -> ReviewResult:
         model_requested=row.model_requested,
         model_returned=row.model_returned,
         latency_ms=row.latency_ms,
+        usage=usage,
+        guidance_context=guidance_context,
         redaction_version=row.redaction_version,
         deleted_at=row.deleted_at,
         assessment=assessment,
         error=error,
+    )
+
+
+def _guidance_context(preview: GuardianReviewPreview | None) -> GuidanceContextSnapshot | None:
+    if preview is None or preview.payload_enc is None:
+        return None
+    try:
+        stored = _load_preview_payload(preview)
+        context = GuardianReviewContext.model_validate(stored.get("context"))
+        outbound = GuardianReviewOutboundPayload.model_validate(stored.get("outbound_payload"))
+    except Exception:
+        return None
+    return GuidanceContextSnapshot(
+        approximate_child_age_group=outbound.approximate_child_age_group,
+        relationship_context=context.relationship_context,
+        repeated_behavior=context.repeated_behavior,
+        parent_believes_immediate_danger=context.parent_believes_immediate_danger,
+        parent_goal=context.parent_goal,
+    )
+
+
+def _authorized_review(db: Session, review_id: str, user: User) -> GuardianReview:
+    row = db.get(GuardianReview, review_id)
+    if row is None or (user.role != "admin" and row.requester_user_id != user.id):
+        raise WorkflowError("not_found", status_code=404)
+    return row
+
+
+def get_feedback(db: Session, *, review_id: str, user: User) -> ReviewFeedbackResponse | None:
+    _authorized_review(db, review_id, user)
+    row = db.query(GuardianReviewFeedback).filter(
+        GuardianReviewFeedback.review_id == review_id,
+        GuardianReviewFeedback.user_id == user.id,
+    ).first()
+    return _feedback_response(row) if row else None
+
+
+def put_feedback(
+    db: Session,
+    *,
+    review_id: str,
+    request: ReviewFeedbackRequest,
+    user: User,
+) -> ReviewFeedbackResponse:
+    review = _authorized_review(db, review_id, user)
+    if review.status != "completed" or review.assessment_enc is None:
+        raise WorkflowError("feedback_unavailable", status_code=409)
+    labels = sorted(set(request.labels))
+    row = db.query(GuardianReviewFeedback).filter(
+        GuardianReviewFeedback.review_id == review_id,
+        GuardianReviewFeedback.user_id == user.id,
+    ).first()
+    if row is None:
+        row = GuardianReviewFeedback(
+            feedback_id=uuid4().hex,
+            review_id=review_id,
+            user_id=user.id,
+            created_at=_now(),
+        )
+        db.add(row)
+    row.labels = labels
+    row.schema_version = review.schema_version
+    row.prompt_version = review.prompt_version
+    row.redaction_version = review.redaction_version
+    row.model = review.model_returned or review.model_requested
+    row.updated_at = _now()
+    log_action(
+        db,
+        actor=str(user.id),
+        action="guardian_review.feedback",
+        target=review_id,
+        details={
+            "incident_id": review.alert_id,
+            "labels": labels,
+            "schema_version": review.schema_version,
+            "prompt_version": review.prompt_version,
+            "redaction_version": review.redaction_version,
+            "model": row.model,
+            "local_only": True,
+            "training_use": False,
+        },
+    )
+    db.commit()
+    return _feedback_response(row)
+
+
+def _feedback_response(row: GuardianReviewFeedback) -> ReviewFeedbackResponse:
+    return ReviewFeedbackResponse(
+        review_id=row.review_id,
+        labels=row.labels,
+        schema_version=row.schema_version,
+        prompt_version=row.prompt_version,
+        redaction_version=row.redaction_version,
+        model=row.model,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -464,6 +584,9 @@ def delete_review(db: Session, *, review_id: str, user: User) -> ReviewSummary:
         raise WorkflowError("review_in_progress", status_code=409)
     if row.status == "deleted":
         return _summary(row)
+    db.query(GuardianReviewFeedback).filter(
+        GuardianReviewFeedback.review_id == row.review_id
+    ).delete(synchronize_session=False)
     preview = db.get(GuardianReviewPreview, row.preview_id)
     information_categories = list(preview.information_categories or []) if preview else []
     row.assessment_enc = None
@@ -512,6 +635,8 @@ def _error_message(code: str) -> str:
         "cannot_cancel": "This preview can no longer be cancelled.",
         "review_in_progress": "Wait for this Guardian Review to finish before deleting it.",
         "payload_too_large": "The minimized incident is still too large to send safely.",
+        "feedback_unavailable": "Feedback is available after a completed Guardian Review.",
+        "database_busy": "GuardianNode is busy saving another update. Your incident is safe; try again shortly.",
     }.get(code, "Guardian Review failed safely.")
 
 
@@ -557,14 +682,20 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
         log_action(db, actor="system", action="guardian_review.sent", target=row.review_id, details={**audit_base, "attempt": attempt})
         db.commit()
         try:
-            result = await provider.assess(payload=payload, prompt=_prompt(), model=row.model_requested, timeout=float(_settings().guardian_review_timeout_seconds))
+            result = await provider.assess(payload=payload, prompt=_prompt(row.prompt_version), model=row.model_requested, timeout=float(_settings().guardian_review_timeout_seconds))
             row.assessment_enc = encryption.encrypt_bytes(result.assessment.model_dump_json().encode(), aad=_review_aad(row.review_id))
             row.model_returned = result.model_returned
             row.provider_response_id = result.response_id
             row.latency_ms = result.latency_ms
+            if result.usage:
+                row.input_tokens = result.usage.input_tokens
+                row.cached_input_tokens = result.usage.cached_input_tokens
+                row.output_tokens = result.usage.output_tokens
+                row.reasoning_tokens = result.usage.reasoning_tokens
+                row.total_tokens = result.usage.total_tokens
             row.status = "completed"
             row.completed_at = _now()
-            log_action(db, actor="system", action="guardian_review.completed", target=row.review_id, details={**audit_base, "model_returned": row.model_returned, "attempts": row.attempts, "latency_ms": row.latency_ms, "status": row.status})
+            log_action(db, actor="system", action="guardian_review.completed", target=row.review_id, details={**audit_base, "model_returned": row.model_returned, "attempts": row.attempts, "latency_ms": row.latency_ms, "total_tokens": row.total_tokens, "status": row.status})
             db.commit()
             return True
         except ProviderError as exc:
