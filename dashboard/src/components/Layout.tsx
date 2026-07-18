@@ -16,6 +16,7 @@ const nav = [
   { to: "/settings", label: "Settings" },
   { to: "/audit", label: "Audit" },
   { to: "/guardian-reviews", label: "Review history" },
+  { to: "/demo", label: "Demo" },
 ];
 
 export default function Layout({ children, user, onLogout }: Props) {

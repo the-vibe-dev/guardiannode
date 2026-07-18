@@ -119,6 +119,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     codex_executable: str = "codex"
     codex_home: Path | None = None
+    demo_mode_enabled: bool = False
 
     @property
     def keys_dir(self) -> Path:

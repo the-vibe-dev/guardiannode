@@ -34,6 +34,7 @@ from app.api import (
 from app.api import (
     dashboard as dashboard_api,
 )
+from app.api import demo as demo_api
 from app.api import (
     devices as devices_api,
 )
@@ -328,6 +329,7 @@ def create_app() -> FastAPI:
     app.include_router(risks_api.router, prefix="/api")
     app.include_router(alerts_api.router, prefix="/api")
     app.include_router(guardian_review_api.router, prefix="/api")
+    app.include_router(demo_api.router, prefix="/api")
     app.include_router(models_api.router, prefix="/api")
     app.include_router(dashboard_api.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")

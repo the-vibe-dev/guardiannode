@@ -8,10 +8,10 @@ type EvidenceOption = { id: string; label: string; text: string; defaultIncluded
 
 export default function GuardianReviewPanel({ alertId, detail }: Props) {
   const [provider, setProvider] = useState<any>(null);
-  const [relationship, setRelationship] = useState("unknown");
-  const [repeated, setRepeated] = useState("unknown");
+  const [relationship, setRelationship] = useState(detail.demo_context?.relationship_context || "unknown");
+  const [repeated, setRepeated] = useState(detail.demo_context?.repeated_behavior || "unknown");
   const [immediateDanger, setImmediateDanger] = useState(false);
-  const [goal, setGoal] = useState("understand_context");
+  const [goal, setGoal] = useState(detail.demo_context?.parent_goal || "understand_context");
   const [goalDetails, setGoalDetails] = useState("");
   const [parentContext, setParentContext] = useState("");
   const [includeAge, setIncludeAge] = useState(true);

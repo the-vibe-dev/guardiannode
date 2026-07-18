@@ -52,8 +52,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     res = await fetch(API_BASE + path, { ...init, credentials: "same-origin", headers });
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    const body = await res.clone().json().catch(() => null);
+    const message = body?.error?.message || body?.detail?.message ||
+      (typeof body?.detail === "string" ? body.detail : null) || `Request failed (${res.status})`;
+    throw new Error(String(message));
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -76,6 +78,11 @@ export const api = {
     request<{ ok: boolean }>("/auth/reauth", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   me: () => request<{ display_name: string; role: string }>("/auth/me"),
+  demoStatus: () => request<any>("/demo/status"),
+  demoScenarios: () => request<any[]>("/demo/scenarios"),
+  triggerDemoScenario: (scenario_id: string) =>
+    request<any>(`/demo/scenarios/${encodeURIComponent(scenario_id)}/trigger`, { method: "POST" }),
+  resetDemo: () => request<any>("/demo/reset", { method: "POST" }),
   recoveryReset: (recovery_code: string, new_password: string) =>
     request<{ ok: boolean }>("/auth/recovery-reset", {
       method: "POST",
