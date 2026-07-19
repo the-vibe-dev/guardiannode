@@ -36,9 +36,11 @@ legal conclusion, punishment decision, or emergency service.
 
 ## Candidate artifacts
 
-The frozen Build Week tag is `guardian-node-build-week-2026`. Pushing that tag
-starts the Windows installer workflow and creates a draft prerelease only after
-the workflow's source, test, bundle, and checksum gates pass.
+The final Build Week tag is `guardian-node-build-week-2026-final`. Pushing that
+tag starts the Windows installer workflow and creates a draft prerelease only
+after the workflow's source, test, bundle, and checksum gates pass. The earlier
+`guardian-node-build-week-2026` candidate is retained as immutable evidence of
+a CI-only readiness-test dependency found before artifacts were published.
 
 The release workflow is expected to produce these unsigned Windows
 x64-compatible artifacts:
