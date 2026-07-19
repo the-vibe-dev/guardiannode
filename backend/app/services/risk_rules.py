@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-RULES_VERSION = "0.1.0-alpha.1"
+RULES_VERSION = "0.1.0-alpha.2"
 
 
 @dataclass

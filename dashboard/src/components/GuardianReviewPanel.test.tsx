@@ -26,15 +26,16 @@ const detail = {
 const provider = {
   enabled: true,
   ready: true,
-  model: "gpt-5.6-sol",
-  selected: "codex",
+  model: "gpt-5.6",
+  selected: "openai",
 };
 
 const preview = {
   preview_id: "preview-1",
   preview_digest: "a".repeat(64),
-  model_requested: "gpt-5.6-sol",
-  redaction_version: "guardian-review-redaction-v2",
+  model_requested: "gpt-5.6",
+  redaction_version: "guardian-review-redaction-v3",
+  external_processing: true,
   character_count: 120,
   information_categories: ["local_detector_findings"],
   disclosure: "This exact preview will be sent to an external OpenAI model.",
@@ -71,7 +72,7 @@ describe("Guardian Review privacy flow", () => {
 
   it("lets the parent remove optional fields before generating the exact preview", async () => {
     renderPanel();
-    await screen.findByText("gpt-5.6-sol ready");
+    await screen.findByText("gpt-5.6 ready");
     fireEvent.click(screen.getByLabelText("Include approximate age group"));
     fireEvent.click(screen.getByLabelText("Include selected minimized evidence"));
     fireEvent.click(screen.getByText("Preview what would be sent"));
@@ -88,7 +89,7 @@ describe("Guardian Review privacy flow", () => {
 
   it("requires unchecked explicit consent and cancellation sends nothing", async () => {
     renderPanel();
-    await screen.findByText("gpt-5.6-sol ready");
+    await screen.findByText("gpt-5.6 ready");
     fireEvent.click(screen.getByText("Preview what would be sent"));
     const send = await screen.findByText("Send for Guardian Review") as HTMLButtonElement;
     expect(send.disabled).toBe(true);
@@ -98,12 +99,32 @@ describe("Guardian Review privacy flow", () => {
     expect(await screen.findByText("Preview what would be sent")).toBeTruthy();
   });
 
+  it("labels mock processing as local rather than an external send", async () => {
+    vi.mocked(api.guardianReviewProviders).mockResolvedValue({
+      ...provider,
+      selected: "mock",
+      model: "gpt-5.6",
+      external_processing: false,
+    });
+    vi.mocked(api.guardianReviewPreview).mockResolvedValue({
+      ...preview,
+      external_processing: false,
+      disclosure: "This deterministic mock stays on this device.",
+      retention_notice: "No external request is made.",
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByText("Preview what would be sent"));
+    expect(await screen.findByText("Processed locally in mock mode")).toBeTruthy();
+    expect(screen.getByText("Run mock Guardian Review")).toBeTruthy();
+    expect(screen.queryByText("Sent to OpenAI if you continue")).toBeNull();
+  });
+
   it("submits only after consent and renders the structured result", async () => {
     vi.mocked(api.submitGuardianReview).mockResolvedValue({ review_id: "review-1", status: "queued" });
     vi.mocked(api.guardianReview).mockResolvedValue({
-      review_id: "review-1", status: "completed", model_requested: "gpt-5.6-sol",
-      model_returned: "gpt-5.6-sol", schema_version: "1.1.0", prompt_version: "guardian-review-v1",
-      redaction_version: "guardian-review-redaction-v2",
+      review_id: "review-1", status: "completed", model_requested: "gpt-5.6",
+      model_returned: "gpt-5.6", schema_version: "1.1.0", prompt_version: "guardian-review-v2",
+      redaction_version: "guardian-review-redaction-v3",
       assessment: {
         assessment: "ambiguous", category: "unknown", severity: "medium", confidence: 0.64,
         plain_language_summary: "Context is incomplete.",
@@ -120,7 +141,7 @@ describe("Guardian Review privacy flow", () => {
       },
     });
     renderPanel();
-    await screen.findByText("gpt-5.6-sol ready");
+    await screen.findByText("gpt-5.6 ready");
     fireEvent.click(screen.getByText("Preview what would be sent"));
     await screen.findByText("Send for Guardian Review");
     fireEvent.click(screen.getByLabelText(/I reviewed the exact content/i));

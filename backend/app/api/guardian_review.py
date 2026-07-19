@@ -51,7 +51,7 @@ def providers(_: User = Depends(parent_user)) -> dict:
         "retention_notice": workflow.RETENTION_NOTICES.get(settings.guardian_review_provider, "No provider retention information is available."),
         "providers": {
             "mock": {"available": settings.dev_mode or settings.guardian_review_provider == "mock"},
-            "codex": {"available": codex["installed"], **codex},
+            "codex": {"available": False, "security_hold": True, **codex},
             "openai": {"available": bool((settings.openai_api_key or os.getenv("OPENAI_API_KEY")) and settings.guardian_review_zdr_confirmed), "api_key_configured": bool(settings.openai_api_key or os.getenv("OPENAI_API_KEY")), "zdr_confirmed": settings.guardian_review_zdr_confirmed},
         },
     }
@@ -62,12 +62,28 @@ def start_codex_login(
     db: Session = Depends(get_db_dep),
     user: User = Depends(parent_user),
     _: None = Depends(require_critical_auth),
-) -> dict:
-    settings = settings_mod.settings
-    result = codex_auth.start(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
-    log_action(db, actor=str(user.id), action="guardian_review.provider_connect_started", target="codex", details={"status": result["status"]})
+) -> JSONResponse:
+    result = {"status": "unavailable", "security_hold": True}
+    log_action(
+        db,
+        actor=str(user.id),
+        action="guardian_review.provider_connect_blocked",
+        target="codex",
+        details={"reason": "zero_tool_isolation_required"},
+    )
     db.commit()
-    return result
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "code": "provider_unavailable",
+                "message": "ChatGPT/Codex connection is temporarily unavailable for incident review.",
+                "retryable": False,
+                "review_id": None,
+            },
+            **result,
+        },
+    )
 
 
 @router.get("/guardian-review/providers/codex/device-login/{session_id}")

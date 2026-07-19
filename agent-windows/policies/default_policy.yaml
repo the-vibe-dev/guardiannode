@@ -1,5 +1,5 @@
 policy_id: default
-policy_version: 0.1.0-alpha.1
+policy_version: 0.1.0-alpha.2
 profile_id: null  # filled in by installer
 age_group: 10_13
 

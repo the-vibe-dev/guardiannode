@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import re
 import unicodedata
@@ -22,16 +23,20 @@ from app.services import encryption, redaction
 
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.%+-]{1,64}@[\w.-]{1,253}\.[^\W\d_]{2,63}\b", re.I)
 _OBFUSCATED_EMAIL = re.compile(
-    r"(?<!\w)([\w.%+-]{1,64})\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\s+at\s+)\s*"
-    r"([\w-]{1,63}(?:\s*(?:\.|\[\s*dot\s*\]|\(\s*dot\s*\)|\s+dot\s+)\s*[\w-]{1,63})*"
-    r"\s*(?:\.|\[\s*dot\s*\]|\(\s*dot\s*\)|\s+dot\s+)\s*[^\W\d_]{2,63})",
+    r"(?<!\w)([\w.%+-]{1,64})\s*(?:@|\[\s*at\s*\]|\(\s*at\s*\)|\s+at\s+)\s*"
+    r"([\w-]{1,63}(?:\s*(?:\.|\[\s*(?:dot|\.)\s*\]|\(\s*(?:dot|\.)\s*\)|\s+dot\s+)\s*[\w-]{1,63})*"
+    r"\s*(?:\.|\[\s*(?:dot|\.)\s*\]|\(\s*(?:dot|\.)\s*\)|\s+dot\s+)\s*[^\W\d_]{2,63})",
     re.I,
 )
 _PHONE_CANDIDATE = re.compile(r"(?<!\w)(?:\+?\d[\s().\-/]*){7,15}(?!\w)")
 _URL = re.compile(r"(?i)(?<!\w)(?:(?:https?|hxxps?)://|www\.)[^\s<>\"']+")
 _IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_IPV6_CANDIDATE = re.compile(
+    r"(?<![\w:])(?:\[[0-9a-f:.%]+\]|[0-9a-f]{0,4}:(?:[0-9a-f:.%]*:[0-9a-f:.%]*|[0-9a-f:.%]+))(?![\w:])",
+    re.I,
+)
 _HANDLE = re.compile(r"(?<!\w)@[\w][\w.\-]{1,63}", re.UNICODE)
-_WINDOWS_PATH = re.compile(r"(?i)(?<!\w)[a-z]:\\(?:[^\\\r\n]+)")
+_WINDOWS_PATH = re.compile(r"(?i)(?<!\w)[a-z]:\\(?:[^\\\r\n]+\\)*[^\\\s\r\n]+")
 _UNC_PATH = re.compile(r"\\\\[^\\\s]+\\[^\r\n]+")
 _POSIX_PATH = re.compile(r"(?<!\w)/(?:home|users|mnt|var|tmp|opt|srv|data)/(?:[^\s\r\n]+)", re.I)
 _FILE_URI = re.compile(r"(?i)\bfile:(?://)?[^\s<>\"']+")
@@ -134,6 +139,7 @@ class _PrivacyRedactor:
         value = self.replace_pattern(_UNC_PATH, "path", value)
         value = self.replace_pattern(_POSIX_PATH, "path", value)
         value = _URL.sub(self._replace_url, value)
+        value = _IPV6_CANDIDATE.sub(self._replace_ipv6, value)
         value = self.replace_pattern(_IP, "ip", value)
         value = self.replace_pattern(_WINDOWS_SID, "account_id", value)
         value = self.replace_pattern(_UUID, "account_id", value)
@@ -153,6 +159,16 @@ class _PrivacyRedactor:
         digits = re.sub(r"\D", "", raw)
         if 7 <= len(digits) <= 15 and (len(digits) >= 10 or any(ch in raw for ch in "+().-/ ")):
             return self.placeholder("phone", raw)
+        return raw
+
+    def _replace_ipv6(self, match: re.Match[str]) -> str:
+        raw = match.group(0)
+        candidate = raw.strip("[]").split("%", 1)[0]
+        try:
+            if ipaddress.ip_address(candidate).version == 6:
+                return self.placeholder("ip", raw)
+        except ValueError:
+            pass
         return raw
 
     def _replace_url(self, match: re.Match[str]) -> str:

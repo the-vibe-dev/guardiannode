@@ -121,11 +121,12 @@ def provider_readiness(provider: str | None = None) -> dict[str, Any]:
             executable=settings.codex_executable,
             codex_home=settings.codex_home_resolved,
         )
-        if not status["installed"]:
-            return {"ready": False, "blocking_reason": "provider_unavailable", "provider_status": status}
-        if not status["connected"]:
-            return {"ready": False, "blocking_reason": "provider_auth_required", "provider_status": status}
-        return {"ready": True, "blocking_reason": None, "provider_status": status}
+        return {
+            "ready": False,
+            "blocking_reason": "provider_unavailable",
+            "security_hold": True,
+            "provider_status": status,
+        }
     return {"ready": False, "blocking_reason": "configuration_error"}
 
 

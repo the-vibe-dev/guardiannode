@@ -34,6 +34,7 @@ from app.services.guardian_review_providers import (
     OpenAIResponsesProvider,
     ProviderError,
     ProviderResult,
+    provider_for,
 )
 
 
@@ -528,11 +529,13 @@ def test_synthetic_harness_mock_mode_needs_no_key(monkeypatch, tmp_path):
                 data_dir=tmp_path / "harness",
                 codex_home=tmp_path / "codex",
                 confirm_live=False,
+                confirm_zdr=False,
                 fresh=False,
             )
         )
     )
     assert result["synthetic"] is True
+    assert result["output_redacted"] is True
     assert result["result"]["status"] == "completed"
     assert (tmp_path / "harness" / "guardiannode.db").exists()
 
@@ -542,9 +545,13 @@ def test_synthetic_harness_mock_mode_needs_no_key(monkeypatch, tmp_path):
     [
         ("Email me at parent@example.test", "parent@example.test", "email"),
         ("Email parent [at] example [dot] test", "parent", "email"),
+        ("Email parent@example[.]test", "parent@example", "email"),
         ("Call +1 (212) 555-0199 tonight", "212", "phone"),
         (r"Open C:\\Users\\Avery\\family.txt", "Avery", "path"),
+        (r"Open C:\\Users\\SyntheticChild\\Documents\\family notes.txt", "SyntheticChild", "path"),
         ("Open /home/avery/private/family.txt", "avery/private", "path"),
+        ("Host 2001:db8:85a3::8a2e:370:7334 connected", "2001:db8", "ip"),
+        ("Host [fe80::1%12] connected", "fe80::1", "ip"),
         ("Account ID: 550e8400-e29b-41d4-a716-446655440000", "550e8400", "account_id"),
         ("Username: Δανάη_17", "Δανάη_17", "username"),
         ("Meet at 40.712800, -74.006000", "40.712800", "location"),
@@ -565,6 +572,29 @@ def test_unicode_handles_and_bypass_forms_are_normalized_and_stable():
     assert "example.test" not in cleaned
     assert counts["handle"] == 2
     assert counts["email"] >= 2
+
+
+def test_coding_agent_provider_is_fail_closed_for_incident_evidence(monkeypatch, tmp_path):
+    from app import settings as settings_mod
+
+    settings = settings_mod.Settings(
+        data_dir=tmp_path,
+        guardian_review_enabled=True,
+        guardian_review_provider="codex",
+    )
+    with pytest.raises(ProviderError, match="provider_unavailable"):
+        provider_for(settings)
+
+
+def test_codex_connection_endpoint_reports_security_hold(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path, provider="codex")
+    providers = client.get("/api/guardian-review/providers")
+    assert providers.status_code == 200
+    assert providers.json()["providers"]["codex"]["security_hold"] is True
+    assert providers.json()["providers"]["codex"]["available"] is False
+    response = client.post("/api/guardian-review/providers/codex/device-login")
+    assert response.status_code == 503
+    assert response.json()["security_hold"] is True
 
 
 def test_url_minimization_preserves_only_relevant_hostname():
@@ -646,7 +676,7 @@ def test_cancelled_preview_is_audited_and_never_queued(monkeypatch, tmp_path):
         assert db.query(GuardianReview).count() == 0
         audit = db.query(AuditLog).filter(AuditLog.action == "guardian_review.cancelled").one()
         assert audit.details["parent_action"] == "cancel"
-        assert audit.details["redaction_version"] == "guardian-review-redaction-v2"
+        assert audit.details["redaction_version"] == "guardian-review-redaction-v3"
     finally:
         db.close()
 

@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     classifier_timeout_seconds: int = 30
     ollama_status_timeout_seconds: int = 5
     ollama_pull_timeout_seconds: int = 1800
-    rules_version: str = "0.1.0-alpha.1"
+    rules_version: str = "0.1.0-alpha.2"
     # Classifier mode: explicit capability contract for readiness and ingest.
     # The legacy classifier_tier variable remains accepted through the beta.
     classifier_mode: str | None = None
@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     pending_frame_max_age_seconds: int = 600
     pending_replay_max_frames: int = 50
     guardian_review_enabled: bool = False
-    guardian_review_provider: str = "codex"
+    guardian_review_provider: str = "mock"
     guardian_review_model: str = "gpt-5.6"
     guardian_review_codex_model: str = "gpt-5.6-sol"
     guardian_review_prompt_version: str = "guardian-review-v2"

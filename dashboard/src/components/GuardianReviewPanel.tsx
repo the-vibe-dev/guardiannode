@@ -230,7 +230,7 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
               </ul>
             </div>
             <div className="rounded border border-blue-200 bg-blue-50 p-3">
-              <h3 className="font-medium text-blue-900">Sent to OpenAI if you continue</h3>
+              <h3 className="font-medium text-blue-900">{preview.external_processing ? "Sent to OpenAI if you continue" : "Processed locally in mock mode"}</h3>
               <p className="mt-2 text-sm text-blue-900">{preview.disclosure}</p>
               <p className="mt-2 text-xs text-blue-800">{preview.retention_notice}</p>
             </div>
@@ -245,11 +245,11 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
           </div>
           <label className="flex items-start gap-2 rounded border p-3 text-sm">
             <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>I reviewed the exact content above and choose to send it to the external model for this Guardian Review.</span>
+            <span>{preview.external_processing ? "I reviewed the exact content above and choose to send it to the external model for this Guardian Review." : "I reviewed the exact content above and choose to run this local mock Guardian Review."}</span>
           </label>
           <div className="flex flex-wrap gap-2">
             <button onClick={submit} disabled={!consent || busy !== null} className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-4 py-2 rounded text-sm">
-              {busy === "submit" ? "Sending…" : "Send for Guardian Review"}
+              {busy === "submit" ? "Running…" : preview.external_processing ? "Send for Guardian Review" : "Run mock Guardian Review"}
             </button>
             <button onClick={cancelPreview} disabled={busy !== null} className="bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-900 px-4 py-2 rounded text-sm">
               {busy === "cancel" ? "Cancelling…" : "Cancel — send nothing"}

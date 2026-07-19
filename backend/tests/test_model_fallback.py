@@ -69,3 +69,22 @@ async def test_successful_llm_marks_ok(monkeypatch):
     result = await classifier.classify_text(redacted_text="homework about volcanoes")
     assert result["status"] == "ok"
     assert result["model"] is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_input_is_bounded_before_local_model_call(monkeypatch):
+    from app.services import classifier
+    from app.services.ollama_client import OllamaClient
+
+    seen: dict[str, str] = {}
+
+    async def good_generate(self, **kwargs):
+        seen["prompt"] = kwargs["prompt"]
+        return '{"risk_level": "none", "score": 0, "categories": [], "summary": "bounded"}'
+
+    monkeypatch.setattr(OllamaClient, "generate", good_generate)
+    marker = "END_OF_UNBOUNDED_EVIDENCE"
+    result = await classifier.classify_text(redacted_text=("x" * 50_000) + marker)
+    assert result["status"] == "ok"
+    assert marker not in seen["prompt"]
+    assert len(seen["prompt"]) < 16_000

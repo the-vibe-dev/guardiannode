@@ -2,7 +2,7 @@
 ; Inno Setup 6.x
 
 #define MyAppName "GuardianNode"
-#define MyAppVersion "0.1.0-alpha.1"
+#define MyAppVersion "0.1.0-alpha.2"
 #define MyAppPublisher "GuardianNode Contributors"
 #define MyAppURL "https://github.com/the-vibe-dev/guardiannode"
 #define MyAppExeName "GuardianNodeAgent.exe"

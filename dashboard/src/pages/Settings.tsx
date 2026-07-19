@@ -43,7 +43,6 @@ export default function Settings() {
   const [storage, setStorage] = useState<any>(null);
   const [backups, setBackups] = useState<any>(null);
   const [guardianReview, setGuardianReview] = useState<any>(null);
-  const [codexLogin, setCodexLogin] = useState<any>(null);
   const [exportsList, setExportsList] = useState<any[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -96,28 +95,6 @@ export default function Settings() {
     return payload;
   }
 
-  async function connectCodex() {
-    setBusy("connect-codex");
-    setErr(null);
-    setMsg(null);
-    try {
-      let login = await api.startCodexLogin();
-      setCodexLogin(login);
-      while (login.session_id && ["starting", "waiting"].includes(login.status)) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1000));
-        login = await api.codexLoginStatus(login.session_id);
-        setCodexLogin(login);
-      }
-      await reload();
-      if (login.status === "connected") setMsg("GuardianNode is connected to ChatGPT through Codex.");
-      else if (login.status !== "cancelled") setErr("ChatGPT connection did not complete. You can try again safely.");
-    } catch (e: any) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
   if (!notifications || !retention || !storage || !backups || !guardianReview) {
     return <div className="text-gray-500">Loading settings…</div>;
   }
@@ -126,7 +103,7 @@ export default function Settings() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Settings</h1>
-        <div className="text-xs text-gray-500">v0.1.0-alpha.1 alpha</div>
+        <div className="text-xs text-gray-500">v0.1.0-alpha.2 alpha</div>
       </div>
 
       {err && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{err}</div>}
@@ -145,40 +122,18 @@ export default function Settings() {
         <div className="grid gap-2 text-sm md:grid-cols-3">
           <Stat label="Provider" value={guardianReview.selected === "codex" ? "ChatGPT / Codex" : guardianReview.selected} />
           <Stat label="Model" value={guardianReview.model} />
-          <Stat label="Connection" value={guardianReview.providers.codex.connected ? "Connected" : guardianReview.providers.codex.installed ? "Sign-in required" : "Codex required"} />
+          <Stat label="Connection" value={guardianReview.selected === "codex" && guardianReview.providers.codex.security_hold ? "Temporarily unavailable" : guardianReview.ready ? "Ready" : "Setup required"} />
         </div>
-        {guardianReview.selected === "codex" && !guardianReview.providers.codex.installed && (
-          <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            Install the official Codex CLI on this Windows parent device, then return here. GuardianNode never asks you to paste an API key.
+        {guardianReview.selected === "codex" && guardianReview.providers.codex.security_hold && (
+          <div role="status" className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 space-y-1">
+            <p className="font-medium">ChatGPT/Codex sign-in is temporarily unavailable for incident review.</p>
+            <p>
+              Codex is a coding agent with local tools. GuardianNode will not send family incident evidence through it until a zero-tool privacy boundary can be enforced. Mock demo mode remains available; the direct OpenAI Responses API is an advanced server configuration.
+            </p>
           </div>
         )}
-        {codexLogin?.verification_url && ["starting", "waiting"].includes(codexLogin.status) && (
-          <div className="rounded border border-brand-200 bg-brand-50 p-3 text-sm space-y-2">
-            <p>Open the secure sign-in page and enter this temporary code:</p>
-            {codexLogin.user_code && <div className="font-mono text-lg font-semibold tracking-wider">{codexLogin.user_code}</div>}
-            <a className="inline-block text-brand-700 underline" href={codexLogin.verification_url} target="_blank" rel="noreferrer">Continue with ChatGPT</a>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={connectCodex}
-            disabled={busy !== null || !guardianReview.enabled || !guardianReview.providers.codex.installed || guardianReview.providers.codex.connected}
-            className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
-          >
-            {guardianReview.providers.codex.connected ? "Connected to ChatGPT" : busy === "connect-codex" ? "Waiting for sign-in…" : "Connect with ChatGPT"}
-          </button>
-          {codexLogin?.session_id && ["starting", "waiting"].includes(codexLogin.status) && (
-            <button
-              onClick={async () => {
-                await api.cancelCodexLogin(codexLogin.session_id);
-                setCodexLogin({ ...codexLogin, status: "cancelled" });
-              }}
-              className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded text-sm"
-            >Cancel</button>
-          )}
-        </div>
         <p className="text-xs text-gray-500">
-          ChatGPT-connected reviews follow your ChatGPT plan or workspace data controls. Direct API mode is an advanced server option and is not shown to families.
+          Live direct-API reviews use server-side credentials and the configured account's data controls. GuardianNode does not claim zero retention unless the operator has verified the applicable controls.
         </p>
         <div className="rounded border bg-gray-50 p-3 text-xs text-gray-700 space-y-1">
           <p>{guardianReview.disclosure}</p>

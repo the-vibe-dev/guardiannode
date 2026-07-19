@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.db.models import Alert, AuditLog, Event, GuardianReview, User
+from app.db.models import Alert, AuditLog, ChildProfile, Device, Event, GuardianReview, User
 from app.demo_scenarios import SCENARIOS
 from app.services import guardian_review
 
@@ -122,3 +123,44 @@ def test_demo_requires_configuration_and_parent_authorization(monkeypatch, tmp_p
     assert client.get("/api/demo/scenarios").status_code == 403
     assert client.post(f"/api/demo/scenarios/{SCENARIOS[0]['id']}/trigger").status_code == 403
     assert client.post("/api/demo/reset").status_code == 403
+
+
+def test_demo_reset_preserves_prefix_collision_that_is_not_a_demo_record(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        db.add(ChildProfile(profile_id="real-profile", display_name="Family profile", age_group="10_13"))
+        db.add(
+            Device(
+                device_id="real-device",
+                hostname="family-device",
+                platform="windows",
+                paired=True,
+                profile_id="real-profile",
+            )
+        )
+        db.flush()
+        db.add(
+            Event(
+                event_id="demo-event-prefix-collision",
+                device_id="real-device",
+                profile_id="real-profile",
+                source_type="browser_dom",
+                timestamp=datetime.now(UTC),
+                event_metadata={"synthetic": False},
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/api/demo/reset")
+    assert response.status_code == 200
+    db = get_sessionmaker()()
+    try:
+        assert db.get(Event, "demo-event-prefix-collision") is not None
+        assert db.get(Device, "real-device") is not None
+    finally:
+        db.close()

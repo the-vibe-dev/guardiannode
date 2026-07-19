@@ -160,7 +160,7 @@ def _to_dto(e: Event) -> EventDTO:
 def list_events(
     device_id: str | None = None,
     profile_id: str | None = None,
-    limit: int = Query(default=50, le=500),
+    limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):

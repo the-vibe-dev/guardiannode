@@ -207,12 +207,18 @@ def reset(
     _: None = Depends(require_critical_auth),
 ) -> dict:
     _require_enabled()
-    event_ids = [
-        row[0]
-        for row in db.query(Event.event_id)
-        .filter(Event.event_id.like("demo-event-%"))
-        .all()
-    ]
+    scenario_ids = {scenario["id"] for scenario in SCENARIOS}
+    event_ids = []
+    for event in db.query(Event).filter(Event.event_id.like("demo-event-%")).all():
+        metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
+        if (
+            event.device_id == _DEVICE_ID
+            and event.profile_id == _PROFILE_ID
+            and metadata.get("synthetic") is True
+            and metadata.get("demo_version") == DEMO_VERSION
+            and metadata.get("scenario_id") in scenario_ids
+        ):
+            event_ids.append(event.event_id)
     risk_ids = [
         row[0]
         for row in db.query(RiskResult.risk_id)
@@ -248,10 +254,16 @@ def reset(
         )
     if event_ids:
         db.query(Event).filter(Event.event_id.in_(event_ids)).delete(synchronize_session=False)
-    db.query(Device).filter(Device.device_id == _DEVICE_ID).delete(synchronize_session=False)
-    db.query(ChildProfile).filter(ChildProfile.profile_id == _PROFILE_ID).delete(
-        synchronize_session=False
-    )
+    db.flush()
+    if db.query(Event).filter(Event.device_id == _DEVICE_ID).count() == 0:
+        db.query(Device).filter(Device.device_id == _DEVICE_ID).delete(synchronize_session=False)
+    if (
+        db.query(Event).filter(Event.profile_id == _PROFILE_ID).count() == 0
+        and db.query(Device).filter(Device.profile_id == _PROFILE_ID).count() == 0
+    ):
+        db.query(ChildProfile).filter(ChildProfile.profile_id == _PROFILE_ID).delete(
+            synchronize_session=False
+        )
     log_action(
         db,
         actor=str(user.id),

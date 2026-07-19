@@ -82,6 +82,8 @@ jobs:
         run: python scripts/check_third_party_notices.py
       - name: Check repository governance files
         run: python scripts/check_repository_controls.py
+      - name: Check Build Week submission package
+        run: python scripts/check_build_week_submission.py
 
   agent:
     runs-on: ubuntu-latest

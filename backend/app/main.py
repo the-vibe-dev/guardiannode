@@ -206,18 +206,16 @@ async def lifespan(app: FastAPI):
     finally:
         s.close()
     if not admin_exists:
-        token = ensure_setup_token()
+        ensure_setup_token()
         log.warning(
-            "first-run setup token required; read it from %s (current token starts with %s...)",
+            "first-run setup token required; read it from %s",
             settings.keys_dir / "setup_token.json",
-            token[:6],
         )
     if not paired_device_exists:
-        token = ensure_device_bootstrap_token()
+        ensure_device_bootstrap_token()
         log.warning(
-            "local device bootstrap token available at %s (current token starts with %s...)",
+            "local device bootstrap token available at %s",
             settings.keys_dir / "device_bootstrap_token.json",
-            token[:6],
         )
     if settings.mdns_enabled:
         try:

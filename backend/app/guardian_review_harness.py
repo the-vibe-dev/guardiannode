@@ -33,6 +33,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=Path(".guardian-review-harness"))
     parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
     parser.add_argument("--confirm-live", action="store_true", help="Required for codex/openai providers")
+    parser.add_argument(
+        "--confirm-zdr",
+        action="store_true",
+        help="Required for OpenAI after verifying the selected project's ZDR controls",
+    )
     parser.add_argument("--fresh", action="store_true")
     return parser.parse_args(argv)
 
@@ -40,11 +45,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 async def _run(args: argparse.Namespace) -> dict:
     if args.provider != "mock" and not args.confirm_live:
         raise SystemExit("Live providers require --confirm-live")
+    if args.provider == "openai" and not getattr(args, "confirm_zdr", False):
+        raise SystemExit("OpenAI live mode requires --confirm-zdr after verifying project controls")
     settings = settings_mod.Settings(
         data_dir=args.data_dir.resolve(),
         guardian_review_enabled=True,
         guardian_review_provider=args.provider,
-        guardian_review_zdr_confirmed=args.provider == "openai",
+        guardian_review_zdr_confirmed=getattr(args, "confirm_zdr", False),
         codex_home=args.codex_home.resolve(),
         mdns_enabled=False,
         retention_cleanup_enabled=False,
@@ -109,8 +116,9 @@ async def _run(args: argparse.Namespace) -> dict:
         return {
             "scenario": scenario_id,
             "synthetic": True,
+            "output_redacted": True,
             "provider": args.provider,
-            "data_dir": str(settings.data_dir),
+            "data_dir": "[local harness directory]",
             "preview": {"preview_id": preview.preview_id, "digest": preview.preview_digest, "redactions": preview.redactions_applied},
             "result": result.model_dump(mode="json"),
         }

@@ -318,5 +318,9 @@ def provider_for(settings, *, provider_name: str | None = None, client: httpx.As
             raise ProviderError("zdr_not_confirmed")
         return OpenAIResponsesProvider(api_key=settings.openai_api_key or os.getenv("OPENAI_API_KEY"), base_url=settings.guardian_review_openai_base_url, client=client)
     if provider == "codex":
-        return CodexProvider(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
+        # A coding-agent session can have local read tools and inherits process
+        # credentials. Incident evidence must not enter that capability boundary.
+        # Re-enable only when the transport provides an enforceable zero-tool,
+        # minimal-environment contract equivalent to the Responses API path.
+        raise ProviderError("provider_unavailable")
     raise ProviderError("configuration_error")

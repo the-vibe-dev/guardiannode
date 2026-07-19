@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = "1.1.0"
 PROMPT_VERSION = "guardian-review-v2"
-REDACTION_VERSION = "guardian-review-redaction-v2"
+REDACTION_VERSION = "guardian-review-redaction-v3"
 
 Category = Literal[
     "none", "self_harm", "grooming", "sexual_content", "sexual_exploitation",
