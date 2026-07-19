@@ -182,3 +182,12 @@ Added:
 External status remains explicit: real-node qualification, a live direct-API
 synthetic demonstration, YouTube publication, `/feedback`, and form submission
 are not represented as complete until the maintainer performs them.
+
+Verified and published internally as a draft release:
+
+- Merged release commit `62590db1911cb84cf01b27de76ab26f238d003d7`
+  and immutable tag `guardian-node-build-week-2026-final`.
+- Passed the final GitHub release workflow and produced both versioned Windows
+  installers, `SHA256SUMS`, and `release-manifest.json`.
+- Downloaded the artifacts and verified both SHA-256 values. The prerelease
+  remains draft and the unsigned installers remain unqualified on a real node.
