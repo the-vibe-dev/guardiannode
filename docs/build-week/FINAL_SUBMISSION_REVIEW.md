@@ -13,7 +13,7 @@ maintainer will complete against the exact tagged commit.
 | Version | `0.1.0-alpha.2` |
 | Baseline tag | `pre-build-week-2026` |
 | Baseline commit | `36b2a547056d40eff32f00aa59b7820f7d3e98d5` |
-| Final Build Week tag | `guardian-node-build-week-2026` |
+| Final Build Week tag | `guardian-node-build-week-2026-final` |
 | Runtime model default | `gpt-5.6` via OpenAI Responses API |
 | Schema / prompt / redaction | `1.1.0` / `guardian-review-v2` / `guardian-review-redaction-v3` |
 | Repository | `https://github.com/the-vibe-dev/guardiannode` |

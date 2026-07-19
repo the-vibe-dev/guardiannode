@@ -101,13 +101,18 @@ def test_readiness_checks_workers_schema_storage_and_encryption(monkeypatch, tmp
     monkeypatch.setenv("GUARDIANNODE_CLASSIFIER_MODE", "rules_only")
     from app import settings as settings_mod
     from app.db import session as session_mod
-    from app.services import worker_supervisor
+    from app.services import pipeline_readiness, worker_supervisor
 
     settings_mod.settings = settings_mod.Settings()
     settings_mod.settings.mdns_enabled = False
     session_mod._engine = None
     session_mod._SessionLocal = None
     worker_supervisor.reset_for_tests()
+    monkeypatch.setattr(
+        pipeline_readiness,
+        "probe_tesseract",
+        lambda *args, **kwargs: {"ok": True, "status": "ok"},
+    )
 
     from app.main import create_app
 
