@@ -36,6 +36,7 @@ def test_source_release_is_prerelease_and_rejects_windows_binaries() -> None:
     text = SOURCE_RELEASE.read_text(encoding="utf-8")
 
     assert '"v*"' in text
+    assert "fetch-depth: 0" in text
     assert "!contains(github.ref_name, '-installer-test')" in text
     assert "prerelease: true" in text
     assert "body_path: docs/RELEASE_NOTES_0.1.0-alpha.2.md" in text
@@ -49,6 +50,7 @@ def test_source_release_is_prerelease_and_rejects_windows_binaries() -> None:
 def test_ci_checks_generated_hardware_tier_constants() -> None:
     text = TESTS.read_text(encoding="utf-8")
 
+    assert "fetch-depth: 0" in text
     assert "python scripts/sync_hardware_tiers.py --check" in text
     assert "python scripts/check_third_party_notices.py" in text
     assert "python scripts/check_repository_controls.py" in text
