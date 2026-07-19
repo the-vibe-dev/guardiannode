@@ -57,12 +57,30 @@ nav:
       - Baseline: build-week/BASELINE.md
       - Changelog: build-week/CHANGELOG.md
       - July 14 daily report: build-week/DAILY_2026-07-14.md
+      - July 15 daily report: build-week/DAILY_2026-07-15.md
+      - July 16 daily report: build-week/DAILY_2026-07-16.md
+      - July 17 daily report: build-week/DAILY_2026-07-17.md
+      - July 18 daily report: build-week/DAILY_2026-07-18.md
+      - July 19 daily report: build-week/DAILY_2026-07-19.md
+      - July 20 daily report: build-week/DAILY_2026-07-20.md
+      - July 21 final report: build-week/DAILY_2026-07-21.md
       - Guardian Review specification: build-week/GUARDIAN_REVIEW_SPEC.md
       - Privacy model: build-week/PRIVACY_MODEL.md
       - Evaluation plan: build-week/EVALUATION_PLAN.md
+      - Evaluation results: build-week/EVALUATION_RESULTS.md
+      - Configuration: build-week/CONFIGURATION.md
+      - Judge troubleshooting: build-week/TROUBLESHOOTING.md
+      - Clean install checklist: build-week/CLEAN_INSTALL_CHECKLIST.md
+      - Video script: build-week/VIDEO_SCRIPT.md
+      - Video production runbook: build-week/video/VIDEO_PRODUCTION_RUNBOOK.md
+      - Codex computer video prompt: build-week/video/CODEX_COMPUTER_PROMPT.md
+      - YouTube copy: build-week/video/YOUTUBE_COPY.md
+      - Synthetic screenshots: build-week/screenshots/README.md
       - Codex collaboration: build-week/CODEX_COLLABORATION.md
       - Submission checklist: build-week/SUBMISSION_CHECKLIST.md
-      - Preliminary Devpost draft: build-week/DEVPOST_DRAFT.md
+      - Final submission review: build-week/FINAL_SUBMISSION_REVIEW.md
+      - Private notes template: build-week/PRIVATE_SUBMISSION_NOTES_TEMPLATE.md
+      - Devpost submission draft: build-week/DEVPOST_DRAFT.md
   - For Parents:
       - Install on one PC: PARENT_GUIDES/install-on-one-pc.md
       - Install a server + child PC: PARENT_GUIDES/install-server-and-child.md
@@ -104,7 +122,8 @@ nav:
       - Windows 11 alpha installer validation: release/windows-11-alpha-installer-validation.md
       - Repository controls: REPOSITORY_CONTROLS.md
       - Launch messaging: LAUNCH_MESSAGING.md
-      - Alpha release notes: RELEASE_NOTES_0.1.0-alpha.1.md
+      - Build Week RC release notes: RELEASE_NOTES_0.1.0-alpha.2.md
+      - Alpha.1 release notes: RELEASE_NOTES_0.1.0-alpha.1.md
   - Safety & Trust:
       - Safety boundaries: SAFETY_BOUNDARIES.md
       - Threat model: THREAT_MODEL.md

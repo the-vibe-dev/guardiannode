@@ -43,7 +43,7 @@ def _to_dto(r: RiskResult) -> RiskDTO:
 @router.get("", response_model=list[RiskDTO])
 def list_risks(
     risk_level: str | None = None,
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):

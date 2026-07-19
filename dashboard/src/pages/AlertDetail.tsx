@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import SeverityBadge from "../components/SeverityBadge";
+import GuardianReviewPanel from "../components/GuardianReviewPanel";
 import { formatDateTime } from "../utils/datetime";
 
 export default function AlertDetail() {
@@ -77,6 +78,13 @@ export default function AlertDetail() {
         )}
       </div>
 
+      {detail.synthetic && (
+        <div className="rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950">
+          <strong>Synthetic demo incident.</strong> This manufactured scenario contains no real child or family data. Review the local reasoning below, then continue through the exact outbound preview.
+          <Link to="/demo" className="ml-2 underline">Demo guide</Link>
+        </div>
+      )}
+
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>}
       {actionMsg && <div className="bg-green-50 border border-green-200 text-green-700 rounded p-3 text-sm">{actionMsg}</div>}
 
@@ -129,6 +137,8 @@ export default function AlertDetail() {
           </details>
         )}
       </div>
+
+      <GuardianReviewPanel alertId={id!} detail={detail} />
 
       {/* Event + Classification */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

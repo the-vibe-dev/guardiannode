@@ -34,6 +34,7 @@ from app.api import (
 from app.api import (
     dashboard as dashboard_api,
 )
+from app.api import demo as demo_api
 from app.api import (
     devices as devices_api,
 )
@@ -205,18 +206,16 @@ async def lifespan(app: FastAPI):
     finally:
         s.close()
     if not admin_exists:
-        token = ensure_setup_token()
+        ensure_setup_token()
         log.warning(
-            "first-run setup token required; read it from %s (current token starts with %s...)",
+            "first-run setup token required; read it from %s",
             settings.keys_dir / "setup_token.json",
-            token[:6],
         )
     if not paired_device_exists:
-        token = ensure_device_bootstrap_token()
+        ensure_device_bootstrap_token()
         log.warning(
-            "local device bootstrap token available at %s (current token starts with %s...)",
+            "local device bootstrap token available at %s",
             settings.keys_dir / "device_bootstrap_token.json",
-            token[:6],
         )
     if settings.mdns_enabled:
         try:
@@ -328,6 +327,7 @@ def create_app() -> FastAPI:
     app.include_router(risks_api.router, prefix="/api")
     app.include_router(alerts_api.router, prefix="/api")
     app.include_router(guardian_review_api.router, prefix="/api")
+    app.include_router(demo_api.router, prefix="/api")
     app.include_router(models_api.router, prefix="/api")
     app.include_router(dashboard_api.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")

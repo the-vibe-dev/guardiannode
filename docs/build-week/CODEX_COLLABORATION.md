@@ -38,8 +38,7 @@ GPT-5.6 is used only for the opt-in Guardian Review second-opinion service.
 Local detection remains the event source. Before each cloud request, the local
 backend will minimize/redact an allowlisted DTO, show the exact outbound JSON to
 the parent, and bind explicit consent to its digest. Direct Responses API mode
-requires verified Zero Data Retention and uses `store: false`; Codex OAuth mode
-discloses that the connected ChatGPT plan/workspace controls apply. The model
+requires verified Zero Data Retention and uses `store: false` with no tools. The model
 response is accepted only through the versioned strict schema. It does not
 directly change enforcement or contact a child.
 
@@ -57,3 +56,22 @@ supported Codex alias `gpt-5.6-sol`, while the optional direct Responses API
 provider continues to default to `gpt-5.6`. A second live synthetic run produced
 a schema-valid assessment and persisted it encrypted locally. No real child,
 family, screenshot, credential, or production database content was submitted.
+
+## Build Week days three through six
+
+Codex implemented the complete parent communication hierarchy and local
+feedback, six-scenario guided judge demo, 55-case evaluation/scoring harness,
+privacy and adversarial tests, release-candidate hardening, and submission copy.
+All evaluation fixtures remain synthetic.
+
+The July 18 security review changed the product decision. Although the Codex
+provider used an isolated directory and read-only mode, a coding agent can still
+have local read tools and inherit process credentials. Codex therefore disabled
+that runtime provider and device-login route pending enforceable zero-tool
+isolation. The direct Responses API path already supplies no tools and remains
+the supported live path; mock mode remains the default judge path.
+
+This is an example of Codex accelerating work without deciding the product
+boundary alone: the repository records the evidence and implementation, while
+the owner remains responsible for release, account controls, Windows hardware
+qualification, video publication, and final submission.

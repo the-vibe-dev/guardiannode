@@ -30,31 +30,46 @@ Remaining public/submission caveats:
       credential and current documentation is sanitized.
 - [ ] Sign Windows installers and verify uploaded signatures/checksums.
 - [ ] Run current Windows 11 and Windows 10 qualification plus suspend/resume.
-- [ ] Capture current dashboard/demo screenshots without real family data.
+- [x] Capture current dashboard/demo screenshots without real family data from
+      the rebuilt source candidate; repeat on the qualified Windows artifact if
+      that platform renders differently.
 - [ ] Ensure unrelated untracked WordPress/scratch files are never staged.
 
 ## Guardian Review implementation gates
 
 - [x] Implement migration, durable job worker, provider clients, and backend
-      routes; add parent-friendly provider connection UI.
+      routes; fail closed the coding-agent connection after security review.
 - [x] Keep direct API mode disabled unless ZDR is confirmed and a server-side
-      API key is present; disclose ChatGPT workspace controls for Codex OAuth.
+      API key is present; keep Codex OAuth transport on a zero-tool security hold.
 - [x] Implement local minimization/redaction and exact outbound preview.
 - [x] Require per-review consent bound to the preview digest.
 - [x] Validate every result against schema `1.1.0`; reject uncontrolled output.
-- [x] Add deterministic mock mode and two synthetic harness scenarios.
-- [ ] Add Guardian Review-specific feedback and evaluation reporting.
+- [x] Add deterministic mock mode, six dashboard scenarios, and 55 evaluation cases.
+- [x] Add Guardian Review-specific local feedback and evaluation reporting.
 - [x] Complete backend privacy, auth, retry, timeout, idempotency, prompt
       injection boundary, and audit-data tests.
-- [ ] Add alert-page preview/result/feedback accessibility tests and expand the
-      frozen judge scenario set.
+- [x] Add alert-page preview, consent, cancel, result, history, deletion, and
+      accessibility-oriented interaction tests.
+- [x] Add Guardian Review-specific feedback and expand the frozen judge
+      scenario set.
 
 ## Final submission gates
 
-- [ ] Replace preliminary Devpost language with demonstrated results only.
-- [ ] Record final demo steps, supported platform, model, schema, and prompt
+- [x] Replace preliminary Devpost language with demonstrated results only.
+- [x] Record final demo steps, supported platform, model, schema, and prompt
       versions.
 - [ ] Re-run repository, dependency, secret, documentation, Docker, and Windows
-      release gates on the exact submission commit.
+      release gates on the exact submission commit. Local/source gates can be
+      completed now; clean-node qualification remains tomorrow's gate.
 - [ ] Verify every external link and every release artifact checksum.
-- [ ] Review the submission for child-safety claims and emergency limitations.
+- [x] Review the submission for child-safety claims and emergency limitations.
+- [x] Add a timed Codex-computer video package: script, voiceover, captions,
+      shot manifest, operating prompt, disposable server, and watch-through.
+- [x] Add a final claim-to-evidence review and private-notes template.
+- [ ] Confirm the external Build Week credit-request form was submitted; do not
+      store credentials or form responses in the repository.
+- [ ] Record/upload the public YouTube video and verify it while logged out.
+- [ ] Run `/feedback` in the same Codex thread and store its Session ID in the
+      private submission notes, never in public repository content.
+- [ ] Submit Devpost, save the confirmation privately, and record the exact
+      submitted tag/commit and video URL.

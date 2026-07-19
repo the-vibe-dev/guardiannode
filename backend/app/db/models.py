@@ -193,9 +193,11 @@ class GuardianReviewPreview(Base):
     model_requested: Mapped[str] = mapped_column(String(128))
     schema_version: Mapped[str] = mapped_column(String(32))
     prompt_version: Mapped[str] = mapped_column(String(64))
+    redaction_version: Mapped[str] = mapped_column(String(64), default="guardian-review-redaction-v2")
+    information_categories: Mapped[list] = mapped_column(JSON, default=list)
     payload_digest: Mapped[str] = mapped_column(String(64), index=True)
     incident_fingerprint: Mapped[str] = mapped_column(String(64))
-    payload_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    payload_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     fresh_assessment: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -220,16 +222,43 @@ class GuardianReview(Base):
     dedup_key: Mapped[str] = mapped_column(String(64))
     schema_version: Mapped[str] = mapped_column(String(32))
     prompt_version: Mapped[str] = mapped_column(String(64))
+    redaction_version: Mapped[str] = mapped_column(String(64), default="guardian-review-redaction-v2")
     model_requested: Mapped[str] = mapped_column(String(128))
     model_returned: Mapped[str | None] = mapped_column(String(128), nullable=True)
     provider_response_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     assessment_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class GuardianReviewFeedback(Base):
+    __tablename__ = "guardian_review_feedback"
+    __table_args__ = (
+        Index("ux_guardian_review_feedback_review_user", "review_id", "user_id", unique=True),
+    )
+
+    feedback_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    review_id: Mapped[str] = mapped_column(String(64), ForeignKey("guardian_reviews.review_id"))
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    labels: Mapped[list] = mapped_column(JSON, default=list)
+    schema_version: Mapped[str] = mapped_column(String(32))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    redaction_version: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from app.db.models import (
     Device,
     Event,
     GuardianReview,
+    GuardianReviewFeedback,
     GuardianReviewPreview,
     RiskResult,
     User,
@@ -26,11 +28,13 @@ from app.guardian_review_models import (
     strict_output_schema,
 )
 from app.services import encryption, guardian_review
+from app.services.guardian_review_minimization import minimize_text
 from app.services.guardian_review_providers import (
     CodexProvider,
     OpenAIResponsesProvider,
     ProviderError,
     ProviderResult,
+    provider_for,
 )
 
 
@@ -134,15 +138,15 @@ def test_strict_schema_closes_every_object_and_rejects_extra_fields():
 
 
 def test_prompt_contract_contains_required_safety_boundaries():
-    prompt = (Path(__file__).parents[1] / "app" / "prompts" / "guardian_review_v1.txt").read_text("utf-8").lower()
+    prompt = (Path(__file__).parents[1] / "app" / "prompts" / "guardian_review_v2.txt").read_text("utf-8").lower()
     for phrase in (
         "observed facts",
         "definitive accusations",
         "benign explanations",
-        "medical, psychological, or legal",
+        "medical, psychological, clinical, or legal",
         "imminent danger",
         "parent as final decision-maker",
-        "untrusted quoted data",
+        "untrusted quoted evidence",
     ):
         assert phrase in prompt
 
@@ -237,7 +241,18 @@ async def test_responses_api_uses_store_false_and_strict_schema():
     seen = {}
     def handler(request: httpx.Request) -> httpx.Response:
         seen.update(json.loads(request.content))
-        return httpx.Response(200, json={"id": "resp_1", "model": "gpt-5.6-2026-07-01", "output": [{"content": [{"type": "output_text", "text": _valid_assessment().model_dump_json()}]}]})
+        return httpx.Response(200, json={
+            "id": "resp_1",
+            "model": "gpt-5.6-2026-07-01",
+            "usage": {
+                "input_tokens": 120,
+                "input_tokens_details": {"cached_tokens": 20},
+                "output_tokens": 80,
+                "output_tokens_details": {"reasoning_tokens": 10},
+                "total_tokens": 200,
+            },
+            "output": [{"content": [{"type": "output_text", "text": _valid_assessment().model_dump_json()}]}],
+        })
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         result = await OpenAIResponsesProvider(api_key="test-only", base_url="https://api.openai.test/v1", client=client).assess(payload={"incident_id": "synthetic"}, prompt="contract", model="gpt-5.6", timeout=1)
@@ -248,6 +263,14 @@ async def test_responses_api_uses_store_false_and_strict_schema():
     assert seen["tools"] == []
     assert seen["text"]["format"]["strict"] is True
     assert result.model_returned == "gpt-5.6-2026-07-01"
+    assert result.usage is not None
+    assert result.usage.model_dump() == {
+        "input_tokens": 120,
+        "cached_input_tokens": 20,
+        "output_tokens": 80,
+        "reasoning_tokens": 10,
+        "total_tokens": 200,
+    }
 
 
 @pytest.mark.asyncio
@@ -366,22 +389,19 @@ async def test_worker_does_not_retry_validation_or_policy_failure(monkeypatch, t
         db.close()
 
 
-@pytest.mark.asyncio
-async def test_missing_openai_key_is_persisted_as_sanitized_failure(monkeypatch, tmp_path):
+def test_missing_openai_key_disables_live_preview_without_exposing_key(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     client = _client(monkeypatch, tmp_path, provider="openai")
-    accepted = _submit(client, _preview(client))
+    response = client.post("/api/alerts/alert-1/guardian-review/preview", json={})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "provider_auth_required"
+    assert "key" not in json.dumps(response.json()).lower()
     from app.db.session import get_sessionmaker
     db = get_sessionmaker()()
     try:
-        await guardian_review.process_one(db)
+        assert db.query(GuardianReview).count() == 0
     finally:
         db.close()
-    result = client.get(accepted["status_url"])
-    assert result.status_code == 200
-    assert result.json()["status"] == "failed"
-    assert result.json()["error"]["code"] == "provider_auth_required"
-    assert "key" not in json.dumps(result.json()["error"]).lower()
 
 
 def test_changed_incident_invalidates_preview(monkeypatch, tmp_path):
@@ -417,6 +437,73 @@ def test_audit_log_never_contains_raw_context(monkeypatch, tmp_path):
         db.close()
 
 
+def test_parent_feedback_is_local_versioned_and_replaceable(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    accepted = _submit(client, _preview(client))
+    from app.db.models import AuditLog
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        asyncio.run(guardian_review.process_one(db))
+    finally:
+        db.close()
+
+    review_id = accepted["review_id"]
+    assert client.get(f"/api/guardian-reviews/{review_id}/feedback").json() is None
+    first = client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["helpful", "missing_context", "helpful"]},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["labels"] == ["helpful", "missing_context"]
+    assert first.json()["prompt_version"] == "guardian-review-v2"
+
+    replaced = client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["too_alarmist"]},
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()["labels"] == ["too_alarmist"]
+
+    db = get_sessionmaker()()
+    try:
+        assert db.query(GuardianReviewFeedback).count() == 1
+        audit = db.query(AuditLog).filter(AuditLog.action == "guardian_review.feedback").all()
+        assert len(audit) == 2
+        assert all(row.details["local_only"] is True for row in audit)
+        assert all(row.details["training_use"] is False for row in audit)
+        assert "parent@example.test" not in json.dumps([row.details for row in audit])
+    finally:
+        db.close()
+
+
+def test_feedback_requires_completed_authorized_review(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    accepted = _submit(client, _preview(client))
+    review_id = accepted["review_id"]
+    pending = client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["helpful"]},
+    )
+    assert pending.status_code == 409
+    assert pending.json()["error"]["code"] == "feedback_unavailable"
+
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        db.query(User).filter(User.display_name == "Parent").one().role = "viewer"
+        db.commit()
+    finally:
+        db.close()
+    assert client.get(f"/api/guardian-reviews/{review_id}/feedback").status_code == 403
+    assert client.put(
+        f"/api/guardian-reviews/{review_id}/feedback",
+        json={"labels": ["helpful"]},
+    ).status_code == 403
+
+
 def test_preview_rows_are_encrypted(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     preview = _preview(client)
@@ -442,10 +529,197 @@ def test_synthetic_harness_mock_mode_needs_no_key(monkeypatch, tmp_path):
                 data_dir=tmp_path / "harness",
                 codex_home=tmp_path / "codex",
                 confirm_live=False,
+                confirm_zdr=False,
                 fresh=False,
             )
         )
     )
     assert result["synthetic"] is True
+    assert result["output_redacted"] is True
     assert result["result"]["status"] == "completed"
     assert (tmp_path / "harness" / "guardiannode.db").exists()
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden", "expected_tag"),
+    [
+        ("Email me at parent@example.test", "parent@example.test", "email"),
+        ("Email parent [at] example [dot] test", "parent", "email"),
+        ("Email parent@example[.]test", "parent@example", "email"),
+        ("Call +1 (212) 555-0199 tonight", "212", "phone"),
+        (r"Open C:\\Users\\Avery\\family.txt", "Avery", "path"),
+        (r"Open C:\\Users\\SyntheticChild\\Documents\\family notes.txt", "SyntheticChild", "path"),
+        ("Open /home/avery/private/family.txt", "avery/private", "path"),
+        ("Host 2001:db8:85a3::8a2e:370:7334 connected", "2001:db8", "ip"),
+        ("Host [fe80::1%12] connected", "fe80::1", "ip"),
+        ("Account ID: 550e8400-e29b-41d4-a716-446655440000", "550e8400", "account_id"),
+        ("Username: Δανάη_17", "Δανάη_17", "username"),
+        ("Meet at 40.712800, -74.006000", "40.712800", "location"),
+        ("Meet near 123 Main Street", "123 Main", "address"),
+    ],
+)
+def test_privacy_redactor_masks_sensitive_formats(raw, forbidden, expected_tag):
+    cleaned, counts = minimize_text(raw, profile=None, alert_id="privacy-test")
+    assert forbidden.casefold() not in cleaned.casefold()
+    assert counts[expected_tag] >= 1
+
+
+def test_unicode_handles_and_bypass_forms_are_normalized_and_stable():
+    raw = "Talk to @søren and @søren or ｐａｒｅｎｔ＠ｅｘａｍｐｌｅ．ｔｅｓｔ and pa\u200brent@example.test"
+    cleaned, counts = minimize_text(raw, profile=None, alert_id="privacy-test")
+    handles = re.findall(r"\[HANDLE_[A-F0-9]{8}\]", cleaned)
+    assert len(handles) == 2 and handles[0] == handles[1]
+    assert "example.test" not in cleaned
+    assert counts["handle"] == 2
+    assert counts["email"] >= 2
+
+
+def test_coding_agent_provider_is_fail_closed_for_incident_evidence(monkeypatch, tmp_path):
+    from app import settings as settings_mod
+
+    settings = settings_mod.Settings(
+        data_dir=tmp_path,
+        guardian_review_enabled=True,
+        guardian_review_provider="codex",
+    )
+    with pytest.raises(ProviderError, match="provider_unavailable"):
+        provider_for(settings)
+
+
+def test_codex_connection_endpoint_reports_security_hold(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path, provider="codex")
+    providers = client.get("/api/guardian-review/providers")
+    assert providers.status_code == 200
+    assert providers.json()["providers"]["codex"]["security_hold"] is True
+    assert providers.json()["providers"]["codex"]["available"] is False
+    response = client.post("/api/guardian-review/providers/codex/device-login")
+    assert response.status_code == 503
+    assert response.json()["security_hold"] is True
+
+
+def test_url_minimization_preserves_only_relevant_hostname():
+    hidden, _ = minimize_text(
+        "Visit https://private.example/path/to/Avery?token=secret#home",
+        profile=None,
+        alert_id="privacy-test",
+    )
+    relevant, _ = minimize_text(
+        "Visit https://phish.example/login?account=Avery#prompt",
+        profile=None,
+        alert_id="privacy-test",
+        url_destination_relevant=True,
+    )
+    assert "private.example" not in hidden
+    assert relevant == "Visit [URL_DOMAIN:phish.example]"
+    assert all(part not in relevant for part in ("login", "account", "Avery", "prompt"))
+
+
+def test_empty_and_large_evidence_are_bounded(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from app.db.session import get_sessionmaker
+    db = get_sessionmaker()()
+    try:
+        risk = db.get(RiskResult, "risk-1")
+        event = db.get(Event, "event-1")
+        risk.evidence = []
+        event.redacted_text_enc = None
+        db.commit()
+    finally:
+        db.close()
+    empty = _preview(client)
+    assert empty["outbound_payload"]["minimized_evidence"] == []
+
+    db = get_sessionmaker()()
+    try:
+        risk = db.get(RiskResult, "risk-1")
+        risk.evidence = [f"relevant-{index} " + ("x" * 2000) for index in range(30)]
+        db.commit()
+    finally:
+        db.close()
+    large = _preview(client)
+    evidence = large["outbound_payload"]["minimized_evidence"]
+    assert len(evidence) <= 8
+    assert sum(len(item["text"]) for item in evidence) <= 4800
+    assert large["character_count"] <= 12_000
+
+
+def test_parent_can_remove_optional_context_and_all_evidence(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/alerts/alert-1/guardian-review/preview",
+        json={
+            "relationship_context": "known_peer",
+            "include_evidence": False,
+            "include_age_group": False,
+            "parent_goal_details": None,
+            "parent_context": None,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["outbound_payload"]
+    assert payload["minimized_evidence"] == []
+    assert "approximate_child_age_group" not in payload
+    assert "parent_goal_details" not in payload
+    assert "parent_supplied_context" not in payload
+
+
+def test_cancelled_preview_is_audited_and_never_queued(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    preview = _preview(client)
+    response = client.delete(f"/api/guardian-review/previews/{preview['preview_id']}")
+    assert response.status_code == 204
+    from app.db.models import AuditLog
+    from app.db.session import get_sessionmaker
+    db = get_sessionmaker()()
+    try:
+        assert db.get(GuardianReviewPreview, preview["preview_id"]) is None
+        assert db.query(GuardianReview).count() == 0
+        audit = db.query(AuditLog).filter(AuditLog.action == "guardian_review.cancelled").one()
+        assert audit.details["parent_action"] == "cancel"
+        assert audit.details["redaction_version"] == "guardian-review-redaction-v3"
+    finally:
+        db.close()
+
+
+def test_history_and_delete_scrub_sensitive_local_content(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    accepted = _submit(client, _preview(client))
+    from app.db.models import AuditLog
+    from app.db.session import get_sessionmaker
+    db = get_sessionmaker()()
+    try:
+        asyncio.run(guardian_review.process_one(db))
+    finally:
+        db.close()
+    history = client.get("/api/guardian-reviews", params={"alert_id": "alert-1"})
+    assert history.status_code == 200
+    assert history.json()[0]["review_id"] == accepted["review_id"]
+    assert history.json()[0]["has_assessment"] is True
+    deleted = client.delete(f"/api/guardian-reviews/{accepted['review_id']}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+    db = get_sessionmaker()()
+    try:
+        row = db.get(GuardianReview, accepted["review_id"])
+        preview = db.get(GuardianReviewPreview, row.preview_id)
+        assert row.assessment_enc is None and row.provider_response_id is None
+        assert preview.payload_enc is None
+        audit = db.query(AuditLog).filter(AuditLog.action == "guardian_review.deleted").one()
+        assert audit.details["parent_action"] == "delete_local_assessment"
+    finally:
+        db.close()
+
+
+def test_viewer_cannot_access_history_cancel_or_delete(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    preview = _preview(client)
+    from app.db.session import get_sessionmaker
+    db = get_sessionmaker()()
+    try:
+        db.query(User).filter(User.display_name == "Parent").one().role = "viewer"
+        db.commit()
+    finally:
+        db.close()
+    assert client.get("/api/guardian-reviews").status_code == 403
+    assert client.delete(f"/api/guardian-review/previews/{preview['preview_id']}").status_code == 403
+    assert client.delete("/api/guardian-reviews/missing").status_code == 403

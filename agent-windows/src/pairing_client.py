@@ -74,7 +74,7 @@ def pair_with_server(
     code: str,
     hostname: str,
     platform: str = "windows",
-    agent_version: str = "0.1.0-alpha.1",
+    agent_version: str = "0.1.0-alpha.2",
 ) -> tuple[str, str]:
     """Run the pair/complete handshake. Returns (device_id, device_token)."""
     body = {
@@ -95,7 +95,7 @@ def bootstrap_local_with_server(
     device_bootstrap_token: str,
     hostname: str,
     platform: str = "windows",
-    agent_version: str = "0.1.0-alpha.1",
+    agent_version: str = "0.1.0-alpha.2",
 ) -> tuple[str, str]:
     """Enroll the first all-in-one device with the purpose-bound local token."""
     body = {

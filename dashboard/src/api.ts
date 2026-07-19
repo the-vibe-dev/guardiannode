@@ -9,8 +9,9 @@ async function getCsrfToken(): Promise<string> {
   if (cachedCsrfToken) return cachedCsrfToken;
   const res = await fetch(`${API_BASE}/auth/csrf`, { credentials: "same-origin" });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    const body = await res.clone().json().catch(() => null);
+    const message = body?.error?.message || body?.detail?.message || body?.detail || `Request failed (${res.status})`;
+    throw new Error(String(message));
   }
   const data = await res.json();
   cachedCsrfToken = String(data.csrf_token);
@@ -51,9 +52,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     res = await fetch(API_BASE + path, { ...init, credentials: "same-origin", headers });
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    const body = await res.clone().json().catch(() => null);
+    const message = body?.error?.message || body?.detail?.message ||
+      (typeof body?.detail === "string" ? body.detail : null) || `Request failed (${res.status})`;
+    throw new Error(String(message));
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -74,6 +78,11 @@ export const api = {
     request<{ ok: boolean }>("/auth/reauth", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   me: () => request<{ display_name: string; role: string }>("/auth/me"),
+  demoStatus: () => request<any>("/demo/status"),
+  demoScenarios: () => request<any[]>("/demo/scenarios"),
+  triggerDemoScenario: (scenario_id: string) =>
+    request<any>(`/demo/scenarios/${encodeURIComponent(scenario_id)}/trigger`, { method: "POST" }),
+  resetDemo: () => request<any>("/demo/reset", { method: "POST" }),
   recoveryReset: (recovery_code: string, new_password: string) =>
     request<{ ok: boolean }>("/auth/recovery-reset", {
       method: "POST",
@@ -99,6 +108,29 @@ export const api = {
   startCodexLogin: () => request<any>("/guardian-review/providers/codex/device-login", { method: "POST" }),
   codexLoginStatus: (session_id: string) => request<any>(`/guardian-review/providers/codex/device-login/${session_id}`),
   cancelCodexLogin: (session_id: string) => request<any>(`/guardian-review/providers/codex/device-login/${session_id}`, { method: "DELETE" }),
+  guardianReviewPreview: (id: string, body: any) =>
+    request<any>(`/alerts/${id}/guardian-review/preview`, { method: "POST", body: JSON.stringify(body) }),
+  cancelGuardianReviewPreview: (preview_id: string) =>
+    request<void>(`/guardian-review/previews/${preview_id}`, { method: "DELETE" }),
+  submitGuardianReview: (id: string, preview_id: string, preview_digest: string) =>
+    request<any>(`/alerts/${id}/guardian-review`, {
+      method: "POST",
+      body: JSON.stringify({ preview_id, preview_digest, consent: true }),
+    }),
+  guardianReview: (review_id: string) => request<any>(`/guardian-reviews/${review_id}`),
+  guardianReviewHistory: (params: Record<string, string> = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request<any[]>(`/guardian-reviews${q ? `?${q}` : ""}`);
+  },
+  deleteGuardianReview: (review_id: string) =>
+    request<any>(`/guardian-reviews/${review_id}`, { method: "DELETE" }),
+  guardianReviewFeedback: (review_id: string) =>
+    request<any | null>(`/guardian-reviews/${review_id}/feedback`),
+  saveGuardianReviewFeedback: (review_id: string, labels: string[]) =>
+    request<any>(`/guardian-reviews/${review_id}/feedback`, {
+      method: "PUT",
+      body: JSON.stringify({ labels }),
+    }),
   reviewAlert: (id: string, status: string, notes?: string) =>
     request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes }) }),
   feedbackAlert: (id: string, feedback_type: string, notes?: string) =>

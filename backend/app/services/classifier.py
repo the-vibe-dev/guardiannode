@@ -4,6 +4,7 @@ Returns a `RiskResult` Pydantic model.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -19,6 +20,10 @@ log = logging.getLogger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "text_classifier.txt"
 _JSON_RE = re.compile(r"\{[\s\S]*\}")
+_MAX_LLM_TEXT_CHARS = 12_000
+_LLM_CONCURRENCY = 2
+_LLM_QUEUE_TIMEOUT_SECONDS = 0.25
+_LLM_SEMAPHORE = asyncio.Semaphore(_LLM_CONCURRENCY)
 
 
 def _prompt_template() -> str:
@@ -106,6 +111,9 @@ async def classify_text(
             base_url=settings.text_ollama_url_resolved,
             timeout=settings.classifier_timeout_seconds,
         )
+        # Rules inspect the bounded API payload, but the local generative model
+        # receives only a small context window. This caps memory/CPU pressure and
+        # avoids an authenticated device monopolizing the family backend.
         prompt = _prompt_template().format(
             app_name=app_name or "unknown",
             source_type=source_type,
@@ -113,34 +121,46 @@ async def classify_text(
             timestamp=timestamp,
             url=url or "none",
             rules_triggered=", ".join(m.rule_id for m in matches) or "none",
-            text=redacted_text,
+            text=redacted_text[:_MAX_LLM_TEXT_CHARS],
         )
-        for attempt in range(2):
-            try:
-                response = await client.generate(
-                    model=chosen_model,
-                    prompt=prompt,
-                    options={"temperature": 0.2, "num_ctx": 4096},
-                    format_json=True,
-                )
-                parsed = _extract_json(response)
-                if parsed is not None:
-                    llm = _normalize_llm(parsed)
-                    llm_used = True
-                    break
-                # one retry with correction prompt
-                if attempt == 0:
-                    prompt = (
-                        prompt
-                        + "\n\nYour previous response was not valid JSON. Return ONLY the JSON object now."
+        acquired = False
+        try:
+            await asyncio.wait_for(
+                _LLM_SEMAPHORE.acquire(),
+                timeout=_LLM_QUEUE_TIMEOUT_SECONDS,
+            )
+            acquired = True
+            for attempt in range(2):
+                try:
+                    response = await client.generate(
+                        model=chosen_model,
+                        prompt=prompt,
+                        options={"temperature": 0.2, "num_ctx": 4096},
+                        format_json=True,
                     )
-                    continue
-            except OllamaError as e:
-                llm_error = str(e)
-                break
-            except Exception as e:
-                llm_error = str(e)
-                break
+                    parsed = _extract_json(response)
+                    if parsed is not None:
+                        llm = _normalize_llm(parsed)
+                        llm_used = True
+                        break
+                    # one retry with correction prompt
+                    if attempt == 0:
+                        prompt = (
+                            prompt
+                            + "\n\nYour previous response was not valid JSON. Return ONLY the JSON object now."
+                        )
+                        continue
+                except OllamaError as e:
+                    llm_error = str(e)
+                    break
+                except Exception as e:
+                    llm_error = str(e)
+                    break
+        except TimeoutError:
+            llm_error = "classifier_busy"
+        finally:
+            if acquired:
+                _LLM_SEMAPHORE.release()
 
     # 3) Merge
     # Rules has higher weight at critical; LLM has more weight at medium/high.

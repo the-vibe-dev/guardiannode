@@ -73,7 +73,7 @@ def start() -> None:
     port = settings.bind_port
 
     properties = {
-        b"version": b"0.1.0-alpha.1",
+        b"version": b"0.1.0-alpha.2",
         b"path": b"/api",
         b"pairing": b"/api/devices/pair",
     }

@@ -7,36 +7,37 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from app import settings as settings_mod
 from app.db.models import Alert, ChildProfile, Device, Event, RiskResult, User
+from app.demo_scenarios import SCENARIOS as DEMO_SCENARIOS
 from app.guardian_review_models import GuardianReviewContext
 from app.services import encryption, guardian_review
+from app.services.classifier import classify_text
 
-SCENARIOS: dict[str, dict[str, Any]] = {
-    "unknown-contact": {
-        "text": "A person asks to move to a private chat and keep it secret.",
-        "categories": ["grooming", "off_platform_contact", "secrecy_request"],
-        "severity": "high",
-        "score": 86,
-    },
-    "ambiguous-joke": {
-        "text": "A fictional game chat contains an ambiguous threat used as a joke.",
-        "categories": ["threat"],
-        "severity": "medium",
-        "score": 55,
-    },
+SCENARIOS = {scenario["id"]: scenario for scenario in DEMO_SCENARIOS}
+SCENARIO_ALIASES = {
+    "unknown-contact": "unknown-contact-secrecy",
+    "ambiguous-joke": "ambiguous-gaming-language",
 }
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Guardian Review using synthetic incidents only")
     parser.add_argument("--provider", choices=["mock", "codex", "openai"], default="mock")
-    parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="unknown-contact")
+    parser.add_argument(
+        "--scenario",
+        choices=sorted([*SCENARIOS, *SCENARIO_ALIASES]),
+        default="unknown-contact-secrecy",
+    )
     parser.add_argument("--data-dir", type=Path, default=Path(".guardian-review-harness"))
     parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
     parser.add_argument("--confirm-live", action="store_true", help="Required for codex/openai providers")
+    parser.add_argument(
+        "--confirm-zdr",
+        action="store_true",
+        help="Required for OpenAI after verifying the selected project's ZDR controls",
+    )
     parser.add_argument("--fresh", action="store_true")
     return parser.parse_args(argv)
 
@@ -44,11 +45,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 async def _run(args: argparse.Namespace) -> dict:
     if args.provider != "mock" and not args.confirm_live:
         raise SystemExit("Live providers require --confirm-live")
+    if args.provider == "openai" and not getattr(args, "confirm_zdr", False):
+        raise SystemExit("OpenAI live mode requires --confirm-zdr after verifying project controls")
     settings = settings_mod.Settings(
         data_dir=args.data_dir.resolve(),
         guardian_review_enabled=True,
         guardian_review_provider=args.provider,
-        guardian_review_zdr_confirmed=args.provider == "openai",
+        guardian_review_zdr_confirmed=getattr(args, "confirm_zdr", False),
         codex_home=args.codex_home.resolve(),
         mdns_enabled=False,
         retention_cleanup_enabled=False,
@@ -66,8 +69,9 @@ async def _run(args: argparse.Namespace) -> dict:
     upgrade_schema(get_engine())
     db = get_sessionmaker()()
     try:
-        suffix = args.scenario.replace("-", "_")
-        scenario = SCENARIOS[args.scenario]
+        scenario_id = SCENARIO_ALIASES.get(args.scenario, args.scenario)
+        suffix = scenario_id.replace("-", "_")
+        scenario = SCENARIOS[scenario_id]
         user = db.query(User).filter(User.display_name == "Synthetic Harness Parent").first()
         if user is None:
             user = User(display_name="Synthetic Harness Parent", password_hash="synthetic-not-usable", recovery_hash="synthetic-not-usable", role="admin")
@@ -80,19 +84,28 @@ async def _run(args: argparse.Namespace) -> dict:
         alert_id = f"synthetic-alert-{suffix}"
         profile = db.get(ChildProfile, profile_id)
         if profile is None:
-            db.add(ChildProfile(profile_id=profile_id, display_name="Synthetic Child", age_group="10_13", custom_watch_phrases=[]))
+            db.add(ChildProfile(profile_id=profile_id, display_name="Synthetic Child", age_group=scenario["age_group"], custom_watch_phrases=[]))
             db.add(Device(device_id=device_id, hostname="synthetic-device", platform="windows", paired=True, profile_id=profile_id))
-            text = str(scenario["text"])
-            db.add(Event(event_id=event_id, device_id=device_id, profile_id=profile_id, source_type="synthetic", timestamp=datetime.now(UTC), redacted_text_enc=encryption.encrypt_text(text)))
-            db.add(RiskResult(risk_id=risk_id, event_id=event_id, risk_level=str(scenario["severity"]), score=int(scenario["score"]), categories=list(scenario["categories"]), summary=text, evidence=[text], recommended_action="parent_review", confidence=0.78, classifier_status="ok"))
             db.flush()
-            db.add(Alert(alert_id=alert_id, risk_id=risk_id, device_id=device_id, profile_id=profile_id, severity=scenario["severity"], repeat_count=1))
+            text = str(scenario["text"])
+            local = await classify_text(
+                redacted_text=text,
+                app_name="GuardianNode Synthetic Harness",
+                source_type="synthetic",
+                age_group=scenario["age_group"],
+                use_llm=False,
+            )
+            db.add(Event(event_id=event_id, device_id=device_id, profile_id=profile_id, source_type="synthetic", timestamp=datetime.now(UTC), redacted_text_enc=encryption.encrypt_text(text), event_metadata={"synthetic": True, "scenario_id": scenario_id}))
+            db.flush()
+            db.add(RiskResult(risk_id=risk_id, event_id=event_id, risk_level=local["risk_level"], score=local["score"], categories=local["categories"], summary=local["summary"] or "No local rule matched this synthetic control scenario.", evidence=local["evidence"] or ["No deterministic safety rule matched."], recommended_action=local["recommended_action"], model=local["model"], rules_triggered=local["rules_triggered"], confidence=local["confidence"], false_positive_notes="Synthetic harness scenario", prompt_version=local["prompt_version"], rules_version=local["rules_version"], classifier_status=local["status"]))
+            db.flush()
+            db.add(Alert(alert_id=alert_id, risk_id=risk_id, device_id=device_id, profile_id=profile_id, severity=local["risk_level"], repeat_count=1))
             db.commit()
         context = GuardianReviewContext(
-            relationship_context="unknown_person",
-            repeated_behavior="unknown",
+            relationship_context=scenario["relationship_context"],
+            repeated_behavior=scenario["repeated_behavior"],
             parent_believes_immediate_danger=False,
-            parent_goal="prepare_conversation",
+            parent_goal=scenario["parent_goal"],
             parent_context="Synthetic fixture only; no real family data.",
             fresh_assessment=args.fresh,
         )
@@ -101,10 +114,11 @@ async def _run(args: argparse.Namespace) -> dict:
         await guardian_review.process_one(db)
         result = guardian_review.get_result(db, review_id=accepted.review_id, user=user)
         return {
-            "scenario": args.scenario,
+            "scenario": scenario_id,
             "synthetic": True,
+            "output_redacted": True,
             "provider": args.provider,
-            "data_dir": str(settings.data_dir),
+            "data_dir": "[local harness directory]",
             "preview": {"preview_id": preview.preview_id, "digest": preview.preview_digest, "redactions": preview.redactions_applied},
             "result": result.model_dump(mode="json"),
         }

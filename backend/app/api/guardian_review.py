@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -13,9 +13,12 @@ from app.db.models import User
 from app.guardian_review_models import (
     GuardianReviewContext,
     ReviewAccepted,
+    ReviewFeedbackRequest,
+    ReviewFeedbackResponse,
     ReviewPreviewResponse,
     ReviewResult,
     ReviewSubmitRequest,
+    ReviewSummary,
 )
 from app.services import guardian_review as workflow
 from app.services import guardian_review_codex_auth as codex_auth
@@ -35,13 +38,20 @@ def _error(exc: workflow.WorkflowError) -> JSONResponse:
 def providers(_: User = Depends(parent_user)) -> dict:
     settings = settings_mod.settings
     codex = codex_auth.status(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
+    readiness = workflow.provider_readiness(settings.guardian_review_provider)
     return {
         "enabled": settings.guardian_review_enabled,
+        "configured": readiness["ready"],
+        "ready": readiness["ready"],
+        "blocking_reason": readiness.get("blocking_reason"),
         "selected": settings.guardian_review_provider,
         "model": workflow.configured_model(settings.guardian_review_provider),
+        "external_processing": settings.guardian_review_provider != "mock",
+        "disclosure": workflow.DISCLOSURES.get(settings.guardian_review_provider, "Guardian Review is not configured correctly."),
+        "retention_notice": workflow.RETENTION_NOTICES.get(settings.guardian_review_provider, "No provider retention information is available."),
         "providers": {
             "mock": {"available": settings.dev_mode or settings.guardian_review_provider == "mock"},
-            "codex": {"available": codex["installed"], **codex},
+            "codex": {"available": False, "security_hold": True, **codex},
             "openai": {"available": bool((settings.openai_api_key or os.getenv("OPENAI_API_KEY")) and settings.guardian_review_zdr_confirmed), "api_key_configured": bool(settings.openai_api_key or os.getenv("OPENAI_API_KEY")), "zdr_confirmed": settings.guardian_review_zdr_confirmed},
         },
     }
@@ -52,12 +62,28 @@ def start_codex_login(
     db: Session = Depends(get_db_dep),
     user: User = Depends(parent_user),
     _: None = Depends(require_critical_auth),
-) -> dict:
-    settings = settings_mod.settings
-    result = codex_auth.start(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
-    log_action(db, actor=str(user.id), action="guardian_review.provider_connect_started", target="codex", details={"status": result["status"]})
+) -> JSONResponse:
+    result = {"status": "unavailable", "security_hold": True}
+    log_action(
+        db,
+        actor=str(user.id),
+        action="guardian_review.provider_connect_blocked",
+        target="codex",
+        details={"reason": "zero_tool_isolation_required"},
+    )
     db.commit()
-    return result
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "code": "provider_unavailable",
+                "message": "ChatGPT/Codex connection is temporarily unavailable for incident review.",
+                "retryable": False,
+                "review_id": None,
+            },
+            **result,
+        },
+    )
 
 
 @router.get("/guardian-review/providers/codex/device-login/{session_id}")
@@ -79,7 +105,7 @@ def cancel_codex_login(
     return {"status": "cancelled"}
 
 
-@router.post("/alerts/{alert_id}/guardian-review/preview", response_model=ReviewPreviewResponse)
+@router.post("/alerts/{alert_id}/guardian-review/preview", response_model=ReviewPreviewResponse, response_model_exclude_none=True)
 def preview(
     alert_id: str,
     request: GuardianReviewContext,
@@ -114,5 +140,67 @@ def result(
 ):
     try:
         return workflow.get_result(db, review_id=review_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+
+
+@router.get("/guardian-reviews/{review_id}/feedback", response_model=ReviewFeedbackResponse | None)
+def feedback(
+    review_id: str,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    try:
+        return workflow.get_feedback(db, review_id=review_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+
+
+@router.put("/guardian-reviews/{review_id}/feedback", response_model=ReviewFeedbackResponse)
+def save_feedback(
+    review_id: str,
+    request: ReviewFeedbackRequest,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    try:
+        return workflow.put_feedback(db, review_id=review_id, request=request, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+
+
+@router.delete("/guardian-review/previews/{preview_id}", status_code=204)
+def cancel_preview(
+    preview_id: str,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    try:
+        workflow.cancel_preview(db, preview_id=preview_id, user=user)
+    except workflow.WorkflowError as exc:
+        return _error(exc)
+    return Response(status_code=204)
+
+
+@router.get("/guardian-reviews", response_model=list[ReviewSummary])
+def history(
+    alert_id: str | None = None,
+    status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+):
+    return workflow.list_reviews(db, user=user, alert_id=alert_id, status=status, limit=limit)
+
+
+@router.delete("/guardian-reviews/{review_id}", response_model=ReviewSummary)
+def delete_review(
+    review_id: str,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+    _: None = Depends(require_critical_auth),
+):
+    try:
+        return workflow.delete_review(db, review_id=review_id, user=user)
     except workflow.WorkflowError as exc:
         return _error(exc)

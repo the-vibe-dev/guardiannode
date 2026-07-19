@@ -63,7 +63,7 @@ def list_alerts(
     status: str | None = None,
     device_id: str | None = None,
     profile_id: str | None = None,
-    limit: int = Query(default=100, le=500),
+    limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):
@@ -100,6 +100,8 @@ class AlertDetail(BaseModel):
     risk: dict
     event: dict
     redacted_text: str | None
+    synthetic: bool = False
+    demo_context: dict | None = None
 
 
 @router.get("/{alert_id}", response_model=AlertDetail)
@@ -146,6 +148,17 @@ def get_alert(
             "timestamp": e.timestamp.isoformat() if e else None,
         },
         redacted_text=redacted_text,
+        synthetic=bool((e.event_metadata or {}).get("synthetic")) if e else False,
+        demo_context={
+            key: (e.event_metadata or {}).get(key)
+            for key in (
+                "scenario_id",
+                "demo_version",
+                "relationship_context",
+                "repeated_behavior",
+                "parent_goal",
+            )
+        } if e and (e.event_metadata or {}).get("synthetic") else None,
     )
 
 

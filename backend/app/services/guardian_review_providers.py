@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from app.guardian_review_models import GuardianReviewAssessment, strict_output_schema
+from app.guardian_review_models import GuardianReviewAssessment, ModelUsage, strict_output_schema
 
 _CATEGORIES = {
     "none", "self_harm", "grooming", "sexual_content", "sexual_exploitation",
@@ -39,6 +39,7 @@ class ProviderResult:
     model_returned: str | None
     response_id: str | None
     latency_ms: int
+    usage: ModelUsage | None = None
 
 
 def _mock_assessment(payload: dict[str, Any]) -> GuardianReviewAssessment:
@@ -47,9 +48,28 @@ def _mock_assessment(payload: dict[str, Any]) -> GuardianReviewAssessment:
     categories = findings.get("categories") or []
     category = categories[0] if categories and categories[0] in _CATEGORIES else "unknown"
     evidence = payload.get("minimized_evidence") or []
+    immediate_danger = bool(payload.get("parent_believes_immediate_danger"))
+    repeated = payload.get("behavior_repeated", "unknown")
+    age_group = payload.get("approximate_child_age_group") or "unknown"
+    relationship = payload.get("known_relationship_context", "unknown")
+    goal = payload.get("parent_goal", "understand_context")
+    assessment = (
+        "concerning" if severity in {"high", "critical"}
+        else "likely_benign" if severity in {"none", "low"}
+        else "ambiguous"
+    )
+    tone = "safety_first" if immediate_danger else "urgent_and_reassuring" if severity == "critical" else "calm_and_curious"
+    age_wording = {
+        "under_10": "Use short, concrete questions and reassure them they are not in trouble.",
+        "10_13": "Use simple, open questions and allow time for an answer.",
+        "14_17": "Respect growing independence while being direct about safety.",
+        "unknown": "Adjust the wording to the child's maturity and communication style.",
+    }[age_group]
+    pattern_wording = "Because this appears repeated, ask about the pattern without assuming motive." if repeated == "yes" else "First establish whether this was isolated or part of a pattern."
+    relationship_wording = f"The supplied relationship context is {str(relationship).replace('_', ' ')}; confirm that context before drawing conclusions."
     return GuardianReviewAssessment.model_validate({
         "schema_version": "1.1.0",
-        "assessment": "concerning" if severity in {"high", "critical"} else "ambiguous",
+        "assessment": assessment,
         "category": category,
         "severity": severity,
         "confidence": 0.72,
@@ -62,13 +82,13 @@ def _mock_assessment(payload: dict[str, Any]) -> GuardianReviewAssessment:
         ],
         "possible_benign_explanations": ["The content may be quoted, fictional, educational, or missing surrounding context."],
         "missing_context": ["Who was involved and what happened before and after the captured material."],
-        "questions_parent_should_answer": ["Is this behavior new or part of a repeated pattern?"],
-        "recommended_parent_tone": {"tone": "calm_and_curious", "rationale": "A non-accusatory opening makes it easier to learn missing context."},
-        "suggested_opening_language": "I noticed something that raised a question for me. Can you help me understand what was happening?",
-        "questions_to_ask_child": ["What was happening here?", "How did this interaction make you feel?"],
+        "questions_parent_should_answer": [pattern_wording, relationship_wording],
+        "recommended_parent_tone": {"tone": tone, "rationale": "A non-accusatory opening makes it easier to learn missing context while separating immediate safety from later consequences."},
+        "suggested_opening_language": "I noticed something that raised a question for me. You are not in trouble based on this alert. Can you help me understand what was happening?",
+        "questions_to_ask_child": ["What was happening here?", "How did this interaction make you feel?", age_wording],
         "phrases_or_approaches_to_avoid": ["Avoid claiming you already know another person's intent."],
         "immediate_actions": [{"priority": "today", "action": "Review the original local evidence and talk calmly with the child.", "rationale": "The assessment is limited to minimized context."}],
-        "follow_up_actions": [{"timeframe": "within_one_week", "action": "Check whether the behavior repeats and whether more context becomes available.", "rationale": "Patterns can change the appropriate response."}],
+        "follow_up_actions": [{"timeframe": "within_one_week", "action": f"Follow up in a way that supports the parent's goal to {str(goal).replace('_', ' ')}.", "rationale": "Patterns and added context can change the appropriate response."}],
         "escalation_indicators": ["A credible statement of imminent harm, coercion, or inability to remain safe."],
         "limitations": ["This is a deterministic synthetic result for development and is not a live model assessment."],
     })
@@ -79,7 +99,13 @@ class MockProvider:
         del prompt, timeout
         started = time.monotonic()
         assessment = _mock_assessment(payload)
-        return ProviderResult(assessment, f"mock:{model}", "mock-response", int((time.monotonic() - started) * 1000))
+        return ProviderResult(
+            assessment,
+            f"mock:{model}",
+            "mock-response",
+            int((time.monotonic() - started) * 1000),
+            ModelUsage(input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_tokens=0, total_tokens=0),
+        )
 
 
 class OpenAIResponsesProvider:
@@ -149,7 +175,33 @@ class OpenAIResponsesProvider:
             model_returned=str(data.get("model")) if data.get("model") else None,
             response_id=str(data.get("id")) if data.get("id") else None,
             latency_ms=int((time.monotonic() - started) * 1000),
+            usage=_usage(data.get("usage")),
         )
+
+
+def _nonnegative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _usage(value: Any) -> ModelUsage | None:
+    if not isinstance(value, dict):
+        return None
+    input_details = value.get("input_tokens_details") or {}
+    output_details = value.get("output_tokens_details") or {}
+    usage = ModelUsage(
+        input_tokens=_nonnegative_int(value.get("input_tokens")),
+        cached_input_tokens=_nonnegative_int(input_details.get("cached_tokens")),
+        output_tokens=_nonnegative_int(value.get("output_tokens")),
+        reasoning_tokens=_nonnegative_int(output_details.get("reasoning_tokens")),
+        total_tokens=_nonnegative_int(value.get("total_tokens")),
+    )
+    return usage if any(item is not None for item in usage.model_dump().values()) else None
 
 
 def _response_output_text(data: dict[str, Any]) -> str:
@@ -266,5 +318,9 @@ def provider_for(settings, *, provider_name: str | None = None, client: httpx.As
             raise ProviderError("zdr_not_confirmed")
         return OpenAIResponsesProvider(api_key=settings.openai_api_key or os.getenv("OPENAI_API_KEY"), base_url=settings.guardian_review_openai_base_url, client=client)
     if provider == "codex":
-        return CodexProvider(executable=settings.codex_executable, codex_home=settings.codex_home_resolved)
+        # A coding-agent session can have local read tools and inherits process
+        # credentials. Incident evidence must not enter that capability boundary.
+        # Re-enable only when the transport provides an enforceable zero-tool,
+        # minimal-environment contract equivalent to the Responses API path.
+        raise ProviderError("provider_unavailable")
     raise ProviderError("configuration_error")

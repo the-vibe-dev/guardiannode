@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guardiannode-backend"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "GuardianNode local-first backend for parental safety monitoring"
 readme = "README.md"
 requires-python = ">=3.11"
