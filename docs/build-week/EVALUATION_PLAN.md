@@ -84,8 +84,8 @@ and find the suggested conversation guidance useful. Collect no child data.
 
 1. Land schema, minimizer, contract tests, and deterministic mock mode.
 2. Demo the entire asynchronous UI path offline with synthetic incidents.
-3. Enable direct API mode only in an approved ZDR project; Codex OAuth requires
-   the separate ChatGPT-workspace disclosure and consent.
+3. Enable direct API mode only in an approved ZDR project; keep coding-agent
+   transport disabled until enforceable zero-tool isolation exists.
 4. Compare live results with the frozen synthetic rubric before expanding.
 5. Keep the feature flag reversible and local detection fully functional when
    Guardian Review is disabled or unavailable.
@@ -95,17 +95,17 @@ and find the suggested conversation guidance useful. Collect no child data.
 The judge demo must show device health, synthetic incident generation, local
 detection, persisted alert, dashboard evidence, outbound preview, explicit
 consent, queued review, strict result, parent guidance, and feedback. Any
-direct API live step requires ZDR. A Codex OAuth demo must use only synthetic
-data and disclose that ChatGPT workspace controls apply; otherwise the
-submission uses clearly labeled mock mode.
+direct API live step requires ZDR. The submission otherwise uses clearly
+labeled mock mode; the Codex transport is not a supported demo path.
 
 ## July 14 evidence
 
 - Deterministic mock completed the full service/persistence path without a key
   or network.
-- A live synthetic Codex run completed with schema `1.1.0`, prompt
+- A historical live synthetic Codex run completed with schema `1.1.0`, prompt
   `guardian-review-v1`, requested/returned model `gpt-5.6-sol`, and 34,112 ms
-  provider latency. The result was revalidated and stored encrypted.
+  provider latency. The result was revalidated and stored encrypted. The July
+  18 security review later disabled that coding-agent transport.
 - Direct Responses request shape, `store: false`, strict schema, timeout,
   malformed output, missing key, and retry classification are covered with a
   mocked transport. No direct live API call was attempted because no API key

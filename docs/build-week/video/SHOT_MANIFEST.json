@@ -1,0 +1,66 @@
+{
+  "project": "GuardianNode — Guardian Review",
+  "version": "0.1.0-alpha.2",
+  "target_runtime_seconds": 168,
+  "recording_mode": "functional synthetic mock workflow",
+  "aspect_ratio": "16:9",
+  "resolution": "1920x1080",
+  "shots": [
+    {
+      "id": "problem",
+      "start_seconds": 0,
+      "end_seconds": 20,
+      "surface": "title card and synthetic incident list",
+      "required_overlay": "Synthetic demonstration — no real child data"
+    },
+    {
+      "id": "existing-platform",
+      "start_seconds": 20,
+      "end_seconds": 40,
+      "surface": "device health, local model status, and risk feed",
+      "required_overlay": "Existing before Build Week"
+    },
+    {
+      "id": "local-detection",
+      "start_seconds": 40,
+      "end_seconds": 65,
+      "surface": "Synthetic demo scenario picker and created incident",
+      "required_overlay": "Local detection — synthetic fixture"
+    },
+    {
+      "id": "outbound-preview",
+      "start_seconds": 65,
+      "end_seconds": 88,
+      "surface": "Guardian Review context and exact minimized JSON preview",
+      "required_overlay": "Parent previews exact outbound context"
+    },
+    {
+      "id": "approval-result",
+      "start_seconds": 88,
+      "end_seconds": 105,
+      "surface": "explicit consent, loading, and strict structured result",
+      "required_overlay": "Mock mode in this recording — live mode uses GPT-5.6"
+    },
+    {
+      "id": "communication",
+      "start_seconds": 105,
+      "end_seconds": 130,
+      "surface": "uncertainty, tone, opening language, actions, and feedback",
+      "required_overlay": "AI guidance — parent decision"
+    },
+    {
+      "id": "development-story",
+      "start_seconds": 130,
+      "end_seconds": 155,
+      "surface": "baseline tag, Build Week diff, evaluation, and test evidence",
+      "required_overlay": "Guardian Review added during Build Week with Codex + GPT-5.6"
+    },
+    {
+      "id": "privacy-close",
+      "start_seconds": 155,
+      "end_seconds": 168,
+      "surface": "outbound preview cancel control, logo, and public repository URL",
+      "required_overlay": "Optional second opinion — not diagnosis or emergency service"
+    }
+  ]
+}

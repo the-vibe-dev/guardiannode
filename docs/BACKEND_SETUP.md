@@ -34,19 +34,21 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 ### Guardian Review configuration
 
 Guardian Review is disabled by default. Local detection and the dashboard work
-normally without it. To enable the parent-friendly Windows path, install the
-official Codex CLI, set `GUARDIANNODE_GUARDIAN_REVIEW_ENABLED=true` and
-`GUARDIANNODE_GUARDIAN_REVIEW_PROVIDER=codex`, restart the backend, then use
-**Settings → Guardian Review → Connect with ChatGPT**. The alert-page review
-button remains unavailable until Codex reports an authenticated connection.
-
-Advanced server deployments may select `openai`, supply
+normally without it. Judges and developers can select `mock` for a complete
+local synthetic flow with no key or network request. Live deployments select
+`openai`, supply
 `GUARDIANNODE_OPENAI_API_KEY` through the service environment, and set
 `GUARDIANNODE_GUARDIAN_REVIEW_ZDR_CONFIRMED=true` only after verifying that the
 OpenAI project has approved Zero Data Retention controls. Requests use
 `store=false`, but GuardianNode does not claim that this parameter alone means
 zero retention. Never place the key in the dashboard, database, logs, or a
 committed environment file.
+
+The experimental `codex`/ChatGPT subscription transport is fail-closed in this
+release. A coding agent may have local tools, so GuardianNode will not place
+family incident evidence in that capability boundary until a zero-tool,
+minimal-environment contract can be enforced. The dashboard explains this
+security hold instead of offering a connection button.
 
 Before every live request, the parent chooses optional evidence/context, sees
 the exact minimized JSON and provider disclosure, and must check an unchecked

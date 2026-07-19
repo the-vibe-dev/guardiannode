@@ -23,7 +23,7 @@ record. Before preview it applies existing redaction plus Guardian Review rules:
 - Use opaque local evidence IDs so displayed support can be traced without
   exporting storage identifiers.
 
-Redaction contract `guardian-review-redaction-v2` normalizes Unicode, removes
+Redaction contract `guardian-review-redaction-v3` normalizes Unicode, removes
 zero-width/bidirectional controls, recognizes common obfuscated identifiers,
 and applies incident-scoped HMAC placeholders so repeated identities remain
 understandable within one review without becoming cross-incident identifiers.
@@ -66,15 +66,13 @@ flowchart LR
     C --> E[(Alert and risk records)]
     D --> F[Parent dashboard]
     E --> F
-    F -->|guided optional selections| G[Deterministic minimizer and redactor v2]
+    F -->|guided optional selections| G[Deterministic minimizer and redactor v3]
     G -->|exact JSON; no network call| F
     F -->|cancel| X[Delete unconsumed preview]
     F -->|unchecked consent + explicit continue| H[Guardian Review service]
     H --> I{Configured provider}
-    I -->|external; ChatGPT controls| J[Codex and OpenAI model]
     I -->|external; store=false + verified ZDR gate| K[OpenAI Responses API]
     I -->|local only| L[Deterministic mock]
-    J --> M[(Encrypted local assessment)]
     K --> M
     L --> M
     M --> F
@@ -101,20 +99,18 @@ The ZDR requirement applies to every direct Responses API Guardian Review, not
 only to a specific age group. If ZDR eligibility is removed or cannot be
 verified, the `openai` provider fails closed while mock mode remains available.
 
-## ChatGPT and Codex controls
+## ChatGPT and Codex security hold
 
-The parent-friendly Windows path uses the official Codex CLI and “Sign in with
-ChatGPT,” not copied desktop-app credentials. The backend owns a protected
-`CODEX_HOME` and the dashboard exposes only the temporary device-login URL and
-code. OAuth tokens remain server-side.
+An experimental parent-friendly path used the official Codex CLI and “Sign in
+with ChatGPT” with synthetic fixtures. The July 18 security review established
+that read-only filesystem access is still a tool capability: untrusted incident
+text could attempt to steer the coding agent toward local files or inherited
+credentials. An isolated working directory does not remove that risk.
 
-Codex requests use an ephemeral session, isolated temporary directory,
-read-only sandbox, no user/project rules, no approval prompts, a strict output
-schema, and stdin rather than process arguments for incident data. Codex CLI
-does not expose the direct Responses API `store` flag, so this mode clearly
-discloses that the connected ChatGPT plan/workspace retention and data controls
-apply. The parent chose this disclosed-consent path for ordinary-family
-usability; it is not represented as ZDR.
+The `codex` provider therefore fails closed and its connection endpoint returns
+a security hold. Re-enabling it requires an enforceable zero-tool and
+minimal-environment transport contract, not only prompt instructions. No real
+family data was used in the live synthetic compatibility sample.
 
 ## Storage and retention
 
@@ -147,7 +143,7 @@ usability; it is not represented as ZDR.
 | Raw data in logs | Structured audit allowlist and sensitive-data regression tests |
 | API key exposure | Environment/secret store only, redacted exception handling |
 | Direct API cloud retention | ZDR hard gate plus `store: false`; mock fallback |
-| Codex OAuth retention | Exact preview, ChatGPT-workspace disclosure, per-review consent, ephemeral local session |
+| Coding-agent tool access | Codex transport disabled until enforceable zero-tool isolation exists |
 | Duplicate billing/transmission | Durable idempotency identity and existing-job response |
 | Child data used for training/evaluation | Synthetic fixtures only; no production export path |
 

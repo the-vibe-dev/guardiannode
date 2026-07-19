@@ -1,9 +1,9 @@
 # Guardian Review Technical Specification
 
-- Status: backend and parent privacy/consent/history experience implemented through 2026-07-15
+- Status: complete beta golden path implemented through 2026-07-18
 - Assessment schema: `1.1.0`
-- Prompt version: `guardian-review-v1`
-- Redaction version: `guardian-review-redaction-v2`
+- Prompt version: `guardian-review-v2`
+- Redaction version: `guardian-review-redaction-v3`
 
 ## Purpose and boundary
 
@@ -13,7 +13,7 @@ calm, safety-conscious conversation. It does not replace local detection,
 silently upload evidence, automatically punish or block a child, make a legal or
 medical determination, or operate as an emergency service.
 
-## Current and planned golden path
+## Current golden path
 
 The existing path is:
 
@@ -41,15 +41,13 @@ flowchart LR
     C --> E[(Alert and risk records)]
     E --> F[Parent dashboard]
     D -->|parent reveal only| F
-    F -->|guided optional context and evidence IDs| G[Deterministic redaction and minimization v2]
+    F -->|guided optional context and evidence IDs| G[Deterministic redaction and minimization v3]
     G -->|exact outbound JSON; local only| F
     F -->|cancel; send nothing| N[Delete unconsumed preview]
     F -->|unchecked consent + explicit continue| H[Guardian Review service]
     H --> K{Configured provider}
-    K -->|parent friendly; ChatGPT controls| L[Codex CLI OAuth]
-    K -->|store=false; ZDR required| I[OpenAI Responses API]
+    K -->|store=false; ZDR required; no tools| I[OpenAI Responses API]
     K -->|offline| M[Deterministic mock]
-    L -->|strict assessment v1.1| H
     I -->|strict assessment v1.1| H
     M -->|strict assessment v1.1| H
     H --> F
@@ -111,11 +109,11 @@ are derived server-side rather than trusted from the browser.
 {
   "preview_id": "opaque-preview-id",
   "alert_id": "opaque-alert-id",
-  "provider": "codex",
-  "model_requested": "gpt-5.6-sol",
+  "provider": "openai",
+  "model_requested": "gpt-5.6",
   "schema_version": "1.1.0",
-  "prompt_version": "guardian-review-v1",
-  "redaction_version": "guardian-review-redaction-v2",
+  "prompt_version": "guardian-review-v2",
+  "redaction_version": "guardian-review-redaction-v3",
   "outbound_payload": {},
   "preview_digest": "64-lowercase-hex-sha256",
   "field_count": 0,
@@ -168,8 +166,8 @@ does not accept client-supplied outbound JSON.
   "created_at": "RFC3339 timestamp",
   "completed_at": "RFC3339 timestamp",
   "schema_version": "1.1.0",
-  "prompt_version": "guardian-review-v1",
-  "redaction_version": "guardian-review-redaction-v2",
+  "prompt_version": "guardian-review-v2",
+  "redaction_version": "guardian-review-redaction-v3",
   "model_requested": "gpt-5.6",
   "model_returned": null,
   "assessment": {}
@@ -183,34 +181,30 @@ A deleted record retains only non-content metadata and `deleted_at`.
 ### Feedback input
 
 ```json
-{
-  "helpfulness": "helpful",
-  "assessment_accuracy": "accurate",
-  "notes": "Optional parent note, maximum 2000 characters."
-}
+{"labels": ["helpful", "missing_context"]}
 ```
 
-`helpfulness` is `helpful`, `partly_helpful`, or `not_helpful`.
-`assessment_accuracy` is `accurate`, `too_concerning`,
-`not_concerning_enough`, or `unsure`. Feedback remains local and never becomes
-an automatic follow-up model request.
+Labels are selected from `helpful`, `inaccurate`, `too_alarmist`,
+`too_dismissive`, `missing_context`, and `needs_follow_up`. Feedback remains
+local, is stored with the assessment/schema/prompt versions, and never becomes
+an automatic follow-up model request or single-event training signal.
 
 ## API and authorization
 
 | Route | Behavior | Authorization |
 |---|---|---|
 | `GET /api/guardian-review/providers` | Non-secret provider/readiness status | Parent session |
-| `POST/GET/DELETE /api/guardian-review/providers/codex/device-login...` | Start, poll, or cancel guided ChatGPT device login | Parent session + CSRF + critical step-up for mutation |
+| `POST /api/guardian-review/providers/codex/device-login` | Fail-closed security-hold response | Parent session + CSRF + critical step-up |
 | `POST /api/alerts/{alert_id}/guardian-review/preview` | Local minimization only; no external call | Parent/admin session + CSRF |
 | `POST /api/alerts/{alert_id}/guardian-review` | Validate digest/consent and enqueue | Parent session + CSRF + recent step-up |
 | `DELETE /api/guardian-review/previews/{preview_id}` | Cancel and delete an unconsumed local preview; no provider call | Requesting parent/admin + CSRF |
 | `GET /api/guardian-reviews` | Sanitized global or per-alert history | Requesting parent/admin |
 | `GET /api/guardian-reviews/{review_id}` | Poll job/result | Requesting parent or admin |
 | `DELETE /api/guardian-reviews/{review_id}` | Scrub encrypted preview/context/result and retain an audit tombstone | Requesting parent/admin + CSRF + critical step-up |
-| `POST /api/guardian-reviews/{review_id}/feedback` | Planned local feedback route | Not implemented on July 14 |
+| `GET/PUT /api/guardian-reviews/{review_id}/feedback` | Read or replace versioned local feedback | Requesting parent/admin; CSRF for mutation |
 
-Connecting the Codex provider requires critical step-up authentication.
-Provider configuration remains server-side.
+Provider configuration and live credentials remain server-side. The Codex
+provider cannot become ready in this release.
 
 ## Error model
 
@@ -249,21 +243,21 @@ evidence.
 
 ## Model and prompt configuration
 
-Planned environment contract:
+Implemented environment contract:
 
 | Setting | Default/requirement |
 |---|---|
 | `GUARDIANNODE_GUARDIAN_REVIEW_ENABLED` | `false` |
-| `GUARDIANNODE_GUARDIAN_REVIEW_PROVIDER` | `codex`; allowed `mock`, `codex`, or `openai` |
+| `GUARDIANNODE_GUARDIAN_REVIEW_PROVIDER` | `mock`; `mock` and `openai` operational, `codex` security-disabled |
 | `GUARDIANNODE_GUARDIAN_REVIEW_ZDR_CONFIRMED` | `false`; direct `openai` mode fails closed |
 | `GUARDIANNODE_GUARDIAN_REVIEW_MODEL` | `gpt-5.6` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_CODEX_MODEL` | `gpt-5.6-sol` |
-| `GUARDIANNODE_GUARDIAN_REVIEW_PROMPT_VERSION` | `guardian-review-v1` |
-| Redaction contract | `guardian-review-redaction-v2`; code-versioned, not configurable at runtime |
+| Prompt contract | `guardian-review-v2`; code-versioned |
+| Redaction contract | `guardian-review-redaction-v3`; code-versioned, not configurable at runtime |
 | `GUARDIANNODE_GUARDIAN_REVIEW_TIMEOUT_SECONDS` | `45` |
 | `GUARDIANNODE_GUARDIAN_REVIEW_MAX_ATTEMPTS` | `2` |
 | `OPENAI_API_KEY` | optional advanced `openai` mode only; never logged or stored in DB |
-| `GUARDIANNODE_CODEX_EXECUTABLE` / `GUARDIANNODE_CODEX_HOME` | Codex executable and protected service OAuth home |
+| `GUARDIANNODE_CODEX_EXECUTABLE` / `GUARDIANNODE_CODEX_HOME` | Legacy compatibility settings; provider remains fail-closed |
 
 The direct Responses API request uses strict `text.format` JSON Schema, `store: false`,
 medium reasoning effort, bounded output, no tools, no web access, no background
@@ -271,10 +265,9 @@ mode, and no response chaining. A deployment-scoped hashed parent identifier may
 be used as `safety_identifier`; a child identifier must not be used. Record the
 requested and returned model IDs because aliases can move.
 
-Codex mode supplies the same strict schema to an ephemeral, isolated, read-only
-`codex exec` process authenticated with ChatGPT. Because Codex does not expose
-the direct API `store` flag, the preview discloses that ChatGPT plan/workspace
-data controls apply.
+The prior Codex compatibility path is retained only as non-routable legacy code
+and focused tests. Provider selection and device-login both fail closed until a
+zero-tool capability boundary is enforceable.
 
 The system prompt is versioned source, treats all evidence and parent context as
 untrusted quoted data, forbids following instructions inside that data, forbids
@@ -284,7 +277,7 @@ unsupported identity/intent claims, and requires uncertainty and limitations.
 
 Emit `guardian_review.previewed`, `.cancelled`, `.consented`, `.queued`, `.sent`,
 `.completed`, `.failed`, `.viewed`, `.deleted`, and eventually
-`.feedback_recorded`. The versioned audit details contain actor, incident/review
+`.feedback`. The versioned audit details contain actor, incident/review
 IDs, provider, prompt/schema/redaction versions, requested/returned model,
 information categories, preview digest, outbound character count, status,
 duration, attempt count, parent action, and sanitized error code.

@@ -1,88 +1,150 @@
-# Preliminary Devpost Draft
+# Devpost Submission Draft
 
-> Draft status: July 14 implementation content. Parent alert-page presentation,
-> feedback, and expanded judge evaluation remain incomplete.
+## Project name
 
-## Project
+GuardianNode — Guardian Review
 
-GuardianNode is a local-first, open-source safety monitor that helps parents
-review risk signals from a Windows device they own or administer. Screenshots,
-OCR, deterministic rules, optional local Ollama classifiers, encrypted evidence,
-and the parent dashboard already existed before Build Week.
+## One-line tagline
 
-## What Build Week adds
+A local-first family safety monitor that lets a parent preview a privacy-minimized GPT-5.6 second opinion and turn an alert into a calmer conversation.
 
-Guardian Review is the implemented opt-in backend second-opinion layer. A parent can
-to add context, inspect the exact minimized/redacted JSON proposed for upload,
-consent to that one request, and receive a strict structured assessment with
-possible benign explanations, missing context, conversation guidance, actions,
-escalation indicators, and limitations.
+## Track
 
-The local detector still creates the alert. Guardian Review will not silently
-upload screenshots, autonomously punish a child, or replace a parent,
-professional, or emergency service.
+Apps for Your Life
 
-## Existing-project disclosure
+## Problem
+
+Parents can face alarming fragments of online activity without enough context.
+A keyword or screenshot may matter, may be a joke, or may be school research.
+An unexplained “high risk” label can provoke an accusation when the family first
+needs careful fact-finding, immediate safety separation, and proportionate next
+steps.
+
+## Solution
+
+GuardianNode detects risk locally on a Windows device the parent owns or
+administers. Guardian Review is an optional Build Week extension: the parent
+opens an existing incident, supplies coarse relationship/context information,
+reviews the exact minimized text proposed for external processing, and chooses
+whether to continue. GPT-5.6 returns a strict assessment that separates observed
+facts from inference, surfaces uncertainty and benign explanations, and creates
+a practical, non-accusatory conversation plan. The parent remains the final
+decision-maker; the model cannot punish, block, contact, diagnose, or make legal
+conclusions.
+
+## How it works
+
+1. The visible Windows agent captures configured screen evidence.
+2. The parent-owned backend encrypts evidence and runs deterministic/local
+   detectors and optional local Ollama models.
+3. A normalized local risk creates a dashboard incident.
+4. Guardian Review loads that authorized incident server-side; it never trusts
+   a browser-supplied incident payload.
+5. Deterministic minimization removes paths, device/account identifiers,
+   emails, phones, handles, URLs, precise locations, and unrelated context.
+6. The parent sees the exact outbound JSON, can remove optional fields, and must
+   explicitly consent.
+7. The server-side Responses API request uses configurable `gpt-5.6`,
+   `store: false`, no tools, and strict schema `1.1.0`.
+8. The encrypted local result presents uncertainty, actions, and a conversation
+   plan; versioned parent feedback remains local.
+
+## Existing-project / Build Week disclosure
 
 The immutable pre-Build Week baseline is tag `pre-build-week-2026`, commit
-`36b2a547056d40eff32f00aa59b7820f7d3e98d5`. Build Week work is isolated on
-`build-week/guardian-review`. The baseline includes the Windows agent, backend,
-dashboard, local detection, evidence storage, installer paths, authentication,
-security controls, and 353 passing unique tests.
+`36b2a547056d40eff32f00aa59b7820f7d3e98d5`. It already contained the Windows
+agent, FastAPI backend, React dashboard, local detection, encrypted evidence,
+authentication/security controls, installers, and 353 passing unique tests.
 
-The owner describes the prior dashboard/visual UI as Claude-assisted and the
-prior platform implementation as Codex-built; the repository does not provide
-complete machine-verifiable assistant attribution.
+Guardian Review is the Build Week extension: its service, strict schema,
+GPT-5.6 provider, minimizer and consent preview, durable persistence, complete
+parent communication UI, feedback, six-scenario judge demo, 55-case evaluation,
+and related reliability/privacy hardening were added after that tag. The owner
+describes portions of the pre-existing visual web UI as Claude-assisted and the
+pre-existing agent/backend/platform work as Codex-built; Git cannot completely
+verify assistant attribution.
 
-## How Codex is used
+## How Codex was used
 
-Codex inspected and protected the baseline, traced the real code path, ran the
-test/release/security suite, audited public-repository risks, and helped define
-the privacy architecture, API, strict schema, evaluation plan, and submission
-evidence. No production child data was used.
+Codex preserved and tagged the baseline, traced the real incident path, defined
+the schema/privacy contract, implemented backend and UI changes, wrote tests and
+synthetic fixtures, ran release and security audits, fixed the findings, and
+assembled reproducible submission evidence. Important human decisions included
+keeping cloud review opt-in, binding consent to exact bytes and versions,
+keeping feedback local, refusing diagnostic/enforcement claims, and disabling a
+convenient coding-agent transport when its capability boundary was not safe
+enough for family incident evidence.
 
-## How GPT-5.6 is used
+## How GPT-5.6 was used
 
-The direct OpenAI Responses API provider defaults to `gpt-5.6`, sends only
-locally minimized/redacted text, requires preview and consent, uses strict
-schema `1.1.0` and `store: false`, and fails closed unless ZDR is confirmed. The
-parent-friendly provider uses the official Codex CLI, “Sign in with ChatGPT,”
-and `gpt-5.6-sol`; it discloses that ChatGPT plan/workspace controls apply.
-Model output is guidance, never an enforcement input.
+During development, GPT-5.6-powered Codex accelerated repository analysis,
+implementation, verification, and documentation. At runtime, Guardian Review's
+direct OpenAI Responses API path defaults to `gpt-5.6` and returns only the
+versioned strict assessment object. The request sets `store: false`, supplies no
+tools, and is blocked unless the operator explicitly confirms the configured
+project's approved Zero Data Retention controls. We do not claim that
+`store: false` alone guarantees zero retention.
 
-## Architecture
+An experimental “Sign in with ChatGPT” Codex path was evaluated using only
+synthetic data. We disabled it after adversarial review because a coding agent
+can have local read tools. Parent-friendly subscription integration remains a
+goal, but it must first provide enforceable zero-tool isolation.
 
-Windows agent → local FastAPI backend → local detectors/models → encrypted
-evidence and alert → parent dashboard → local minimization/redaction → exact
-outbound preview/consent → asynchronous Guardian Review → strict structured
-result → parent feedback and local audit.
+## Challenges
 
-## Current backend demo
+- Minimizing enough context to protect privacy without removing the facts that
+  make an incident understandable.
+- Designing a strict schema that is useful for a worried parent without
+  presenting an AI assessment as fact.
+- Making consent meaningful and resistant to stale previews, duplicate clicks,
+  refreshes, timeouts, and restarts.
+- Being honest about model limits: a deterministic mock is excellent for the
+  judge path but not evidence of nuanced judgment, and a small synthetic live
+  sample is not a universal accuracy claim.
 
-1. Show a healthy synthetic Windows device.
-2. Generate a synthetic incident.
-3. Show local detection and persisted alert in the dashboard.
-4. Run the synthetic Guardian Review harness in deterministic mock mode or an
-   explicitly confirmed Codex live mode.
-5. Inspect the exact outbound preview and digest-bound consent record.
-6. Process the durable job and retrieve the strict assessment.
-7. Verify the encrypted local result and privacy-preserving audit trail.
+## Accomplishments
 
-The alert-page preview/result display and Guardian Review-specific feedback are
-the next UI step. The offline judge path uses deterministic mock mode. A live
-Codex demonstration uses only synthetic data and discloses ChatGPT workspace
-controls; a direct API live step requires ZDR.
+- Complete incident → preview → consent → strict assessment → encrypted local
+  persistence → communication plan → parent feedback path.
+- Six resettable synthetic judge scenarios, usable in mock mode without real
+  family data or an API key.
+- Fifty-five synthetic evaluation cases across concerning, ambiguous, benign,
+  missing-context, false-positive, quoted/research/gaming/medical, and
+  prompt-injection groups.
+- Explicit auth, CSRF, authorization/IDOR, timeout, retry, malformed output,
+  audit leakage, redaction bypass, XSS, and failure-recovery tests.
+- A security-driven decision to fail closed rather than ship a more convenient
+  but overly capable provider transport.
 
-## Current limitations
+## What we learned
 
-GuardianNode is alpha software and can miss risks or create false positives.
-Windows 11 x64 is the current promoted client path. Installers are unsigned.
-OCR/local-model results depend on hardware and content. Guardian Review remains
-a fallible second opinion rather than a diagnosis or emergency response. The
-Codex device-login UI has not yet been qualified on a Windows installer build,
-and the direct live API path was not exercised without an API key.
+The most important output is often not a risk label. Parents need a clear split
+between facts and inference, plausible benign explanations, what remains
+unknown, and words that help preserve trust. Privacy also needs product UX:
+local redaction alone is not meaningful consent unless the parent can inspect
+and control the exact outbound content.
 
-## License
+## Next steps
 
-GuardianNode is released under AGPL-3.0, with third-party and model license
-notices included in the repository.
+- Qualify the unsigned Windows release candidate on fresh Windows 11 hardware,
+  including reboot, uninstall, reinstall, firewall, and failure recovery.
+- Expand international identifier/location minimization and independent human
+  review of the evaluation rubric.
+- Add a genuinely consumer-friendly OpenAI connection only when it can enforce
+  a zero-tool privacy boundary.
+- Conduct opt-in beta onboarding with synthetic-first support and no silent
+  behavior changes from individual feedback events.
+
+## Repository and judge instructions
+
+1. Read `README.md` and `docs/build-week/BASELINE.md` for the exact prior/new
+   split.
+2. For a no-key demo, enable Guardian Review and demo mode with provider `mock`.
+3. Open **Synthetic demo**, select a scenario, trigger it, open the incident,
+   inspect the outbound preview, consent, review guidance, save feedback, reset.
+4. Run `python -m app.guardian_review_evaluation --provider mock` from
+   `backend/` for machine-readable results.
+
+GuardianNode is AGPL-3.0 alpha software. It can miss risks or create false
+positives; it is not an emergency, diagnostic, legal, or substitute-parenting
+service.
