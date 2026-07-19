@@ -28,12 +28,15 @@ Remaining public/submission caveats:
 - [ ] Historical commits retain prior lab host/address metadata. Removing it
       requires a separately approved coordinated history rewrite; it is not a
       credential and current documentation is sanitized.
-- [ ] Sign Windows installers and verify uploaded signatures/checksums.
+- [x] Verify the downloaded final-tag installer checksums against the generated
+      `SHA256SUMS` file.
+- [ ] Sign Windows installers and verify uploaded signatures.
 - [ ] Run current Windows 11 and Windows 10 qualification plus suspend/resume.
 - [x] Capture current dashboard/demo screenshots without real family data from
       the rebuilt source candidate; repeat on the qualified Windows artifact if
       that platform renders differently.
-- [ ] Ensure unrelated untracked WordPress/scratch files are never staged.
+- [x] Keep unrelated untracked WordPress/scratch files out of every Build Week
+      commit and release artifact.
 
 ## Guardian Review implementation gates
 
@@ -58,10 +61,11 @@ Remaining public/submission caveats:
 - [x] Replace preliminary Devpost language with demonstrated results only.
 - [x] Record final demo steps, supported platform, model, schema, and prompt
       versions.
-- [ ] Re-run repository, dependency, secret, documentation, Docker, and Windows
-      release gates on the exact submission commit. Local/source gates can be
-      completed now; clean-node qualification remains tomorrow's gate.
-- [ ] Verify every external link and every release artifact checksum.
+- [x] Re-run repository, dependency, secret, documentation, and Windows release
+      automation gates on the exact tagged release commit.
+- [ ] Run clean-node Windows installation and Docker qualification tomorrow.
+- [x] Verify public repository/evidence links and both generated installer
+      checksums. Verify the draft release link while logged out after promotion.
 - [x] Review the submission for child-safety claims and emergency limitations.
 - [x] Add a timed Codex-computer video package: script, voiceover, captions,
       shot manifest, operating prompt, disposable server, and watch-through.

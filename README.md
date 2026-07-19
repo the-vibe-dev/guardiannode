@@ -206,12 +206,12 @@ candidate; it is not a parent-friendly replacement for the direct API yet.
 
 ### Tests and evaluation
 
-The latest practical Linux source run recorded 412 unique passing automated
-tests: 276 backend/E2E, 59 Windows-agent unit tests, 58 release/control tests,
+The latest practical Linux source run recorded 416 unique passing automated
+tests: 276 backend/E2E, 59 Windows-agent unit tests, 62 release/control tests,
 and 19 dashboard tests. Lint, type checks, production builds, dependency audits,
 repository controls, a 196-case rules benchmark, strict documentation build,
-and tracked-history secret scanning also passed. See the exact commands and
-environment in the [July 19 report](docs/build-week/DAILY_2026-07-19.md).
+and tracked-history secret scanning also passed. See the exact final results and
+environment in the [July 21 report](docs/build-week/DAILY_2026-07-21.md).
 
 The 55-case Guardian Review evaluation is wholly synthetic and checks explicit
 properties. Mock mode achieved 55/55 schema-compliant completions but only
@@ -237,6 +237,7 @@ the [evaluation results](docs/build-week/EVALUATION_RESULTS.md), and the
 ### Build Week commits and evidence
 
 - Baseline tag: [`pre-build-week-2026`](https://github.com/the-vibe-dev/guardiannode/tree/pre-build-week-2026)
+- Frozen Build Week release: [`guardian-node-build-week-2026-final`](https://github.com/the-vibe-dev/guardiannode/tree/guardian-node-build-week-2026-final)
 - Baseline-to-current comparison: [Build Week diff](https://github.com/the-vibe-dev/guardiannode/compare/pre-build-week-2026...main)
 - Evidence index: [Build Week 2026](BUILD_WEEK.md)
 - Daily reports: [July 14](docs/build-week/DAILY_2026-07-14.md),

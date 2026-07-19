@@ -6,6 +6,8 @@ The last repository commit before that cutoff is
 `pre-build-week-2026`. Implementation was developed on
 `build-week/guardian-review` and `build-week/guardian-review-privacy`; the
 submission comparison is the immutable baseline against `main`.
+The frozen Build Week release is `guardian-node-build-week-2026-final` at
+`62590db1911cb84cf01b27de76ab26f238d003d7`.
 
 This file is the concise disclosure. Detailed evidence lives under
 [`docs/build-week/`](docs/build-week/BASELINE.md).
@@ -80,5 +82,6 @@ consistent attribution metadata to independently prove that complete split.
 - [Submission checklist](docs/build-week/SUBMISSION_CHECKLIST.md)
 - [Final Devpost draft](docs/build-week/DEVPOST_DRAFT.md)
 - [July 14 daily completion report](docs/build-week/DAILY_2026-07-14.md)
+- [July 21 final completion report](docs/build-week/DAILY_2026-07-21.md)
 - [Final submission review](docs/build-week/FINAL_SUBMISSION_REVIEW.md)
 - [Video production runbook](docs/build-week/video/VIDEO_PRODUCTION_RUNBOOK.md)

@@ -14,14 +14,30 @@ maintainer will complete against the exact tagged commit.
 | Baseline tag | `pre-build-week-2026` |
 | Baseline commit | `36b2a547056d40eff32f00aa59b7820f7d3e98d5` |
 | Final Build Week tag | `guardian-node-build-week-2026-final` |
+| Frozen release commit | `62590db1911cb84cf01b27de76ab26f238d003d7` |
 | Runtime model default | `gpt-5.6` via OpenAI Responses API |
 | Schema / prompt / redaction | `1.1.0` / `guardian-review-v2` / `guardian-review-redaction-v3` |
 | Repository | `https://github.com/the-vibe-dev/guardiannode` |
 | License | AGPL-3.0 |
 
-The submitted repository commit is the commit resolved by the final tag. Record
-that immutable value in the private submission notes after the tag is pushed;
-do not type a speculative hash here.
+The final tag resolves to the frozen release commit above. A later
+documentation-only evidence merge may advance `main`; record the immutable tag
+commit as the judged binary/source release unless tomorrow's qualification
+requires a reviewed replacement release.
+
+## Release artifact evidence
+
+The [final release workflow](https://github.com/the-vibe-dev/guardiannode/actions/runs/29697304602)
+completed successfully and created a draft prerelease. The downloaded
+`SHA256SUMS` file verified both installers:
+
+| Artifact | SHA-256 |
+|---|---|
+| `GuardianNodeChildSetup-0.1.0-alpha.2.exe` | `a487937abc44e80036a5eb0d823868e7fdb3d06c60efe8724a873758c008251d` |
+| `GuardianNodeServerSetup-0.1.0-alpha.2.exe` | `b289432a8a97c7ad93dab13e09984f83925b12c6b8716a977dd40c7ab3a8fd15` |
+
+The release stays draft until real-node qualification. The installers are
+unsigned alpha artifacts and must not be described as production-qualified.
 
 ## Claim-to-evidence review
 
@@ -61,7 +77,8 @@ Exact results belong in `DAILY_2026-07-21.md` after the final run.
 Complete these against the exact tagged commit/artifacts and attach private
 evidence where appropriate:
 
-- [ ] Verify artifact SHA-256, then install on a clean Windows 11 node.
+- [x] Verify artifact SHA-256 against the generated checksum file.
+- [ ] Install the verified artifacts on a clean Windows 11 node.
 - [ ] Complete setup, parent account, backend/agent startup, enrollment, reboot,
       mock flow, live GPT-5.6 synthetic flow, recovery, uninstall, and reinstall.
 - [ ] Record the functional 2:35–2:50 video using the supplied production kit.
