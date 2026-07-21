@@ -98,6 +98,6 @@ jobs:
       - name: Create source-only GitHub prerelease
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
-          body_path: docs/RELEASE_NOTES_0.1.0-alpha.2.md
+          body_path: docs/RELEASE_NOTES_0.1.0-alpha.3.md
           draft: false
           prerelease: true

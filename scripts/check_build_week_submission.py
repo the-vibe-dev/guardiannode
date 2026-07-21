@@ -158,7 +158,7 @@ def validate() -> dict[str, object]:
     failures.extend(f"broken local Markdown link: {item}" for item in _check_local_links(tracked))
 
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    if version != "0.1.0-alpha.2":
+    if version != "0.1.0-alpha.3":
         failures.append(f"unexpected submission version: {version}")
 
     try:

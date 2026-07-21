@@ -2,7 +2,7 @@
 ; Installs the backend, dashboard, and Ollama on a parent server PC.
 
 #define MyAppName "GuardianNode Server"
-#define MyAppVersion "0.1.0-alpha.2"
+#define MyAppVersion "0.1.0-alpha.3"
 #define MyAppPublisher "GuardianNode Contributors"
 #define MyAppURL "https://github.com/the-vibe-dev/guardiannode"
 

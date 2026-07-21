@@ -39,7 +39,7 @@ def test_source_release_is_prerelease_and_rejects_windows_binaries() -> None:
     assert "fetch-depth: 0" in text
     assert "!contains(github.ref_name, '-installer-test')" in text
     assert "prerelease: true" in text
-    assert "body_path: docs/RELEASE_NOTES_0.1.0-alpha.2.md" in text
+    assert "body_path: docs/RELEASE_NOTES_0.1.0-alpha.3.md" in text
     assert "-iname '*.exe'" in text
     assert "-iname '*.msi'" in text
     assert "installer/build/dist/*.exe" not in text

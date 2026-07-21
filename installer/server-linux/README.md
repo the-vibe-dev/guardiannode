@@ -9,7 +9,7 @@ SHA-256 or signature, review it locally, then run it with `sudo`. Avoid piping
 an unverified network response directly into a privileged shell.
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.2/installer/server-linux/install.sh
+curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.3/installer/server-linux/install.sh
 # Verify the published checksum or signature before running:
 sudo bash install.sh
 ```

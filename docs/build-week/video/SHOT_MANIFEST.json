@@ -1,6 +1,6 @@
 {
   "project": "GuardianNode — Guardian Review",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "target_runtime_seconds": 168,
   "recording_mode": "functional synthetic mock workflow",
   "aspect_ratio": "16:9",
