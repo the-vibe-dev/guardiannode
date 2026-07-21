@@ -78,11 +78,13 @@ Complete these against the exact tagged commit/artifacts and attach private
 evidence where appropriate:
 
 - [x] Verify artifact SHA-256 against the generated checksum file.
-- [ ] Install the verified artifacts on a clean Windows 11 node.
-- [ ] Complete setup, parent account, backend/agent startup, enrollment, reboot,
-      mock flow, live GPT-5.6 synthetic flow, recovery, uninstall, and reinstall.
-- [ ] Record the functional 2:35–2:50 video using the supplied production kit.
-- [ ] Watch it fully; verify clear audio and no secrets/personal data.
+- [x] Install the exact `0.1.0-alpha.3` artifacts on Windows 11 all-in-one and
+      child/server qualification nodes.
+- [x] Complete setup, parent account, backend/agent startup, enrollment, reboot,
+      mock flow, real synthetic client/server alert, and live GPT-5.6 review.
+- [x] Produce the functional 2:48 video using the supplied production kit.
+- [x] Verify duration, streams, key frames, claims, and absence of visible
+      secrets/personal data. Final human audio listening remains an upload gate.
 - [ ] Upload to YouTube as Public and verify while signed out.
 - [ ] Verify repository and final tag while signed out.
 - [ ] In this Codex thread, run `/feedback` and copy the returned Session ID to

@@ -63,7 +63,9 @@ Remaining public/submission caveats:
       versions.
 - [x] Re-run repository, dependency, secret, documentation, and Windows release
       automation gates on the exact tagged release commit.
-- [ ] Run clean-node Windows installation and Docker qualification tomorrow.
+- [x] Run Windows 11 all-in-one and separate child/server qualification with
+      exact `0.1.0-alpha.3` artifacts. Clean uninstall/reinstall and Windows 10
+      remain disclosed follow-up gates.
 - [x] Verify public repository/evidence links and both generated installer
       checksums. Verify the draft release link while logged out after promotion.
 - [x] Review the submission for child-safety claims and emergency limitations.
@@ -72,7 +74,9 @@ Remaining public/submission caveats:
 - [x] Add a final claim-to-evidence review and private-notes template.
 - [ ] Confirm the external Build Week credit-request form was submitted; do not
       store credentials or form responses in the repository.
-- [ ] Record/upload the public YouTube video and verify it while logged out.
+- [x] Produce and checksum the functional 2:48 video with live synthetic
+      client/server alert, live GPT-5.6 review, Coral narration, and captions.
+- [ ] Upload the video to YouTube as Public and verify it while logged out.
 - [ ] Run `/feedback` in the same Codex thread and store its Session ID in the
       private submission notes, never in public repository content.
 - [ ] Submit Devpost, save the confirmation privately, and record the exact

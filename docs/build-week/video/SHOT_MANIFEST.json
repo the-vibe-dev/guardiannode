@@ -2,9 +2,9 @@
   "project": "GuardianNode — Guardian Review",
   "version": "0.1.0-alpha.3",
   "target_runtime_seconds": 168,
-  "recording_mode": "functional synthetic mock workflow",
+  "recording_mode": "functional synthetic client/server workflow with live GPT-5.6 Guardian Review",
   "aspect_ratio": "16:9",
-  "resolution": "1920x1080",
+  "resolution": "1280x720",
   "shots": [
     {
       "id": "problem",
@@ -24,7 +24,7 @@
       "id": "local-detection",
       "start_seconds": 40,
       "end_seconds": 65,
-      "surface": "Synthetic demo scenario picker and created incident",
+      "surface": "Real Windows child-agent capture and resulting staging alert",
       "required_overlay": "Local detection — synthetic fixture"
     },
     {
@@ -39,7 +39,7 @@
       "start_seconds": 88,
       "end_seconds": 105,
       "surface": "explicit consent, loading, and strict structured result",
-      "required_overlay": "Mock mode in this recording — live mode uses GPT-5.6"
+      "required_overlay": "Live GPT-5.6 · Responses API · no tools · store=false"
     },
     {
       "id": "communication",
