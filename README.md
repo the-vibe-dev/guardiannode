@@ -83,11 +83,12 @@ does not silently upload screenshots or directly drive enforcement.
 
 The last verified repository state before the official Build Week cutoff is
 commit `36b2a547056d40eff32f00aa59b7820f7d3e98d5`, protected by tag
-`pre-build-week-2026`. Build Week work is isolated on
-`build-week/guardian-review` and the July 15 continuation
-`build-week/guardian-review-privacy`. The pre-existing project includes the agent,
-backend, dashboard, local detection, encrypted evidence, installers,
-authentication/security controls, and 353 passing unique tests.
+`pre-build-week-2026`. Guardian Review was developed on the
+`build-week/guardian-review` and `build-week/guardian-review-privacy` branches;
+the qualified Build Week result and its release evidence are merged into
+`main`. The pre-existing project includes the agent, backend, dashboard, local
+detection, encrypted evidence, installers, authentication/security controls,
+and 353 passing unique tests.
 
 The repository owner describes the existing dashboard/visual UI as
 Claude-assisted and the existing agent, backend, security, installer, and
@@ -193,7 +194,12 @@ captured from the real disposable mock workflow, not a design mockup.
 The recording package includes the [2:48 script](docs/build-week/VIDEO_SCRIPT.md),
 [Codex computer prompt](docs/build-week/video/CODEX_COMPUTER_PROMPT.md),
 [production runbook](docs/build-week/video/VIDEO_PRODUCTION_RUNBOOK.md), captions,
-voiceover, and a machine-readable shot manifest.
+voiceover, and a machine-readable shot manifest. The final 2:48 recording uses
+only labelled synthetic evidence and visibly demonstrates a Windows client,
+server-side local detection, exact outbound preview and consent, a live GPT-5.6
+Guardian Review, communication guidance, local feedback, and the human decision
+boundary. Its qualification record and checksum are in the
+[Windows release report](docs/release-validation/windows-build-week-2026-07-21.md).
 
 ### Live mode
 
@@ -210,7 +216,8 @@ The latest practical Linux source run recorded 416 unique passing automated
 tests: 276 backend/E2E, 59 Windows-agent unit tests, 62 release/control tests,
 and 19 dashboard tests. Lint, type checks, production builds, dependency audits,
 repository controls, a 196-case rules benchmark, strict documentation build,
-and tracked-history secret scanning also passed. See the exact final results and
+and tracked-history secret scanning also passed. A final targeted submission and
+release-documentation run added 40 passing tests. See the exact final results and
 environment in the [July 21 report](docs/build-week/DAILY_2026-07-21.md).
 
 The 55-case Guardian Review evaluation is wholly synthetic and checks explicit
@@ -228,9 +235,12 @@ opinion rather than an emergency or diagnostic service. Deterministic
 redaction is defense-in-depth rather than a guarantee: unusual international
 addresses, novel obfuscation, image-only private data, or relevant URL domains
 can still carry identifying context. The 55-case synthetic evaluation measures
-explicit properties, not clinical or universal accuracy. Windows clean-install,
-reboot, uninstall, and reinstall qualification must be completed on the signed
-release candidate before general beta promotion. See [Known limitations](KNOWN_LIMITATIONS.md),
+explicit properties, not clinical or universal accuracy. Windows 11 server and
+child installation, pairing, event delivery, browser flow, and reboot recovery
+were qualified with synthetic data. Windows 10 qualification, code signing, a
+complete clean uninstall/reinstall cycle, and unattended local Ollama recovery
+remain before general beta promotion. See [Known limitations](KNOWN_LIMITATIONS.md),
+the [Windows release report](docs/release-validation/windows-build-week-2026-07-21.md),
 the [evaluation results](docs/build-week/EVALUATION_RESULTS.md), and the
 [submission checklist](docs/build-week/SUBMISSION_CHECKLIST.md).
 
@@ -238,6 +248,7 @@ the [evaluation results](docs/build-week/EVALUATION_RESULTS.md), and the
 
 - Baseline tag: [`pre-build-week-2026`](https://github.com/the-vibe-dev/guardiannode/tree/pre-build-week-2026)
 - Frozen Build Week release: [`guardian-node-build-week-2026-final`](https://github.com/the-vibe-dev/guardiannode/tree/guardian-node-build-week-2026-final)
+- Windows-qualified candidate: [`guardian-node-build-week-2026-qualified`](https://github.com/the-vibe-dev/guardiannode/tree/guardian-node-build-week-2026-qualified)
 - Baseline-to-current comparison: [Build Week diff](https://github.com/the-vibe-dev/guardiannode/compare/pre-build-week-2026...main)
 - Evidence index: [Build Week 2026](BUILD_WEEK.md)
 - Daily reports: [July 14](docs/build-week/DAILY_2026-07-14.md),
