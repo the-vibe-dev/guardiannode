@@ -103,7 +103,7 @@ export default function Settings() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Settings</h1>
-        <div className="text-xs text-gray-500">v0.1.0-alpha.2 alpha</div>
+        <div className="text-xs text-gray-500">v0.1.0-alpha.3 alpha</div>
       </div>
 
       {err && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{err}</div>}

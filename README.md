@@ -351,8 +351,8 @@ must review the license and performance of any Ollama model they install. See
 
 The public alpha can include unsigned Windows x64-compatible installers:
 
-- `GuardianNodeChildSetup-0.1.0-alpha.2.exe`
-- `GuardianNodeServerSetup-0.1.0-alpha.2.exe`
+- `GuardianNodeChildSetup-0.1.0-alpha.3.exe`
+- `GuardianNodeServerSetup-0.1.0-alpha.3.exe`
 
 The child installer supports all-in-one mode and child-only pairing mode. The
 server installer installs the parent backend/dashboard and can stay local-only

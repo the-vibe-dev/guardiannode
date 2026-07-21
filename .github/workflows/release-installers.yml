@@ -300,7 +300,7 @@ jobs:
             installer/build/dist/*.exe
             installer/build/dist/SHA256SUMS
             installer/build/dist/release-manifest.json
-          body_path: docs/RELEASE_NOTES_0.1.0-alpha.2.md
+          body_path: docs/RELEASE_NOTES_0.1.0-alpha.3.md
           draft: true
           prerelease: true
 

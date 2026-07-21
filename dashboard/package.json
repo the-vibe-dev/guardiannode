@@ -1,6 +1,6 @@
 {
   "name": "guardiannode-dashboard",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "packageManager": "npm@11.6.2",
   "license": "AGPL-3.0-only",

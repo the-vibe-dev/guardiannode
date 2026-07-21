@@ -124,7 +124,7 @@ class PairCompleteRequest(BaseModel):
     code: str = Field(default="", max_length=8)
     hostname: str = Field(max_length=256)
     platform: str = "windows"
-    agent_version: str = "0.1.0-alpha.2"
+    agent_version: str = "0.1.0-alpha.3"
 
 
 class LocalBootstrapRequest(BaseModel):
@@ -133,7 +133,7 @@ class LocalBootstrapRequest(BaseModel):
     device_bootstrap_token: str = Field(max_length=256)
     hostname: str = Field(max_length=256)
     platform: str = "windows"
-    agent_version: str = "0.1.0-alpha.2"
+    agent_version: str = "0.1.0-alpha.3"
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}

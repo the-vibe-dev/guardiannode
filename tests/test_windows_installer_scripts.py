@@ -109,6 +109,11 @@ def test_windows_ollama_bootstrap_registers_persistent_task() -> None:
     assert 'cmd = Chr(34)' in text
     assert "shell.Run cmd, 0, True" in text
     assert "Start-ScheduledTask -TaskName \"GuardianNodeOllama\"" in text
+    assert "task did not become reachable" in text
+    assert "direct installer-session fallback" in text
+    task_start = text.index('Start-ScheduledTask -TaskName "GuardianNodeOllama"')
+    direct_fallback = text.index('Start-Process -FilePath $ollamaPath -ArgumentList "serve"')
+    assert task_start < direct_fallback
     assert "New-ScheduledTaskTrigger -AtLogOn" in text
     assert "OLLAMA_MODELS" in text
     assert 'Join-Path $userProfile ".ollama\\models"' in text

@@ -318,8 +318,27 @@ function Start-OllamaServer {
         Write-Log "WARN could not start GuardianNodeOllama scheduled task: $_"
         Start-Process -FilePath $ollamaPath -ArgumentList "serve" -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
     }
+    # Interactive scheduled tasks can be registered successfully from an SSH
+    # or service session while still being unable to start until the next
+    # desktop logon. Give the persistent task a short opportunity to start,
+    # then use a direct process for the current installer session. The task
+    # remains registered and takes over at the next interactive logon.
+    for ($i = 0; $i -lt 15; $i++) {
+        if (Test-OllamaReachable) {
+            return $true
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    Write-Log "WARN GuardianNodeOllama task did not become reachable; starting a direct installer-session fallback."
+    try {
+        Start-Process -FilePath $ollamaPath -ArgumentList "serve" -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Log "WARN direct Ollama fallback could not start: $_"
+    }
     for ($i = 0; $i -lt 30; $i++) {
         if (Test-OllamaReachable) {
+            Write-Log "Ollama became reachable through the direct installer-session fallback."
             return $true
         }
         Start-Sleep -Seconds 2

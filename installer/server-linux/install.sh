@@ -11,7 +11,7 @@
 set -Eeuo pipefail
 
 # ---------- Config ----------
-GN_VERSION="${GN_VERSION:-v0.1.0-alpha.2}"
+GN_VERSION="${GN_VERSION:-v0.1.0-alpha.3}"
 GN_USER="${GN_USER:-guardiannode}"
 GN_HOME="${GN_HOME:-/opt/guardiannode}"
 GN_DATA="${GN_DATA:-/var/lib/guardiannode}"

@@ -40,7 +40,7 @@ class AgentConfig:
     profile_id: str | None = None
     age_group: str = "10_13"
     policy_id: str = "default"
-    policy_version: str = "0.1.0-alpha.2"
+    policy_version: str = "0.1.0-alpha.3"
     ocr_engine: str = "tesseract"  # tesseract | paddle | none
     # Capture cadence. The phash is now computed on the foreground-window
     # region, so it correctly detects small text edits (e.g. lines added in

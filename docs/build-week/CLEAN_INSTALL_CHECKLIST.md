@@ -1,6 +1,6 @@
 # Clean Windows Release-Candidate Checklist
 
-Target artifact version: `0.1.0-alpha.2`
+Target artifact version: `0.1.0-alpha.3`
 
 Qualification target: fresh Windows 11 x64 machine or disposable VM
 
