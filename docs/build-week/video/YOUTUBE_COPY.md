@@ -11,11 +11,13 @@ Build Week 2026 extension: an optional, parent-approved GPT-5.6 second opinion
 that turns a locally detected incident into uncertainty-aware conversation
 guidance.
 
-This video uses GuardianNode's functional synthetic demo and deterministic mock
-Guardian Review mode. It contains no real child or family data and makes no
-live OpenAI request. Configured live mode uses the server-side OpenAI Responses
-API with GPT-5.6, strict Structured Outputs, no tools, and `store:false` after
-the parent previews and approves the exact minimized context.
+This video uses a functional client/server run containing only a labelled
+synthetic gaming fixture. A Windows child agent captured the fixture, the
+isolated parent server performed local OCR and deterministic detection, and the
+parent approved a live Guardian Review request. The server-side OpenAI Responses
+API requested GPT-5.6 with strict Structured Outputs, no tools, and `store:false`.
+The result was validated and persisted locally. No real child or family data is
+included. The narration is an AI-generated OpenAI `gpt-4o-mini-tts` Coral voice.
 
 Repository: https://github.com/the-vibe-dev/guardiannode
 

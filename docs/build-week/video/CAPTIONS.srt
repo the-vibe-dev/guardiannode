@@ -1,31 +1,31 @@
 1
 00:00:00,000 --> 00:00:20,000
-A worrying message can be serious, a joke, or school research. Parents need context without turning an uncertain signal into an accusation. GuardianNode keeps detection local, then helps a parent decide what to ask next.
+A worrying message can be serious, a joke, or missing context. I built GuardianNode to help parents protect a child without turning an uncertain signal into an accusation. Detection stays local first; the parent decides what leaves and what happens next.
 
 2
 00:00:20,000 --> 00:00:40,000
-Before Build Week, GuardianNode already had a visible Windows agent, parent-owned backend, local detection, encrypted evidence, dashboard, authentication, and installers. Portions of the earlier web UI were Claude-assisted; the broader platform was built with Codex assistance.
+Before Build Week, my platform already had a Windows agent, parent-owned backend, local detection, encrypted evidence, authentication, dashboard, and installers. Claude assisted with parts of the earlier UI. Guardian Review is the Build Week extension I created with Codex and GPT-5.6.
 
 3
 00:00:40,000 --> 00:01:05,000
-Six resettable judge scenarios contain no real child data. The normal local detector creates and persists this synthetic incident first. Guardian Review never replaces that local path.
+This is a real client-server run with synthetic data. A Windows child agent captured a mild fictional gaming chat. Local OCR and deterministic rules created a medium bullying alert in the parent dashboard.
 
 4
 00:01:05,000 --> 00:01:25,000
-Guardian Review loads the authorized incident on the server. Deterministic minimization removes names, accounts, contact details, paths, device identifiers, precise locations, and unrelated context.
+Guardian Review loads the authorized incident from the server. Deterministic minimization removes names, accounts, contact details, paths, device identifiers, precise locations, and unrelated context.
 
 5
 00:01:25,000 --> 00:01:45,000
-The parent sees the exact outbound JSON and explicitly continues. Live mode uses the server-side OpenAI Responses API with configurable GPT-5.6, no tools, store false, and a strict schema. This recording uses local mock mode.
+The parent sees the exact outbound JSON and explicitly approves external processing. This recording uses the live server-side OpenAI Responses API with GPT-5.6, no tools, store false, and a strict versioned schema. The API key never enters the browser or repository.
 
 6
 00:01:45,000 --> 00:02:10,000
-The result is not presented as fact. It separates observation from inference, surfaces benign explanations and missing context, and suggests calm opening words. Feedback stays local and does not silently change production behavior.
+GPT-5.6 returns a structured, locally persisted second opinion. It separates observation from inference, surfaces benign explanations and missing context, and suggests calm opening words. The parent remains the decision-maker; feedback stays local.
 
 7
 00:02:10,000 --> 00:02:35,000
-Codex helped preserve the baseline, implement and test Guardian Review, build fifty-five synthetic evaluation cases, and run adversarial review. We disabled a coding-agent transport when its local tools proved to be the wrong privacy boundary.
+I used Codex with GPT-5.6 to preserve the baseline, trace the real path, implement Guardian Review, and test it with fifty-five synthetic evaluation cases and adversarial checks. Runtime review stays on the tool-free Responses API.
 
 8
 00:02:35,000 --> 00:02:48,000
-GuardianNode keeps the parent in control. It is an alpha second opinion—not a diagnosis, emergency service, punishment engine, or replacement for a trusted family conversation.
+GuardianNode keeps the parent in control. Guardian Review is an alpha second opinion—not a diagnosis, emergency service, truth detector, punishment engine, or replacement for a trusted family conversation.

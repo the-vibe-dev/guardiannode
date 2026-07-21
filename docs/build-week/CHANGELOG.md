@@ -183,6 +183,13 @@ External status remains explicit: real-node qualification, a live direct-API
 synthetic demonstration, YouTube publication, `/feedback`, and form submission
 are not represented as complete until the maintainer performs them.
 
+Late July 21 qualification completed the Windows 11 all-in-one and separate
+child/server paths, a real synthetic agent-capture alert, and a live GPT-5.6
+Guardian Review with strict structured persistence. The final 2:48 H.264/AAC
+video uses disclosed OpenAI Coral narration and embedded English captions.
+YouTube publication, `/feedback`, and the Devpost account submission remain
+maintainer actions.
+
 Verified and published internally as a draft release:
 
 - Merged release commit `62590db1911cb84cf01b27de76ab26f238d003d7`
