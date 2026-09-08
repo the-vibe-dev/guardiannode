@@ -1,6 +1,30 @@
 from __future__ import annotations
 
+import io
+
 import pytest
+from PIL import Image
+
+
+def test_vision_copy_is_downscaled_without_changing_aspect_ratio() -> None:
+    from app.services.image_safety import _downscale_for_vision
+
+    source = io.BytesIO()
+    Image.new("RGB", (1920, 1080), "white").save(source, format="JPEG")
+
+    resized = Image.open(io.BytesIO(_downscale_for_vision(source.getvalue(), max_edge=1280)))
+
+    assert resized.size == (1280, 720)
+
+
+def test_vision_copy_is_never_upscaled() -> None:
+    from app.services.image_safety import _downscale_for_vision
+
+    source = io.BytesIO()
+    Image.new("RGB", (800, 600), "white").save(source, format="JPEG")
+    original = source.getvalue()
+
+    assert _downscale_for_vision(original, max_edge=1280) == original
 
 
 @pytest.mark.asyncio

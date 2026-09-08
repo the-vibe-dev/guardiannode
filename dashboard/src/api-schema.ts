@@ -1237,6 +1237,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/dashboard/capture-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Capture Status
+         * @description Show acceptance separately from classification and alert creation.
+         *
+         *     This intentionally returns receipt/progress metadata only. It never returns
+         *     screenshot bytes, OCR text, window titles, URLs, or classification content.
+         */
+        get: operations["capture_status_api_dashboard_capture_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/notifications": {
         parameters: {
             query?: never;
@@ -1766,6 +1789,28 @@ export interface components {
             timestamp?: string | null;
             /** Idempotency Key */
             idempotency_key?: string | null;
+        };
+        /**
+         * CaptureStatus
+         * @description Metadata-only receipt and review progress for screen captures.
+         */
+        CaptureStatus: {
+            /** Latest Capture At */
+            latest_capture_at: string | null;
+            /** Latest Capture Device Id */
+            latest_capture_device_id: string | null;
+            /** Latest Capture Hostname */
+            latest_capture_hostname: string | null;
+            /** Pending Review Count */
+            pending_review_count: number;
+            /** Reviewing Count */
+            reviewing_count: number;
+            /** Waiting Upload Count */
+            waiting_upload_count: number;
+            /** Estimated Wait Seconds */
+            estimated_wait_seconds: number | null;
+            /** Last Reviewed At */
+            last_reviewed_at: string | null;
         };
         /** ChildRequestCreate */
         ChildRequestCreate: {
@@ -5233,6 +5278,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Overview"];
+                };
+            };
+        };
+    };
+    capture_status_api_dashboard_capture_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureStatus"];
                 };
             };
         };

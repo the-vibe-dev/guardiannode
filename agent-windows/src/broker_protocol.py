@@ -17,6 +17,7 @@ MAX_STRING_BYTES = 4096
 MAX_REQUEST_ID_BYTES = 80
 
 ALLOWED_ACTIONS = {
+    "capture_config",
     "health",
     "status",
     "submit_screenshot",

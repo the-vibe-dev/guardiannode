@@ -70,6 +70,9 @@ class BrokerClient:
     def status(self) -> dict[str, Any]:
         return self.request("status")
 
+    def capture_config(self) -> dict[str, Any]:
+        return self.request("capture_config")
+
     def submit_screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         image_bytes = payload.get("image_bytes")
         if not isinstance(image_bytes, bytes):

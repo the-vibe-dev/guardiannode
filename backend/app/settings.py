@@ -103,11 +103,11 @@ class Settings(BaseSettings):
     database_backup_interval_seconds: int = 24 * 60 * 60
     database_backup_keep: int = 7
     readiness_min_free_bytes: int = 256 * 1024 * 1024
-    # Safety cap on the long edge (px) sent to the vision model. qwen3-vl:8b has
-    # ~4.6 GB headroom on a 12 GB card, so full-res frames OCR best and are left
-    # untouched; this only shrinks enormous 4K+ frames. Downscaling degrades OCR
-    # of small text (usernames, handles, addresses) — measured. 0 disables it.
-    vision_max_image_edge: int = 2560
+    # Safety cap on the long edge (px) sent to the vision model. Only the model
+    # copy is resized: deterministic OCR and encrypted evidence keep the source
+    # resolution. 1280 retained synthetic detections while reducing prompt time
+    # on the supported 12 GB GPU tier. 0 disables the resize.
+    vision_max_image_edge: int = 1280
     # Guardrails for the disk-backed screenshot classifier queue. Stale replay
     # must not block current safety events after upgrades/restarts.
     # Cold qwen3-vl startup on a 12 GB GPU can exceed a minute after a clean

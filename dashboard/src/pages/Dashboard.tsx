@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Check, CircleAlert, Clock3, Laptop, ShieldCheck, UsersRound } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CircleAlert, Clock3, Images, Laptop, ShieldCheck, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
-import { api, type Alert, type Device, type Profile } from "../api";
+import { api, type Alert, type CaptureStatus, type Device, type Profile } from "../api";
 import { formatDateTime } from "../utils/datetime";
 
 export default function Dashboard() {
@@ -12,6 +12,11 @@ export default function Dashboard() {
   const requests = useQuery({ queryKey: ["child-requests", "open"], queryFn: () => api.childRequests({ status: "open", limit: "5" }) });
   const onboarding = useQuery({ queryKey: ["onboarding"], queryFn: api.onboardingStatus });
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const capture = useQuery({
+    queryKey: ["capture-status"],
+    queryFn: api.captureStatus,
+    refetchInterval: 5_000,
+  });
 
   const firstError = [overview, alerts, devices, profiles, requests, onboarding].find((query) => query.error)?.error;
   if (firstError) return <ErrorState message={(firstError as Error).message} />;
@@ -41,6 +46,8 @@ export default function Dashboard() {
       </header>
 
       {!onboarding.data!.complete && <OnboardingCard currentStep={onboarding.data!.current_step} steps={onboarding.data!.steps} />}
+
+      <CaptureQueueCard status={capture.data} loading={capture.isPending} error={capture.error} />
 
       <section aria-labelledby="attention-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(13,59,74,0.06)] sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -79,6 +86,64 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+function formatWait(seconds: number | null): string | null {
+  if (!seconds || seconds < 1) return null;
+  if (seconds < 60) return "under a minute";
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `about ${hours}h${remainder ? ` ${remainder}m` : ""}`;
+}
+
+function CaptureQueueCard({ status, loading, error }: { status?: CaptureStatus; loading: boolean; error: Error | null }) {
+  if (loading) {
+    return <section aria-label="Screen capture queue" className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500" role="status">Loading screen capture queue…</section>;
+  }
+  if (error || !status) {
+    return <section aria-label="Screen capture queue" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900" role="status">Screen capture queue status is temporarily unavailable.</section>;
+  }
+
+  const pending = status.pending_review_count;
+  const waiting = Math.max(0, pending - status.reviewing_count);
+  const wait = formatWait(status.estimated_wait_seconds);
+  const source = status.latest_capture_hostname || "a paired device";
+
+  return (
+    <section aria-labelledby="capture-queue-heading" className="rounded-xl border border-sky-200 bg-sky-50 p-5" aria-live="polite">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-sky-800"><Images aria-hidden="true" size={20} /></span>
+          <div className="min-w-0">
+            <h2 id="capture-queue-heading" className="font-display font-semibold text-[#18313a]">Screen capture queue</h2>
+            {status.latest_capture_at ? (
+              <p className="mt-1 text-sm text-slate-700"><strong>Captured from {source}</strong> · {formatDateTime(status.latest_capture_at)}</p>
+            ) : (
+              <p className="mt-1 text-sm text-slate-700">Waiting for the first screen capture.</p>
+            )}
+            <p className="mt-1 text-xs text-slate-600">A capture appears here when this server accepts it; alerts appear after safety review.</p>
+          </div>
+        </div>
+        <div className="shrink-0 sm:text-right">
+          {pending > 0 ? (
+            <>
+              <p className="font-display text-lg font-bold text-sky-950">{pending} captured screen{pending === 1 ? "" : "s"} in review queue</p>
+              <p className="mt-1 text-xs text-slate-600">
+                {status.reviewing_count > 0 ? `${status.reviewing_count} reviewing now` : "Review will start shortly"}
+                {waiting > 0 ? ` · ${waiting} waiting` : ""}
+                {wait ? ` · ${wait}` : ""}
+              </p>
+            </>
+          ) : (
+            <p className="inline-flex items-center gap-2 font-semibold text-emerald-800"><Check aria-hidden="true" size={17} /> All captured screens reviewed</p>
+          )}
+          {status.waiting_upload_count > 0 && <p className="mt-1 text-xs font-semibold text-amber-800">{status.waiting_upload_count} still waiting to upload</p>}
+        </div>
+      </div>
+    </section>
   );
 }
 

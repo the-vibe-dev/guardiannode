@@ -380,37 +380,52 @@ async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue)
         await asyncio.sleep(30)
 
 
-async def capture_config_loop(client: BackendClient, cfg: AgentConfig) -> None:
-    """Poll the backend for the parent's capture policy and apply it live.
+def _apply_capture_config(cfg: AgentConfig, cc: dict) -> None:
+    if isinstance(cc.get("cadence_seconds"), (int, float)):
+        cfg.ocr_cadence_seconds = max(2, int(cc["cadence_seconds"]))
+    if isinstance(cc.get("phash_threshold"), (int, float)):
+        cfg.phash_threshold = int(cc["phash_threshold"])
+    if isinstance(cc.get("full_screen_change_threshold"), (int, float)):
+        cfg.full_screen_change_threshold = int(cc["full_screen_change_threshold"])
+    if isinstance(cc.get("full_screen_capture_enabled"), bool):
+        cfg.full_screen_capture_enabled = cc["full_screen_capture_enabled"]
+    if isinstance(cc.get("max_capture_interval_seconds"), (int, float)):
+        cfg.max_capture_interval_seconds = max(
+            cfg.ocr_cadence_seconds,
+            int(cc["max_capture_interval_seconds"]),
+        )
+    log.info(
+        "capture policy: level=%s cadence=%ds phash=%d max_interval=%ds",
+        cc.get("level"), cfg.ocr_cadence_seconds, cfg.phash_threshold,
+        cfg.max_capture_interval_seconds,
+    )
 
-    Lets a parent tighten or loosen monitoring (cadence, change sensitivity)
-    from the dashboard without touching the child's PC. Falls back silently to
-    the local agent.yaml settings if the endpoint isn't reachable."""
+
+async def capture_config_loop(client: BackendClient, cfg: AgentConfig) -> None:
+    """Poll the backend for the parent's capture policy and apply it live."""
     while True:
         try:
             cc = await client.get_capture_config()
             if cc:
-                if isinstance(cc.get("cadence_seconds"), (int, float)):
-                    cfg.ocr_cadence_seconds = max(2, int(cc["cadence_seconds"]))
-                if isinstance(cc.get("phash_threshold"), (int, float)):
-                    cfg.phash_threshold = int(cc["phash_threshold"])
-                if isinstance(cc.get("full_screen_change_threshold"), (int, float)):
-                    cfg.full_screen_change_threshold = int(cc["full_screen_change_threshold"])
-                if isinstance(cc.get("full_screen_capture_enabled"), bool):
-                    cfg.full_screen_capture_enabled = cc["full_screen_capture_enabled"]
-                if isinstance(cc.get("max_capture_interval_seconds"), (int, float)):
-                    cfg.max_capture_interval_seconds = max(
-                        cfg.ocr_cadence_seconds,
-                        int(cc["max_capture_interval_seconds"]),
-                    )
-                log.info(
-                    "capture policy: level=%s cadence=%ds phash=%d max_interval=%ds",
-                    cc.get("level"), cfg.ocr_cadence_seconds, cfg.phash_threshold,
-                    cfg.max_capture_interval_seconds,
-                )
+                _apply_capture_config(cfg, cc)
         except Exception as e:
             log.debug("capture-config poll error: %s", e)
         await asyncio.sleep(120)
+
+
+async def broker_capture_config_loop(cfg: AgentConfig) -> None:
+    """Consume the broker's credentialed server policy without reading its token."""
+    from src.broker_client import BrokerClient
+
+    client = BrokerClient()
+    while True:
+        try:
+            cc = await asyncio.to_thread(client.capture_config)
+            if cc:
+                _apply_capture_config(cfg, cc)
+        except Exception as e:
+            log.debug("broker capture-config poll error: %s", e)
+        await asyncio.sleep(10)
 
 
 async def refresh_pairing_credentials(
@@ -468,7 +483,10 @@ async def main_async(cfg: AgentConfig, *, broker_capture_authorized: bool = True
             cfg.ocr_cadence_seconds,
             len(cfg.monitored_apps),
         )
-        await capture_loop(cfg, screenshot_queue)  # type: ignore[arg-type]
+        await asyncio.gather(
+            capture_loop(cfg, screenshot_queue),  # type: ignore[arg-type]
+            broker_capture_config_loop(cfg),
+        )
         return
 
     # Complete pairing left pending by the installer (or a previous failed run).

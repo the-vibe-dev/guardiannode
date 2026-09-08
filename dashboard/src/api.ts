@@ -9,6 +9,7 @@ export type Device = components["schemas"]["DeviceDTO"];
 export type Overview = components["schemas"]["Overview"];
 export type Profile = components["schemas"]["ProfileDTO"];
 export type PairStart = components["schemas"]["PairStartResponse"];
+export type CaptureStatus = components["schemas"]["CaptureStatus"];
 
 export interface OnboardingStatus {
   complete: boolean;
@@ -119,6 +120,7 @@ export const api = {
       body: JSON.stringify({ recovery_code, new_password }),
     }),
   overview: () => request<Overview>("/dashboard/overview"),
+  captureStatus: () => request<CaptureStatus>("/dashboard/capture-status"),
   devices: () => request<Device[]>("/devices"),
   startPair: () => request<PairStart>("/devices/pair/start", { method: "POST" }),
   pauseDevice: (device_id: string, duration_seconds: number) =>

@@ -130,6 +130,18 @@ def run_canary() -> None:
             }))
             csrf = expect(client.get("/api/auth/csrf"))["csrf_token"]
             browser_headers = {"x-csrf-token": csrf}
+            consent_status = expect(client.get("/api/consent"))
+            expect(client.post("/api/consent", headers=browser_headers, json={
+                "notice_version": consent_status["notice_version"],
+                "choices": {
+                    "screenshots": True,
+                    "apps_and_urls": True,
+                    "retention": True,
+                    "notifications": False,
+                    "external_ai": False,
+                    "child_notice_acknowledged": True,
+                },
+            }))
             profile = expect(client.post("/api/profiles", headers=browser_headers, json={
                 "display_name": "Canary Child",
                 "age_group": "10_13",
@@ -155,7 +167,7 @@ def run_canary() -> None:
 
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
-                alerts = expect(client.get("/api/alerts"))
+                alerts = expect(client.get("/api/alerts"))["items"]
                 if alerts:
                     detail = expect(client.get(f"/api/alerts/{alerts[0]['alert_id']}"))
                     if PHRASE not in (detail.get("redacted_text") or ""):

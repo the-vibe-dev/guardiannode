@@ -64,6 +64,7 @@ def test_server_installer_guides_private_lan_mode() -> None:
     assert "netsh.exe" in text
     assert "profile=private" in text
     assert "Check: ShouldEnableLanAccess" in text
+    assert "GUARDIANNODE_VISION_MAX_IMAGE_EDGE=1280" in shared_env
 
 
 def test_windows_installers_fail_if_ollama_bootstrap_fails() -> None:

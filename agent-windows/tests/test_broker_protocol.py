@@ -21,6 +21,12 @@ def test_protocol_round_trip_and_parse() -> None:
     assert request.request_id == message["request_id"]
 
 
+def test_protocol_allows_capture_config_without_payload() -> None:
+    request = parse_request(make_request("capture_config"))
+    assert request.action == "capture_config"
+    assert request.payload == {}
+
+
 def test_protocol_rejects_unknown_action() -> None:
     message = make_request("health")
     message["action"] = "read_device_token"

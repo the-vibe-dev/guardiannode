@@ -260,6 +260,7 @@ def test_linux_installer_systemd_preserves_blank_model_values(tmp_path: Path) ->
         grep -F 'Environment="GUARDIANNODE_CLASSIFIER_TIER=text_only"' "{unit_path}"
         grep -F 'Environment="GUARDIANNODE_TEXT_MODEL="' "{unit_path}"
         grep -F 'Environment="GUARDIANNODE_VISION_MODEL="' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_VISION_MAX_IMAGE_EDGE=1280"' "{unit_path}"
         ! grep -F 'llama3.2:3b' "{unit_path}"
         ! grep -F 'qwen3-vl:8b-instruct' "{unit_path}"
         """,

@@ -105,12 +105,16 @@ class BrokerCommandHandler:
         credential_path: Path | None = None,
         legacy_credential_path: Path | None = None,
         replay_cache: RequestReplayCache | None = None,
+        capture_config: dict[str, Any] | None = None,
     ):
         self.queue = queue
         self.pause_path = pause_path or broker_pause_path()
         self.credential_path = credential_path or broker_device_path()
         self.legacy_credential_path = legacy_credential_path or default_device_path()
         self.replay_cache = replay_cache or RequestReplayCache()
+        self._capture_config_lock = threading.Lock()
+        self._capture_config: dict[str, Any] = {}
+        self.set_capture_config(capture_config or {})
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -145,11 +149,36 @@ class BrokerCommandHandler:
                 "paused": pause.paused,
                 "paused_until": pause.paused_until,
             }
+        if request.action == "capture_config":
+            with self._capture_config_lock:
+                return dict(self._capture_config)
         if request.action == "submit_screenshot":
             payload = self._screenshot_payload(request.payload)
             self.queue.put_nowait(payload)
             return {"status": "queued", "queue_depth": self.queue.qsize()}
         raise ProtocolError("unsupported action")
+
+    def set_capture_config(self, payload: dict[str, Any]) -> None:
+        """Cache only bounded, non-secret capture controls for session agents."""
+        clean: dict[str, Any] = {}
+        level = payload.get("level")
+        if level in {"tight", "balanced", "leeway", "local"}:
+            clean["level"] = level
+        numeric_bounds = {
+            "cadence_seconds": (2, 300),
+            "phash_threshold": (0, 256),
+            "full_screen_change_threshold": (0, 256),
+            "max_capture_interval_seconds": (2, 3600),
+        }
+        for key, (minimum, maximum) in numeric_bounds.items():
+            value = payload.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                clean[key] = max(minimum, min(maximum, int(value)))
+        full_screen = payload.get("full_screen_capture_enabled")
+        if isinstance(full_screen, bool):
+            clean["full_screen_capture_enabled"] = full_screen
+        with self._capture_config_lock:
+            self._capture_config = clean
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
         creds = load_credentials(self.credential_path)
@@ -479,6 +508,9 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
         )
         try:
             await client.heartbeat(queued_frames=handler.queue.qsize())
+            capture_config = await client.get_capture_config()
+            if capture_config:
+                handler.set_capture_config(capture_config)
             for command in await client.get_commands():
                 command_id = str(command.get("command_id") or "")
                 try:
@@ -502,7 +534,17 @@ def build_handler(cfg: AgentConfig) -> BrokerCommandHandler:
         max_bytes=cfg.durable_queue_max_bytes,
         max_age_seconds=cfg.durable_queue_max_age_seconds,
     )
-    return BrokerCommandHandler(queue=queue)
+    return BrokerCommandHandler(
+        queue=queue,
+        capture_config={
+            "level": "local",
+            "cadence_seconds": cfg.ocr_cadence_seconds,
+            "phash_threshold": cfg.phash_threshold,
+            "full_screen_change_threshold": cfg.full_screen_change_threshold,
+            "max_capture_interval_seconds": cfg.max_capture_interval_seconds,
+            "full_screen_capture_enabled": cfg.full_screen_capture_enabled,
+        },
+    )
 
 
 def cli() -> None:

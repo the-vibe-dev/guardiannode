@@ -44,6 +44,32 @@ def test_broker_status_never_returns_device_token(tmp_path) -> None:
     assert "device_token" not in serialized
 
 
+def test_broker_returns_only_bounded_capture_config(tmp_path) -> None:
+    handler = _handler(tmp_path)
+    handler.set_capture_config({
+        "level": "balanced",
+        "cadence_seconds": 8,
+        "phash_threshold": 3,
+        "full_screen_change_threshold": 12,
+        "max_capture_interval_seconds": 120,
+        "full_screen_capture_enabled": True,
+        "device_token": "must-not-cross-the-pipe",
+    })
+
+    response = handler.handle_message(make_request("capture_config"))
+
+    assert response["ok"]
+    assert response["payload"] == {
+        "level": "balanced",
+        "cadence_seconds": 8,
+        "phash_threshold": 3,
+        "full_screen_change_threshold": 12,
+        "max_capture_interval_seconds": 120,
+        "full_screen_capture_enabled": True,
+    }
+    assert "must-not-cross-the-pipe" not in json.dumps(response)
+
+
 def test_broker_migrates_legacy_credentials_to_secure_path(tmp_path) -> None:
     handler = _handler(tmp_path)
     save_credentials("dev-1", "secret-token", "http://127.0.0.1:8787", handler.legacy_credential_path)
@@ -131,9 +157,13 @@ def test_agent_broker_mode_does_not_load_credentials_or_sender(monkeypatch) -> N
         assert isinstance(queue, FakeBrokerQueue)
         raise asyncio.CancelledError
 
+    async def fake_capture_config_loop(_cfg):
+        await asyncio.Future()
+
     monkeypatch.setattr(main.os, "name", "nt")
     monkeypatch.setattr("src.broker_client.BrokerScreenshotQueue", FakeBrokerQueue)
     monkeypatch.setattr(main, "capture_loop", fake_capture_loop)
+    monkeypatch.setattr(main, "broker_capture_config_loop", fake_capture_config_loop)
     monkeypatch.setattr(main, "bootstrap_pairing", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr(main, "load_credentials", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError))
 
@@ -142,6 +172,25 @@ def test_agent_broker_mode_does_not_load_credentials_or_sender(monkeypatch) -> N
         asyncio.run(main.main_async(cfg))
     except asyncio.CancelledError:
         pass
+
+
+def test_agent_applies_broker_capture_config() -> None:
+    from src import main
+
+    cfg = main.AgentConfig()
+    main._apply_capture_config(cfg, {
+        "cadence_seconds": 15,
+        "phash_threshold": 5,
+        "full_screen_change_threshold": 18,
+        "max_capture_interval_seconds": 300,
+        "full_screen_capture_enabled": True,
+    })
+
+    assert cfg.ocr_cadence_seconds == 15
+    assert cfg.phash_threshold == 5
+    assert cfg.full_screen_change_threshold == 18
+    assert cfg.max_capture_interval_seconds == 300
+    assert cfg.full_screen_capture_enabled is True
 
 
 def test_named_pipe_identity_validation_uses_win32security_impersonation(monkeypatch) -> None:

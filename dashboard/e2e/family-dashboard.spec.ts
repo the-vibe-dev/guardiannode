@@ -83,6 +83,16 @@ async function mockFamilyApi(page: Page) {
       devices_paused: 0,
       recent_severity_counts: { "2026-08-17": 2 },
     });
+    if (path === "/api/dashboard/capture-status") return fulfill(route, {
+      latest_capture_at: now,
+      latest_capture_device_id: device.device_id,
+      latest_capture_hostname: device.hostname,
+      pending_review_count: 7,
+      reviewing_count: 1,
+      waiting_upload_count: 0,
+      estimated_wait_seconds: 98,
+      last_reviewed_at: now,
+    });
     if (path === "/api/alerts") return fulfill(route, { items: [alert], next_cursor: null, open_count: 1 });
     if (path === "/api/alerts/alert-1") return fulfill(route, {
       alert,
@@ -155,7 +165,9 @@ test("family home is responsive, keyboard reachable, and accessible", async ({ p
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Good .*Jordan/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible();
-  await expect(page.getByText("Alex-Laptop")).toBeVisible();
+  await expect(page.getByText("Alex-Laptop", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Captured from Alex-Laptop/)).toBeVisible();
+  await expect(page.getByText("7 captured screens in review queue")).toBeVisible();
 
   if (testInfo.project.name === "mobile") {
     const menu = page.getByRole("button", { name: "Open navigation" });
