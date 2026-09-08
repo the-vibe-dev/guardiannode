@@ -17,7 +17,7 @@ dependencies = [
   "pydantic-settings>=2.1,<3.0",
   "sqlalchemy>=2.0,<3.0",
   "alembic>=1.13,<2.0",
-  "cryptography>=48.0.1,<50.0",
+  "cryptography>=50.0.0,<51.0",
   "argon2-cffi>=23.1,<26.0",
   "httpx>=0.27,<1.0",
   "python-multipart>=0.0.9,<1.0",
@@ -36,6 +36,7 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-cov>=4.1",
+  "httpx2>=2.9,<3.0",
   "httpx>=0.27",
   "ruff>=0.3",
   "mypy>=1.8",
@@ -73,7 +74,6 @@ check_untyped_defs = true
 
 [[tool.mypy.overrides]]
 module = [
-  "app.services.encryption",
   "app.services.notifications",
   "app.services.image_safety",
   "app.api.events",

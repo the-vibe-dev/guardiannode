@@ -228,16 +228,16 @@ as model accuracy. See [evaluation results](docs/build-week/EVALUATION_RESULTS.m
 ### Supported platforms and limitations
 
 GuardianNode is alpha software, can miss or overstate risks, and can capture
-sensitive visible content. Windows 11 x64 is the promoted child-device path;
-Windows 10 has not been promoted. Installers are unsigned, separated deployments
-need a trusted VPN/TLS design, and Guardian Review remains a fallible second
+sensitive visible content. Windows 11 x64 is the target child-device path;
+Windows 10 has not been promoted. Installers are unsigned, the current TLS and
+broker changes require a fresh Windows qualification run, and Guardian Review remains a fallible second
 opinion rather than an emergency or diagnostic service. Deterministic
 redaction is defense-in-depth rather than a guarantee: unusual international
 addresses, novel obfuscation, image-only private data, or relevant URL domains
 can still carry identifying context. The 55-case synthetic evaluation measures
-explicit properties, not clinical or universal accuracy. Windows 11 server and
-child installation, pairing, event delivery, browser flow, and reboot recovery
-were qualified with synthetic data. Windows 10 qualification, code signing, a
+explicit properties, not clinical or universal accuracy. Earlier Windows 11
+installers were qualified with synthetic data, but that evidence does not
+qualify this changed build. Windows 10 and current-build qualification, code signing, a
 complete clean uninstall/reinstall cycle, and unattended local Ollama recovery
 remain before general beta promotion. See [Known limitations](KNOWN_LIMITATIONS.md),
 the [Windows release report](docs/release-validation/windows-build-week-2026-07-21.md),
@@ -273,9 +273,10 @@ shape. The backend should stay bound to loopback.
 
 Run the Windows child-device agent on the child's PC and run the backend,
 dashboard, and Ollama on a parent-owned Windows or Linux server. This is an
-advanced operator path only and must use a trusted VPN/TLS setup. Do not expose
-the backend directly on a raw LAN or the public internet. Built-in TLS/mTLS is
-planned. See [Secure LAN setup](docs/SECURE_LAN_SETUP.md).
+advanced operator path only. Fresh installs use a local family CA and pinned
+HTTPS; a trusted VPN is still recommended for network isolation. Do not expose
+the backend directly to the public internet. Mutual TLS is not implemented. See
+[Secure LAN setup](docs/SECURE_LAN_SETUP.md).
 
 ## What It Monitors
 
@@ -340,9 +341,9 @@ must review the license and performance of any Ollama model they install. See
 
 | Mode | Alpha support |
 |---|---|
-| Windows 11 all-in-one installer | Supported public alpha path for technical parents |
-| Windows 11 server installer | Supported public alpha path for parent-owned server PCs |
-| Windows 11 child-only installer | Supported public alpha path when paired to a trusted parent server |
+| Windows 11 all-in-one installer | Closed-beta candidate; current build needs clean-machine requalification |
+| Windows 11 server installer | Closed-beta candidate; current build needs clean-machine requalification |
+| Windows 11 child-only installer | Closed-beta candidate; current build needs clean-machine requalification |
 | Source backend on loopback | Supported for technical evaluation |
 | Source all-in-one Windows evaluation | Supported for technical evaluation |
 | Separated private LAN/VPN deployment | Advanced alpha path; explicit opt-in, trusted LAN/VPN/TLS required |
@@ -399,6 +400,8 @@ GUARDIANNODE_MDNS_ENABLED=false
 GUARDIANNODE_CLASSIFIER_TIER=text_only
 GUARDIANNODE_TEXT_MODEL=
 GUARDIANNODE_VISION_MODEL=
+GUARDIANNODE_DEV_MODE=true
+GUARDIANNODE_TLS_ENABLED=false
 EOF
 set -a
 . local_config/dev.env
@@ -439,6 +442,7 @@ cd dashboard
 npm ci
 npm run typecheck
 npm test -- --run
+npm run test:e2e
 npm run build
 ```
 
@@ -456,7 +460,8 @@ pip install -e ".[dev,windows]"
 pytest
 
 # In the dashboard, create a child profile, open Devices, choose Add device,
-# and copy the six-digit pairing code. Replace 123456 with that code.
+# and copy the six-digit pairing code. This loopback-only HTTP command is for
+# synthetic development data; HTTPS pairing uses --pair-bundle family.gnpair.
 python -m src.main --pair --server http://127.0.0.1:8787 --code 123456
 
 # Validate capture without sending events.
@@ -469,12 +474,12 @@ python -m src.main
 Create and assign the child profile in the dashboard before relying on age
 policy behavior. Do not send parent passwords over plaintext LAN HTTP.
 
-### Public Alpha Installer Paths
+### Closed-Beta Candidate Installer Paths
 
-Windows 11 child/all-in-one and parent-server installers are supported
-public-alpha artifacts for technical parents and early evaluators. They remain
-unsigned alpha installers, so verify the release checksums before running them
-and expect SmartScreen/Defender reputation warnings.
+Windows child/all-in-one and parent-server installers remain unsigned
+closed-beta candidates until this build completes the clean-machine matrix.
+Verify release checksums before running any qualified artifact and expect
+SmartScreen/Defender reputation warnings until code signing is complete.
 
 For Linux server installs, prefer downloading the tagged installer bundle or
 script, verifying the published checksum or signature, reviewing it locally,

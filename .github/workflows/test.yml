@@ -153,6 +153,15 @@ jobs:
       - name: Unit tests
         working-directory: dashboard
         run: npm test -- --run
+      - name: Install browser
+        working-directory: dashboard
+        run: npx playwright install --with-deps chromium
+      - name: Browser accessibility and journey tests
+        working-directory: dashboard
+        run: npm run test:e2e
+      - name: Dependency audit
+        working-directory: dashboard
+        run: npm audit --audit-level=high
       - name: Build
         working-directory: dashboard
         run: npm run build

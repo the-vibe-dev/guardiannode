@@ -5,6 +5,7 @@ import ipaddress
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -30,6 +31,11 @@ class Settings(BaseSettings):
     data_dir: Path = _default_data_dir()
     bind_host: str = "127.0.0.1"
     bind_port: int = 8787
+    # Exact URL placed in child-device pairing bundles. This is useful when
+    # guardiannode.local is unavailable (for example, a routed lab or VPN).
+    # The host must also be present in GUARDIANNODE_ALLOWED_HOSTS so the
+    # generated TLS certificate covers the endpoint the child will use.
+    advertised_server_url: str | None = None
     ollama_url: str = "http://127.0.0.1:11434"
     # Optional per-role overrides — set these if vision and text LLM should use
     # different Ollama instances (e.g. on different ports / GPUs).
@@ -49,7 +55,12 @@ class Settings(BaseSettings):
     https_only_cookies: bool = False
     mdns_enabled: bool = True
     cors_allow_origin: str | None = None  # for dashboard dev server
-    allowed_hosts: str = "127.0.0.1,localhost,::1,testserver"
+    # Include the default pairing/certificate name so a fresh loopback install
+    # can issue its first child bundle without requiring an undocumented host
+    # override.  TrustedHostMiddleware still rejects every other hostname.
+    allowed_hosts: str = "127.0.0.1,localhost,::1,testserver,guardiannode.local"
+    tls_enabled: bool = True
+    tls_san_hosts: str = "guardiannode.local"
     text_model: str = "llama3.2:3b"
     # qwen3-vl:8b-INSTRUCT is the alpha vision default. The hardware selector
     # only auto-selects vision at 12+ GB VRAM because hot model/runtime memory
@@ -102,7 +113,7 @@ class Settings(BaseSettings):
     # Cold qwen3-vl startup on a 12 GB GPU can exceed a minute after a clean
     # install. Keep this above warm latency so first-run safety checks do not
     # spin in repeated Ollama timeouts.
-    vision_timeout_seconds: int = 240
+    vision_timeout_seconds: int = 360
     pending_frame_max_age_seconds: int = 600
     pending_replay_max_frames: int = 50
     guardian_review_enabled: bool = False
@@ -128,6 +139,31 @@ class Settings(BaseSettings):
     @property
     def setup_token_path(self) -> Path:
         return self.keys_dir / "setup_token"
+
+    @property
+    def device_token_pepper_path(self) -> Path:
+        """Server-only key used to authenticate high-entropy device tokens."""
+        return self.keys_dir / "device_token_pepper"
+
+    @property
+    def tls_dir(self) -> Path:
+        return self.data_dir / "tls"
+
+    @property
+    def tls_ca_cert_path(self) -> Path:
+        return self.tls_dir / "family-ca.pem"
+
+    @property
+    def tls_ca_key_path(self) -> Path:
+        return self.tls_dir / "family-ca-key.enc"
+
+    @property
+    def tls_cert_path(self) -> Path:
+        return self.tls_dir / "server.pem"
+
+    @property
+    def tls_key_path(self) -> Path:
+        return self.tls_dir / "server-key.enc"
 
     @property
     def evidence_dir(self) -> Path:
@@ -204,6 +240,45 @@ class Settings(BaseSettings):
         except ValueError:
             return host.lower() != "localhost"
 
+    def pairing_server_url(self) -> str:
+        """Return the validated endpoint embedded in child pairing bundles."""
+        scheme = "https" if self.tls_enabled else "http"
+        raw = (self.advertised_server_url or f"{scheme}://guardiannode.local:{self.bind_port}").strip()
+        parsed = urlsplit(raw)
+        try:
+            parsed_port = parsed.port
+        except ValueError as exc:
+            raise ValueError("GUARDIANNODE_ADVERTISED_SERVER_URL has an invalid port") from exc
+        if parsed.scheme.lower() != scheme:
+            raise ValueError(
+                f"GUARDIANNODE_ADVERTISED_SERVER_URL must use {scheme} when TLS is "
+                f"{'enabled' if self.tls_enabled else 'disabled'}"
+            )
+        if (
+            not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "GUARDIANNODE_ADVERTISED_SERVER_URL must be an origin without "
+                "credentials, path, query, or fragment"
+            )
+        host = parsed.hostname.strip("[]").lower()
+        _validate_allowed_host(host)
+        allowed = {item.strip("[]").lower() for item in self.effective_allowed_hosts()}
+        if "*" not in allowed and host not in allowed:
+            raise ValueError(
+                "GUARDIANNODE_ADVERTISED_SERVER_URL host must be listed in "
+                "GUARDIANNODE_ALLOWED_HOSTS"
+            )
+        netloc = f"[{host}]" if ":" in host else host
+        if parsed_port is not None:
+            netloc += f":{parsed_port}"
+        return f"{scheme}://{netloc}"
+
     def ensure_dirs(self) -> None:
         for d in (
             self.data_dir,
@@ -211,6 +286,7 @@ class Settings(BaseSettings):
             self.evidence_dir,
             self.logs_dir,
             self.backups_dir,
+            self.tls_dir,
             self.codex_home_resolved,
         ):
             d.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from app.db.session import get_sessionmaker
-from app.services import notifications
+from app.services import daily_digest, notifications
 from app.settings import settings
 
 log = logging.getLogger(__name__)
@@ -14,7 +14,10 @@ log = logging.getLogger(__name__)
 def run_once(*, limit: int = 10) -> int:
     db = get_sessionmaker()()
     try:
-        return notifications.process_pending(db, limit=limit)
+        processed = notifications.process_pending(db, limit=limit)
+        if daily_digest.run_due(db) is not None:
+            processed += 1
+        return processed
     finally:
         db.close()
 

@@ -43,19 +43,21 @@ export default function Settings() {
   const [storage, setStorage] = useState<any>(null);
   const [backups, setBackups] = useState<any>(null);
   const [guardianReview, setGuardianReview] = useState<any>(null);
+  const [familyLocale, setFamilyLocale] = useState<{ timezone: string } | null>(null);
   const [exportsList, setExportsList] = useState<any[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   async function reload() {
-    const [n, r, s, e, b, g] = await Promise.all([
+    const [n, r, s, e, b, g, l] = await Promise.all([
       api.notificationSettings(),
       api.retentionSettings(),
       api.storage(),
       api.exports(),
       api.backupSettings(),
       api.guardianReviewProviders(),
+      api.familyLocale(),
     ]);
     setNotifications({ ...n, password: "" });
     setRetention(r);
@@ -63,6 +65,7 @@ export default function Settings() {
     setExportsList(e);
     setBackups(b);
     setGuardianReview(g);
+    setFamilyLocale(l);
   }
 
   useEffect(() => {
@@ -95,7 +98,7 @@ export default function Settings() {
     return payload;
   }
 
-  if (!notifications || !retention || !storage || !backups || !guardianReview) {
+  if (!notifications || !retention || !storage || !backups || !guardianReview || !familyLocale) {
     return <div className="text-gray-500">Loading settings…</div>;
   }
 
@@ -108,6 +111,12 @@ export default function Settings() {
 
       {err && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{err}</div>}
       {msg && <div className="bg-green-50 border border-green-200 text-green-700 rounded p-3 text-sm">{msg}</div>}
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h2 className="font-display font-semibold">Family time</h2>
+        <p className="text-sm text-slate-600">Daily summaries use this IANA timezone, including across daylight-saving changes.</p>
+        <div className="flex flex-wrap items-end gap-3"><Field label="Timezone (for example America/New_York)" value={familyLocale.timezone} onChange={(timezone) => setFamilyLocale({ timezone })} /><button onClick={() => run("save-timezone", () => api.updateFamilyLocale(familyLocale.timezone), "Family timezone saved.")} disabled={busy !== null} className="min-h-10 rounded bg-brand-500 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50">Save timezone</button></div>
+      </section>
 
       <section className="bg-white shadow rounded p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -208,6 +217,11 @@ export default function Settings() {
               Allow private/internal webhook URL
             </label>
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={Boolean(notifications.daily_digest_enabled)} onChange={(e) => setNotifications({ ...notifications, daily_digest_enabled: e.target.checked })} />
+            Send a metadata-only daily digest
+          </label>
+          <Field label="Daily digest time" type="time" value={notifications.daily_digest_time || "08:00"} onChange={(daily_digest_time) => setNotifications({ ...notifications, daily_digest_time })} />
         </div>
         <div className="flex flex-wrap gap-2">
           <button

@@ -4,7 +4,7 @@
 #
 # Usage:
 #   docker compose up -d
-#   # then open http://127.0.0.1:8787 in your browser on the Docker host
+#   # then open https://127.0.0.1:8787 in your browser on the Docker host
 #
 # Persistent state:
 #   - ollama_models   : downloaded model weights
@@ -65,7 +65,7 @@ services:
       - GUARDIANNODE_BIND_HOST=0.0.0.0
       - GUARDIANNODE_BIND_PORT=8787
       - GUARDIANNODE_MDNS_ENABLED=false
-      - GUARDIANNODE_VISION_TIMEOUT_SECONDS=240
+      - GUARDIANNODE_VISION_TIMEOUT_SECONDS=360
     ports:
       - "127.0.0.1:${GUARDIANNODE_HOST_PORT:-8787}:8787"
     volumes:
@@ -75,7 +75,7 @@ services:
     pids_limit: 512
     mem_limit: 2g
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/health/ready"]
+      test: ["CMD", "curl", "--cacert", "/data/tls/family-ca.pem", "-fsS", "https://127.0.0.1:8787/api/health/ready"]
       interval: 30s
       timeout: 5s
       retries: 5

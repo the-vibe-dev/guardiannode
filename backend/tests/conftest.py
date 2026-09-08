@@ -11,12 +11,15 @@ import pytest
 def isolate_data_dir(monkeypatch, tmp_path: Path) -> Iterator[Path]:
     """Point GUARDIANNODE_DATA_DIR at a temp dir for each test."""
     monkeypatch.setenv("GUARDIANNODE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GUARDIANNODE_TLS_ENABLED", "false")
     # Reload settings so the env var takes effect.
     from app import settings as settings_mod
     settings_mod.settings = settings_mod.Settings()
     # Reset encryption cache so a fresh master key is generated per test.
-    from app.services import encryption
+    from app.services import device_budget, device_tokens, encryption
     encryption._reset_cache()
+    device_tokens._reset_cache()
+    device_budget.clear_for_tests()
     # Reset the cached DB engine so each test gets its own database file.
     from app.db import session as session_mod
     session_mod._engine = None

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import settings as settings_mod
 from app.api.deps import current_user, get_db_dep, require_recent_auth
-from app.db.models import User
+from app.db.models import Setting, User
 from app.db.session import begin_immediate_if_sqlite
 from app.services import rate_limit
 from app.services.audit import log_action
@@ -280,6 +280,15 @@ def setup(req: SetupRequest, request: Request, db: Session = Depends(get_db_dep)
     try:
         db.add(user)
         db.flush()
+        # The setup UI only submits after the parent confirms that the recovery
+        # phrase has been stored. Persist that fact so guided onboarding reflects
+        # the completed security step without retaining the phrase itself.
+        db.add(
+            Setting(
+                key="recovery_acknowledged_at",
+                value=datetime.now(UTC).isoformat(),
+            )
+        )
         log_action(
             db, actor=str(user.id), action="setup.complete",
             target=str(user.id),

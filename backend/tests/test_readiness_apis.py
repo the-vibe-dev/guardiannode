@@ -5,7 +5,15 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import Alert, ChildProfile, Device, Event, NotificationJob, RiskResult
+from app.db.models import (
+    Alert,
+    ChildProfile,
+    Device,
+    DeviceCommand,
+    Event,
+    NotificationJob,
+    RiskResult,
+)
 from app.services import event_ingest
 
 
@@ -127,6 +135,46 @@ def test_settings_audit_and_storage_endpoints(monkeypatch, tmp_path):
     assert any(row["action"] == "settings.retention.update" for row in audit)
 
 
+def test_setup_records_recovery_acknowledgement_and_consent_can_be_withdrawn(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+
+    onboarding = client.get("/api/onboarding/status")
+    assert onboarding.status_code == 200
+    recovery = next(
+        step for step in onboarding.json()["steps"] if step["id"] == "recovery"
+    )
+    assert recovery["complete"] is True
+
+    notice_version = client.get("/api/consent").json()["notice_version"]
+    granted = client.post(
+        "/api/consent",
+        json={
+            "notice_version": notice_version,
+            "choices": {
+                "screenshots": True,
+                "apps_and_urls": True,
+                "retention": True,
+                "notifications": False,
+                "external_ai": False,
+                "child_notice_acknowledged": True,
+            },
+        },
+    )
+    assert granted.status_code == 200
+    assert granted.json()["active"] is True
+
+    withdrawn = client.post(
+        "/api/consent/withdraw", json={"evidence_disposition": "retain"}
+    )
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["active"] is False
+    assert withdrawn.json()["record"]["choices"] == {
+        "evidence_disposition": "retain"
+    }
+
+
 def test_profile_delete_refuses_referenced_profile(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     r = client.post(
@@ -225,7 +273,29 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
     unsupported = client.post(
         "/api/alerts/action-alert/action", json={"action": "pause_app"}
     )
-    assert unsupported.status_code == 501
+    assert unsupported.status_code == 409
+
+    preview = client.post(
+        "/api/alerts/action-alert/actions",
+        json={
+            "action": "pause_app",
+            "target": r"C:\Games\Chat.exe",
+            "duration_seconds": 900,
+        },
+    )
+    assert preview.status_code == 409
+    exact = preview.json()["detail"]["preview"]
+    queued = client.post(
+        "/api/alerts/action-alert/actions",
+        json={
+            "action": "pause_app",
+            "target": r"C:\Games\Chat.exe",
+            "duration_seconds": 900,
+            "confirmed_preview": exact,
+        },
+    )
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "queued"
 
     notified = client.post(
         "/api/alerts/action-alert/action", json={"action": "notify"}
@@ -236,6 +306,9 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
     db = get_sessionmaker()()
     try:
         assert db.query(NotificationJob).filter_by(alert_id="action-alert", status="queued").count() == 1
+        assert db.query(DeviceCommand).filter_by(
+            alert_id="action-alert", command_type="pause_app", status="queued"
+        ).count() == 1
     finally:
         db.close()
 

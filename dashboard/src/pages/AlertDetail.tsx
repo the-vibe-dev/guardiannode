@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import SeverityBadge from "../components/SeverityBadge";
 import GuardianReviewPanel from "../components/GuardianReviewPanel";
 import { formatDateTime } from "../utils/datetime";
@@ -13,6 +13,10 @@ export default function AlertDetail() {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showFullText, setShowFullText] = useState(false);
+  const [enforcementTarget, setEnforcementTarget] = useState("");
+  const [enforcementAction, setEnforcementAction] = useState("show_child_prompt");
+  const [enforcementMessage, setEnforcementMessage] = useState("");
+  const [enforcementDuration, setEnforcementDuration] = useState(900);
 
   useEffect(() => {
     if (id) api.alert(id).then(setDetail).catch((e) => setError(e.message));
@@ -55,6 +59,41 @@ export default function AlertDetail() {
       setTimeout(() => setActionMsg(null), 3000);
     } catch (e: any) {
       setError(`Feedback failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmedAction() {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    setActionMsg(null);
+    const body = {
+      action: enforcementAction,
+      ...(enforcementTarget ? { target: enforcementTarget } : {}),
+      ...(enforcementAction === "pause_app" ? { duration_seconds: enforcementDuration } : {}),
+      ...(enforcementAction === "show_child_prompt" ? { message: enforcementMessage } : {}),
+    };
+    try {
+      await api.confirmedAlertAction(id, body);
+    } catch (error) {
+      const preview = error instanceof ApiError ? error.body?.detail?.preview : null;
+      if (!preview) {
+        setError(`Action failed: ${(error as Error).message}`);
+        setBusy(false);
+        return;
+      }
+      if (!window.confirm(`${preview}\n\nGuardianNode will send this command only because you confirmed it. Continue?`)) {
+        setBusy(false);
+        return;
+      }
+      try {
+        const result = await api.confirmedAlertAction(id, { ...body, confirmed_preview: preview });
+        setActionMsg(`✓ Parent-confirmed action queued (${result.status})`);
+      } catch (secondError) {
+        setError(`Action failed: ${(secondError as Error).message}`);
+      }
     } finally {
       setBusy(false);
     }
@@ -139,6 +178,18 @@ export default function AlertDetail() {
       </div>
 
       <GuardianReviewPanel alertId={id!} detail={detail} />
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="font-display font-semibold text-[#18313a]">Parent-confirmed device action</h2>
+        <p className="mt-1 text-sm text-slate-600">GuardianNode never takes these actions from a classifier result. You will see and confirm the exact command first.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="text-sm"><span className="mb-1 block text-xs font-medium text-slate-600">Action</span><select value={enforcementAction} onChange={(e) => setEnforcementAction(e.target.value)} className="min-h-11 w-full rounded-lg border border-slate-300 px-3"><option value="show_child_prompt">Show a notice to the child</option><option value="pause_app">Pause an app temporarily</option><option value="block_domain">Block one domain</option><option value="delete_evidence">Delete this evidence</option></select></label>
+          {enforcementAction === "pause_app" && <label className="text-sm"><span className="mb-1 block text-xs font-medium text-slate-600">Duration</span><select value={enforcementDuration} onChange={(e) => setEnforcementDuration(Number(e.target.value))} className="min-h-11 w-full rounded-lg border border-slate-300 px-3"><option value={900}>15 minutes</option><option value={3600}>1 hour</option><option value={86400}>24 hours</option></select></label>}
+          {enforcementAction === "show_child_prompt" && <label className="text-sm sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-600">Child-facing message</span><textarea value={enforcementMessage} onChange={(e) => setEnforcementMessage(e.target.value)} maxLength={500} rows={3} className="w-full rounded-lg border border-slate-300 p-3" placeholder="Use calm, supportive language…" /></label>}
+          {(enforcementAction === "pause_app" || enforcementAction === "block_domain") && <label className="text-sm sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-600">{enforcementAction === "pause_app" ? "Exact absolute .exe path" : "Exact domain"}</span><input value={enforcementTarget} onChange={(e) => setEnforcementTarget(e.target.value)} className="min-h-11 w-full rounded-lg border border-slate-300 px-3" placeholder={enforcementAction === "pause_app" ? "C:\\Program Files\\Example\\Example.exe" : "example.com"} /></label>}
+        </div>
+        <button onClick={confirmedAction} disabled={busy} className={`mt-4 min-h-11 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${enforcementAction === "delete_evidence" ? "bg-red-700 hover:bg-red-800" : "bg-[#0d3b4a] hover:bg-[#164f60]"}`}>Preview exact action…</button>
+      </section>
 
       {/* Event + Classification */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

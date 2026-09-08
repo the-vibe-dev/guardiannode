@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -56,7 +57,7 @@ class NotificationSettings(BaseModel):
     webhook_allow_private: bool = False
     immediate_min_severity: str = Field(default="high", pattern="^(critical|high|medium|low)$")
     daily_digest_enabled: bool = True
-    daily_digest_time: str = "08:00"
+    daily_digest_time: str = Field(default="08:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
 def _public_notifications(data: dict[str, Any]) -> dict[str, Any]:
@@ -132,6 +133,46 @@ def update_notifications(
     )
     db.commit()
     return _public_notifications(data)
+
+
+class FamilyLocaleSettings(BaseModel):
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+
+
+@router.get("/family-locale")
+def get_family_locale(
+    db: Session = Depends(get_db_dep),
+    _: User = Depends(current_user),
+):
+    row = db.get(Setting, "family_timezone")
+    return {"timezone": row.value if row and row.value else "UTC"}
+
+
+@router.patch("/family-locale")
+def update_family_locale(
+    req: FamilyLocaleSettings,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(current_user),
+):
+    try:
+        ZoneInfo(req.timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(422, "Unknown IANA timezone") from exc
+    row = db.get(Setting, "family_timezone")
+    if row is None:
+        db.add(Setting(key="family_timezone", value=req.timezone))
+    else:
+        row.value = req.timezone
+    log_action(
+        db,
+        actor=str(user.id),
+        action="settings.family_locale.update",
+        details={"timezone": req.timezone},
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return {"timezone": req.timezone}
 
 
 @router.post("/notifications/test")
@@ -226,7 +267,6 @@ class BackupSettings(BaseModel):
     retention_count: int = Field(default=7, ge=1, le=365)
     interval_seconds: int = Field(default=86400, ge=300, le=31_536_000)
     incremental_evidence: bool = False
-    hook_argv: list[str] = Field(default_factory=list, max_length=16)
 
 
 def _backup_public(config: dict[str, Any]) -> dict[str, Any]:
@@ -282,8 +322,6 @@ def update_backups(
             status_code=422,
             detail="Incremental evidence chains are not enabled in this release; use complete backups",
         )
-    if any(not item or len(item) > 1024 for item in data["hook_argv"]):
-        raise HTTPException(status_code=422, detail="Backup hook arguments must be 1-1024 characters")
     if data["recipient_public_key"]:
         try:
             key = backup_worker._public_key(data["recipient_public_key"])

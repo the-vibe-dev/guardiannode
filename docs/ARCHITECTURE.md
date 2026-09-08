@@ -21,8 +21,8 @@ GuardianNode cloud by default.
                     │  │     GN Tray + Watchdog       │  │
                     │  └──────────────┬───────────────┘  │
                     └─────────────────┼──────────────────┘
-                                      │ HTTP on loopback/LAN by default
-                                      │ (use VPN/TLS for stronger transport)
+                                      │ pinned family-CA HTTPS
+                                      │ + device credential
                     ┌─────────────────▼──────────────────┐
                     │     Backend (Win or Linux)         │
                     │  ┌──────────────────────────────┐  │
@@ -53,8 +53,9 @@ In all-in-one mode the entire stack runs on one PC, bound to `127.0.0.1`.
    session. Current installer defaults enable full visible-screen capture; app
    names remain important context, and narrower app-gated capture is available
    through policy/config.
-2. **Transmit.** Loopback HTTP (all-in-one) or LAN HTTP/VPN/TLS (separated) to
-   the backend.
+2. **Transmit.** Family-CA HTTPS to the backend. The child agent pins the exact
+   CA and server URL from an expiring `.gnpair` bundle. Loopback HTTP is limited
+   to explicit source development.
 3. **Optional filtering.** Some paths apply basic text filtering/redaction. This
    is best-effort hygiene, not a certainty.
 4. **Rules engine.** Deterministic regex/phrase rules score the event for known patterns.
@@ -99,7 +100,8 @@ docker/              Docker assets for self-hosted server
 - **AES-GCM via Python `cryptography`** — well-audited, available on all platforms, no SQLCipher native build pain.
 - **Ollama HTTP API** — abstracts the runtime; we never link to model code directly. Lets us swap llama.cpp/vLLM/MLC underneath.
 - **Argon2id for passwords** — current best practice for password hashing.
-- **mDNS for server discovery** — discovery may show candidate endpoints, but it does not authenticate or automatically trust them. Child devices still need an explicit parent-approved server URL or a future pinned pairing flow.
+- **mDNS for discovery only** — discovery never establishes trust. Child devices
+  enroll the exact URL and family CA from the parent-approved pairing bundle.
 - **Inno Setup for Windows** — actively maintained, free, scriptable. WiX/MSI is more "enterprise" but parents don't run MSIs.
 - **WinSW for service wrapping** — better logging than NSSM, MIT licensed.
 - **Screenshot + server-side OCR** — one collection path (no per-browser extension to install or maintain); the vision/text classifier reads whatever is actually on screen.

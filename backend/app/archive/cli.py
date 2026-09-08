@@ -19,6 +19,7 @@ from app.archive.format import (
     restore_archive,
     verify_archive,
 )
+from app.archive.identity import export_public_identity, load_public_identity
 from app.services import encryption
 
 
@@ -44,6 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
     keygen = commands.add_parser("keygen", help="generate an offline recovery recipient key")
     keygen.add_argument("private_key", type=Path)
     keygen.add_argument("public_key", type=Path)
+    signer = commands.add_parser(
+        "signer-export", help="export the archive signer for an offline recovery kit"
+    )
+    signer.add_argument("public_key", type=Path)
     inspect = commands.add_parser("inspect", help="show public archive metadata")
     inspect.add_argument("archive", type=Path)
     verify = commands.add_parser("verify", help="authenticate and verify an archive")
@@ -57,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("archive", type=Path)
     restore.add_argument("--target", type=Path, required=True)
     restore.add_argument("--dry-run", action="store_true")
+    restore.add_argument(
+        "--trusted-signer", type=Path, required=True,
+        help="Ed25519 signer public key from the offline recovery kit",
+    )
     _add_unlock(restore, instance=False)
     create = commands.add_parser("create", help="create a complete archive from this instance")
     create.add_argument("destination", type=Path)
@@ -72,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "keygen":
             fingerprint = crypto.generate_recipient_key(args.private_key, args.public_key)
             result = {"private_key": str(args.private_key), "public_key": str(args.public_key), "fingerprint": fingerprint}
+        elif args.command == "signer-export":
+            fingerprint = export_public_identity(
+                settings_mod.settings.keys_dir, args.public_key
+            )
+            result = {"public_key": str(args.public_key), "fingerprint": fingerprint}
         elif args.command == "inspect":
             result = inspect_archive(args.archive)
         elif args.command == "create":
@@ -94,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = restore_archive(
                     args.archive, args.target, passphrase=passphrase,
                     private_key=private, dry_run=args.dry_run,
+                    trusted_signer=load_public_identity(args.trusted_signer),
                 )
         print(json.dumps(result, indent=2, sort_keys=True, default=str))
         return 0

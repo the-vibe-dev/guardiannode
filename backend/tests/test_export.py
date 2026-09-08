@@ -101,7 +101,7 @@ def test_export_contains_encrypted_evidence_blobs(monkeypatch, tmp_path):
     from app.archive.format import verify_archive
 
     verified = verify_archive(export_path, master_key=encryption.get_master_key())
-    assert verified["manifest"]["format"] == "guardiannode-archive-manifest-v1"
+    assert verified["manifest"]["format"] == "guardiannode-archive-manifest-v2"
     assert verified["manifest"]["evidence"]["covered"] is True
     assert verified["manifest"]["evidence"]["file_count"] == 1
 

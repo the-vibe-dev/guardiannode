@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.services import pipeline_metrics, rate_limit
 from app.services.input_bounds import InputBoundsError, sanitize_metadata
+from app.services.request_limits import JSON_LIMIT, SMALL_DEVICE_LIMIT
 
 
 def _client(monkeypatch, tmp_path) -> TestClient:
@@ -72,3 +73,33 @@ def test_event_ingest_rejects_oversized_metadata(monkeypatch, tmp_path):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 422
+
+
+def test_oversized_event_is_rejected_before_device_auth(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/events",
+        content=b"x" * (JSON_LIMIT + 1),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.text == "Request body too large"
+
+
+def test_oversized_heartbeat_is_rejected_before_device_auth(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/devices/heartbeat",
+        content=b"x" * (SMALL_DEVICE_LIMIT + 1),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 413
+
+
+def test_under_limit_request_reaches_authentication(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/devices/heartbeat",
+        json={"queued_frames": 0},
+    )
+    assert response.status_code == 401

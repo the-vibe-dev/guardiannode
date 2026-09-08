@@ -18,7 +18,7 @@ and printed at the end of the build.
 Windows (PowerShell):
 
 ```powershell
-Get-FileHash .\GuardianNodeChildSetup-0.1.0-alpha.1.exe -Algorithm SHA256
+Get-FileHash .\GuardianNodeChildSetup-0.1.0-alpha.3.exe -Algorithm SHA256
 ```
 
 Compare the printed hash against the matching line in `SHA256SUMS` on the

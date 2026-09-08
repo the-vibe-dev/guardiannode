@@ -6,9 +6,9 @@ ready. GuardianNode currently makes no production-readiness claim.
 
 | Feature | Code | Automated coverage | Platform qualification | Field validation | Release status | Source module | Test reference |
 |---|---|---|---|---|---|---|---|
-| Parent dashboard | Present | Unit | Web bundle tested | Limited | Beta candidate | `dashboard/src/App.tsx` | `dashboard/src/components/Layout.test.tsx` |
+| Parent dashboard | Present | Unit + Playwright + axe | Linux Chromium tested | Limited | Beta candidate | `dashboard/src/App.tsx` | `dashboard/e2e/family-dashboard.spec.ts` |
 | Backend API and dashboard bundle | Present | Integration | Linux/Windows candidate | Limited | Beta candidate | `backend/app/main.py` | `backend/tests/test_readiness_apis.py` |
-| Device pairing | Present | Integration | Windows candidate | Validated | Beta candidate | `backend/app/services/pairing.py` | `backend/tests/test_device_auth.py` |
+| Family-CA HTTPS pairing | Present | Integration | Windows candidate | Not yet requalified | Beta candidate | `agent-windows/src/pairing_client.py` | `agent-windows/tests/test_pairing_bootstrap.py` |
 | Local all-in-one bootstrap | Present | Integration | Windows candidate | Validated | Experimental | `backend/app/api/devices.py` | `backend/tests/test_pairing_local_bootstrap.py` |
 | Screenshot upload and classification | Present | Integration | Windows candidate | Validated | Beta candidate | `backend/app/services/screenshot_async.py` | `backend/tests/test_image_mime.py` |
 | Server-side OCR | Present | Clean-container canary | Docker qualified | Limited | Beta candidate | `backend/app/services/ocr.py` | `scripts/docker_canary.py` |
@@ -23,8 +23,13 @@ ready. GuardianNode currently makes no production-readiness claim.
 | Windows watchdog | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/watchdog.py` | `agent-windows/tests/test_watchdog.py` |
 | Durable encrypted agent queue | Present | Unit | Windows candidate | Limited | Experimental | `agent-windows/src/durable_queue.py` | `agent-windows/tests/test_durable_queue.py` |
 | Privileged Windows broker | Present | Unit | Windows candidate | Validated | Experimental | `agent-windows/src/broker_service.py` | `agent-windows/tests/test_broker_service.py` |
+| Parent-confirmed endpoint actions | Present | Unit + integration | Windows candidate | None | Experimental | `agent-windows/src/enforcement.py` | `agent-windows/tests/test_enforcement.py` |
+| Explicit consent and withdrawal | Present | Integration + browser | Source qualified | None | Beta candidate | `backend/app/api/consent.py` | `backend/tests/test_readiness_apis.py` |
+| Child request queue | Present | Integration + browser | Source qualified | None | Beta candidate | `backend/app/api/child_requests.py` | `dashboard/e2e/family-dashboard.spec.ts` |
+| Metadata-only daily digest | Present | Unit | Source qualified | None | Experimental | `backend/app/services/daily_digest.py` | `backend/tests/test_daily_digest.py` |
 | Docker Compose deployment | Present | Clean OCR-to-alert canary | Linux CI qualified | CI validated | Closed-beta candidate | `installer/server-linux/docker-compose.yml` | `scripts/docker_canary.py` |
-| Built-in TLS/mTLS separated mode | Absent | None | Not qualified | None | Planned | Planned transport layer | Not implemented |
+| Built-in server-authenticated TLS | Present | Unit + integration | Not yet platform qualified | None | Beta candidate | `backend/app/services/local_tls.py` | `backend/tests/test_local_tls.py` |
+| Mutual TLS/device certificates | Absent | None | Not qualified | None | Planned | Planned transport layer | Not implemented |
 | Automatic application updates | Absent | None | Not qualified | None | Planned | Planned updater | Not implemented |
 
 See [Closed Beta Release Gates](RELEASE_GATES.md) for promotion requirements and

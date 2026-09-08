@@ -41,6 +41,26 @@ def identity_path(keys_dir: Path) -> Path:
     return keys_dir / "instance-identity.json"
 
 
+def export_public_identity(keys_dir: Path, destination: Path) -> str:
+    """Write the archive-signing public key for an offline recovery kit."""
+    if destination.exists():
+        raise FileExistsError(f"refusing to overwrite recovery signer: {destination}")
+    identity = load_or_create(keys_dir)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(identity.public_key.public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ))
+    return identity.fingerprint
+
+
+def load_public_identity(path: Path) -> Ed25519PublicKey:
+    key = serialization.load_pem_public_key(path.read_bytes())
+    if not isinstance(key, Ed25519PublicKey):
+        raise ValueError("recovery signer must be an Ed25519 public key")
+    return key
+
+
 def _write_private(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")

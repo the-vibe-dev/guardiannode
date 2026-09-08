@@ -23,7 +23,13 @@ from src import __version__
 from src.backend_client import BackendClient
 from src.config import AgentConfig, default_config_path
 from src.durable_queue import DurableScreenshotQueue
-from src.pairing_client import bootstrap_pairing, load_credentials, pair_with_server, save_credentials
+from src.pairing_client import (
+    bootstrap_pairing,
+    enroll_pairing_bundle,
+    load_credentials,
+    pair_with_server,
+    save_credentials,
+)
 from src.process_watcher import get_active_process, is_monitored
 from src.screenshot_capture import capture_active, capture_full, hamming
 from src.window_tracker import get_active_window
@@ -433,6 +439,7 @@ async def refresh_pairing_credentials(
     backend_url = str(creds.get("backend_url") or client.base_url).rstrip("/")
     client.base_url = backend_url
     client.token = str(creds["device_token"])
+    client.ca_path = str(creds.get("ca_path") or "") or None
     cfg.backend_url = backend_url
     cfg.device_id = str(creds.get("device_id") or cfg.device_id)
     cfg.device_token = client.token
@@ -448,8 +455,11 @@ async def pairing_monitor_loop(client: BackendClient, cfg: AgentConfig) -> None:
         await asyncio.sleep(30)
 
 
-async def main_async(cfg: AgentConfig) -> None:
+async def main_async(cfg: AgentConfig, *, broker_capture_authorized: bool = True) -> None:
     if os.name == "nt" and cfg.broker_enabled and not cfg.dry_run:
+        if not broker_capture_authorized:
+            log.warning("capture process was not launched by the GuardianNode broker; exiting")
+            return
         from src.broker_client import BrokerScreenshotQueue
 
         screenshot_queue = BrokerScreenshotQueue()
@@ -480,7 +490,7 @@ async def main_async(cfg: AgentConfig) -> None:
         )
     else:
         screenshot_queue = asyncio.Queue(maxsize=20)
-    client = BackendClient(backend_url, token)
+    client = BackendClient(backend_url, token, ca_path=creds.get("ca_path"))
 
     log.info(
         "agent started: backend=%s cadence=%ds monitored_apps=%d",
@@ -527,8 +537,14 @@ def cli() -> None:
     parser.add_argument("--dry-run", action="store_true", help="don't send events, just log")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--pair", action="store_true", help="pair with a backend and exit")
-    parser.add_argument("--server", help="backend URL for --pair (e.g. http://192.168.1.42:8787)")
+    parser.add_argument("--broker-capture", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--server", help="exact backend URL for --pair")
     parser.add_argument("--code", help="6-digit pairing code for --pair")
+    parser.add_argument(
+        "--pair-bundle",
+        type=Path,
+        help="parent-exported .gnpair trust bundle (required for HTTPS pairing)",
+    )
     args = parser.parse_args()
 
     # File handler so a --windowed (no-console) PyInstaller bundle still leaves a trail.
@@ -563,12 +579,32 @@ def cli() -> None:
         if not args.code:
             parser.error("--pair requires --code (and usually --server)")
         server = args.server or cfg.backend_url
+        ca_path = None
+        ca_sha256 = ""
         try:
-            device_id, token = pair_with_server(server, args.code, socket.gethostname(), agent_version=__version__)
+            if args.pair_bundle:
+                server, ca_path, ca_sha256 = enroll_pairing_bundle(
+                    args.pair_bundle,
+                    backend_url=args.server,
+                )
+            device_id, token = pair_with_server(
+                server,
+                args.code,
+                socket.gethostname(),
+                agent_version=__version__,
+                ca_path=ca_path,
+                allow_loopback_http=True,
+            )
         except Exception as e:
             log.error("pairing failed: %s", e)
             raise SystemExit(1)
-        path = save_credentials(device_id, token, server)
+        path = save_credentials(
+            device_id,
+            token,
+            server,
+            ca_path=ca_path,
+            ca_sha256=ca_sha256,
+        )
         log.info("paired with %s as device %s (credentials: %s)", server, device_id, path)
         print(f"Paired successfully. Device ID: {device_id}")
         return
@@ -583,7 +619,7 @@ def cli() -> None:
 
     log.info("GuardianNode agent %s starting (hostname=%s)", __version__, socket.gethostname())
     try:
-        asyncio.run(main_async(cfg))
+        asyncio.run(main_async(cfg, broker_capture_authorized=args.broker_capture))
     except KeyboardInterrupt:
         log.info("agent stopped by user")
 

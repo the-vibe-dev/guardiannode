@@ -114,12 +114,15 @@ async def ingest(
             score=0,
             categories=[],
         )
-    result = await event_ingest.ingest_event(
-        db,
-        payload=req.model_dump(),
-        device_id=device.device_id,
-        source_ip=request.client.host if request.client else None,
-    )
+    try:
+        result = await event_ingest.ingest_event(
+            db,
+            payload=req.model_dump(),
+            device_id=device.device_id,
+            source_ip=request.client.host if request.client else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     db.commit()
     return IngestResponse(**result)
 
@@ -263,13 +266,6 @@ async def ingest_screenshot(
         # Honor pause server-side: drop quietly, don't store.
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
 
-    if screenshot_async.pending_count() >= screenshot_async.max_pending():
-        raise HTTPException(
-            503,
-            "Screenshot classifier backlog is full",
-            headers={"Retry-After": "30"},
-        )
-
     image_bytes = await _read_upload_with_cap(image)
     if not image_bytes:
         raise HTTPException(400, "Empty image")
@@ -278,6 +274,13 @@ async def ingest_screenshot(
     if capture_scope not in {"monitored_app", "visible_desktop", "browser_dom"}:
         raise HTTPException(400, "Invalid capture scope")
     mime_type = _validate_image_bytes(image_bytes)
+    accepted, capacity_detail = screenshot_async.can_accept(device.device_id, len(image_bytes))
+    if not accepted:
+        raise HTTPException(
+            503,
+            capacity_detail or "Screenshot classifier backlog is full",
+            headers={"Retry-After": "30"},
+        )
 
     # Update device liveness now (don't wait for classification).
     device.last_seen = datetime.now(UTC)

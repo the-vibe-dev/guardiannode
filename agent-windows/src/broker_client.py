@@ -90,23 +90,6 @@ class BrokerClient:
                 broker_payload[key] = value
         return self.request("submit_screenshot", broker_payload)
 
-    def pause(self, duration_seconds: int, *, actor: str = "local-parent", parent_password: str) -> dict[str, Any]:
-        return self.request(
-            "pause",
-            {
-                "duration_seconds": duration_seconds,
-                "actor": actor,
-                "parent_password": parent_password,
-            },
-        )
-
-    def resume(self, *, actor: str = "local-parent", parent_password: str) -> dict[str, Any]:
-        return self.request("resume", {"actor": actor, "parent_password": parent_password})
-
-    def verify_parent(self, parent_password: str, *, actor: str = "local-parent") -> dict[str, Any]:
-        return self.request("verify_parent", {"actor": actor, "parent_password": parent_password})
-
-
 class BrokerScreenshotQueue:
     """asyncio.Queue-compatible capture sink backed by the endpoint broker."""
 

@@ -1,5 +1,23 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
-html, body, #root { height: 100%; }
-body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+:root {
+  color: #18313a;
+  background: #f3f6f8;
+  font-synthesis: none;
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  margin: 0;
+  background: #f3f6f8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, a, input, select, textarea { outline-offset: 3px; }
+:focus-visible { outline: 3px solid #7ec6f5; }
+.page-status { padding: 3rem 1rem; color: #64748b; text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}

@@ -17,6 +17,8 @@ import os
 import secrets
 import struct
 import sys
+import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-from app.settings import settings
+from app import settings as settings_mod
 
 _MASTER_KEY_FILE = "master.key"
 _MASTER_KEY_DPAPI_FILE = "master.key.dpapi"
@@ -47,27 +49,73 @@ class EncryptionError(Exception):
 
 
 def _key_path() -> Path:
-    return settings.keys_dir / _MASTER_KEY_FILE
+    return settings_mod.settings.keys_dir / _MASTER_KEY_FILE
 
 
 def _dpapi_key_path() -> Path:
-    return settings.keys_dir / _MASTER_KEY_DPAPI_FILE
+    return settings_mod.settings.keys_dir / _MASTER_KEY_DPAPI_FILE
 
 
 def _metadata_path() -> Path:
-    return settings.keys_dir / _MASTER_KEY_METADATA_FILE
+    return settings_mod.settings.keys_dir / _MASTER_KEY_METADATA_FILE
 
 
 def _write_restricted(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
-    tmp.write_bytes(data)
-    if os.name != "nt":
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-    os.replace(tmp, path)
+    try:
+        with tmp.open("wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name != "nt":
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+        os.replace(tmp, path)
+        if os.name != "nt":
+            try:
+                directory_fd = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+@contextmanager
+def _master_key_file_lock():
+    """Serialize key initialization across backend processes."""
+    lock_path = settings_mod.settings.keys_dir / ".master-key.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as stream:
+        if os.name == "nt":  # pragma: no cover - exercised by Windows qualification
+            import msvcrt
+
+            stream.seek(0)
+            if stream.read(1) == b"":
+                stream.write(b"0")
+                stream.flush()
+            stream.seek(0)
+            locking = msvcrt.locking  # type: ignore[attr-defined]
+            locking(stream.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+            try:
+                yield
+            finally:
+                stream.seek(0)
+                locking(stream.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def _load_raw_key(path: Path) -> bytes:
@@ -110,8 +158,9 @@ def _dpapi_protect(data: bytes) -> bytes:
         raise EncryptionError("DPAPI is only available on Windows")
     from ctypes import wintypes
 
-    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    win_dll = ctypes.WinDLL  # type: ignore[attr-defined]
+    crypt32 = win_dll("crypt32", use_last_error=True)
+    kernel32 = win_dll("kernel32", use_last_error=True)
     crypt32.CryptProtectData.argtypes = [
         ctypes.POINTER(_DataBlob),
         wintypes.LPCWSTR,
@@ -138,7 +187,8 @@ def _dpapi_protect(data: bytes) -> bytes:
         ctypes.byref(out_blob),
     )
     if not ok:
-        raise EncryptionError(f"DPAPI CryptProtectData failed: {ctypes.get_last_error()}")
+        last_error = ctypes.get_last_error()  # type: ignore[attr-defined]
+        raise EncryptionError(f"DPAPI CryptProtectData failed: {last_error}")
     try:
         return _bytes_from_blob(out_blob)
     finally:
@@ -150,8 +200,9 @@ def _dpapi_unprotect(data: bytes) -> bytes:
         raise EncryptionError("DPAPI is only available on Windows")
     from ctypes import wintypes
 
-    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    win_dll = ctypes.WinDLL  # type: ignore[attr-defined]
+    crypt32 = win_dll("crypt32", use_last_error=True)
+    kernel32 = win_dll("kernel32", use_last_error=True)
     crypt32.CryptUnprotectData.argtypes = [
         ctypes.POINTER(_DataBlob),
         ctypes.POINTER(wintypes.LPWSTR),
@@ -178,7 +229,8 @@ def _dpapi_unprotect(data: bytes) -> bytes:
         ctypes.byref(out_blob),
     )
     if not ok:
-        raise EncryptionError(f"DPAPI CryptUnprotectData failed: {ctypes.get_last_error()}")
+        last_error = ctypes.get_last_error()  # type: ignore[attr-defined]
+        raise EncryptionError(f"DPAPI CryptUnprotectData failed: {last_error}")
     try:
         plaintext = _bytes_from_blob(out_blob)
     finally:
@@ -204,36 +256,42 @@ def _store_master_key(key: bytes, *, migrated_from: str | None = None) -> None:
 
 
 def _load_or_generate_master_key() -> bytes:
-    settings.ensure_dirs()
-    raw_path = _key_path()
-    dpapi_path = _dpapi_key_path()
-    if os.name == "nt" and dpapi_path.exists():
-        key = _dpapi_unprotect(dpapi_path.read_bytes())
-        if not _metadata_path().exists():
-            _write_key_metadata(wrapping="dpapi-local-machine")
-        return key
-    if raw_path.exists():
-        key = _load_raw_key(raw_path)
-        if os.name == "nt":
-            # Preserve compatibility with existing alpha installs. The raw key
-            # remains in place until an administrator removes it after backup.
-            _write_dpapi_key(key, migrated_from="raw-file")
-        elif not _metadata_path().exists():
-            _write_key_metadata(wrapping="raw-file")
-        return key
+    settings_mod.settings.ensure_dirs()
+    with _master_key_file_lock():
+        # Re-check after taking the cross-process lock: another worker may have
+        # created the key while this process waited.
+        raw_path = _key_path()
+        dpapi_path = _dpapi_key_path()
+        if os.name == "nt" and dpapi_path.exists():
+            key = _dpapi_unprotect(dpapi_path.read_bytes())
+            if not _metadata_path().exists():
+                _write_key_metadata(wrapping="dpapi-local-machine")
+            return key
+        if raw_path.exists():
+            key = _load_raw_key(raw_path)
+            if os.name == "nt":
+                # Preserve compatibility with existing alpha installs. The raw key
+                # remains in place until an administrator removes it after backup.
+                _write_dpapi_key(key, migrated_from="raw-file")
+            elif not _metadata_path().exists():
+                _write_key_metadata(wrapping="raw-file")
+            return key
 
-    key = secrets.token_bytes(32)
-    _store_master_key(key)
-    return key
+        key = secrets.token_bytes(32)
+        _store_master_key(key)
+        return key
 
 
 _master_key_cache: bytes | None = None
+_master_key_cache_lock = threading.Lock()
 
 
 def get_master_key() -> bytes:
     global _master_key_cache
     if _master_key_cache is None:
-        _master_key_cache = _load_or_generate_master_key()
+        with _master_key_cache_lock:
+            if _master_key_cache is None:
+                _master_key_cache = _load_or_generate_master_key()
     return _master_key_cache
 
 
@@ -398,12 +456,19 @@ def _derive_backup_key(passphrase: str, salt: bytes, *, kdf: dict[str, Any] | No
     params = kdf or _KEY_BACKUP_KDF
     if params.get("name") != "scrypt":
         raise EncryptionError("Unsupported key-backup KDF")
+    try:
+        length = int(str(params["length"]))
+        n = int(str(params["n"]))
+        r = int(str(params["r"]))
+        p = int(str(params["p"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EncryptionError("Invalid key-backup KDF parameters") from exc
     return Scrypt(
         salt=salt,
-        length=int(params["length"]),
-        n=int(params["n"]),
-        r=int(params["r"]),
-        p=int(params["p"]),
+        length=length,
+        n=n,
+        r=r,
+        p=p,
     ).derive(passphrase.encode("utf-8"))
 
 

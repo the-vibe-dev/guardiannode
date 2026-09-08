@@ -50,7 +50,6 @@ def test_watchdog_launches_missing_processes_in_exact_active_sessions(monkeypatc
     watchdog.watchdog_once(api=fake)
 
     assert fake.launches == [
-        (3, Path("C:/GN/GuardianNodeAgent.exe")),
         (1, Path("C:/GN/GuardianNodeTray.exe")),
     ]
     assert task_runs == []
@@ -59,7 +58,7 @@ def test_watchdog_launches_missing_processes_in_exact_active_sessions(monkeypatc
 def test_watchdog_falls_back_to_task_when_exact_session_launch_fails(monkeypatch):
     fake = FakeSessionApi(
         active_sessions={7},
-        process_sessions={"GuardianNodeAgent.exe": set(), "GuardianNodeTray.exe": {7}},
+        process_sessions={"GuardianNodeTray.exe": set()},
         launch_result=False,
     )
     task_runs: list[str] = []
@@ -70,14 +69,14 @@ def test_watchdog_falls_back_to_task_when_exact_session_launch_fails(monkeypatch
 
     watchdog.watchdog_once(api=fake)
 
-    assert fake.launches == [(7, Path("C:/GN/GuardianNodeAgent.exe"))]
-    assert task_runs == ["GuardianNodeAgent"]
+    assert fake.launches == [(7, Path("C:/GN/GuardianNodeTray.exe"))]
+    assert task_runs == ["GuardianNodeTray"]
 
 
 def test_watchdog_falls_back_when_one_missing_session_launch_fails(monkeypatch):
     fake = FakeSessionApi(
         active_sessions={7, 8},
-        process_sessions={"GuardianNodeAgent.exe": set(), "GuardianNodeTray.exe": {7, 8}},
+        process_sessions={"GuardianNodeTray.exe": set()},
         launch_results={7: True, 8: False},
     )
     task_runs: list[str] = []
@@ -89,10 +88,10 @@ def test_watchdog_falls_back_when_one_missing_session_launch_fails(monkeypatch):
     watchdog.watchdog_once(api=fake)
 
     assert fake.launches == [
-        (7, Path("C:/GN/GuardianNodeAgent.exe")),
-        (8, Path("C:/GN/GuardianNodeAgent.exe")),
+        (7, Path("C:/GN/GuardianNodeTray.exe")),
+        (8, Path("C:/GN/GuardianNodeTray.exe")),
     ]
-    assert task_runs == ["GuardianNodeAgent"]
+    assert task_runs == ["GuardianNodeTray"]
 
 
 def test_watchdog_skips_user_processes_when_no_active_session(monkeypatch):

@@ -86,6 +86,7 @@ nav:
       - Install a server + child PC: PARENT_GUIDES/install-server-and-child.md
       - Child profiles & watch phrases: PARENT_GUIDES/profiles-and-watch-phrases.md
       - Privacy & alert settings: PARENT_GUIDES/privacy-and-alert-settings.md
+      - Child monitoring notice: CHILD_MONITORING_NOTICE.md
       - Get alerts by email: PARENT_GUIDES/email-alerts-setup.md
       - When Windows says "Protected your PC": PARENT_GUIDES/when-windows-says-protected-your-pc.md
       - If you forget your password: PARENT_GUIDES/if-you-forget-your-password.md
@@ -115,10 +116,13 @@ nav:
       - Power-user/source install: POWER_USER_INSTALL.md
       - End-to-end testing: E2E_TESTING.md
       - Closed beta release gates: RELEASE_GATES.md
+      - Controlled pilot protocol: PILOT_AND_FIELD_QUALITY.md
+      - Recovery and deletion drills: RECOVERY_AND_DELETION_DRILLS.md
       - Version support policy: VERSION_SUPPORT.md
       - Reproducible builds: REPRODUCIBLE_BUILDS.md
       - Windows source-agent validation: release-validation/windows-source-agent-2026-06-22.md
       - Windows beta qualification: release-validation/windows-beta-2026-07-09.md
+      - Beta hardening source validation: release-validation/beta-hardening-2026-08-17.md
       - Windows 11 alpha installer validation: release/windows-11-alpha-installer-validation.md
       - Repository controls: REPOSITORY_CONTROLS.md
       - Launch messaging: LAUNCH_MESSAGING.md
@@ -128,5 +132,7 @@ nav:
       - Safety boundaries: SAFETY_BOUNDARIES.md
       - Threat model: THREAT_MODEL.md
       - Administrative security: ADMIN_SECURITY.md
+      - Incident response: INCIDENT_RESPONSE.md
+      - Data destination/vendor inventory: VENDOR_INVENTORY.md
   - Roadmap: ROADMAP.md
   - Support: SUPPORT.md

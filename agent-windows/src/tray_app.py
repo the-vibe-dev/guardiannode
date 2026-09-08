@@ -1,18 +1,10 @@
-"""System tray icon + pause UX.
-
-Right-click -> Pause -> enter parent password -> pick duration -> request the
-local endpoint broker to pause capture.
-"""
+"""Child-visible system tray status and parent-dashboard shortcut."""
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
-import subprocess
 import sys
-import tempfile
-import tkinter as tk
 from pathlib import Path
 from typing import Callable
 
@@ -21,14 +13,6 @@ from src.config import AgentConfig, default_config_path
 from src.pairing_client import load_credentials
 
 log = logging.getLogger("guardiannode.tray")
-
-DURATIONS = [
-    ("15 minutes", 15 * 60),
-    ("1 hour", 60 * 60),
-    ("4 hours", 4 * 60 * 60),
-    ("Until reboot", 86400),  # ~24h cap; service restart resets
-]
-
 
 # Held for the process lifetime so the OS keeps the mutex alive.
 _instance_mutex = None
@@ -75,126 +59,9 @@ def _device_id() -> str | None:
     return creds.get("device_id")
 
 
-# --- Dialogs ---------------------------------------------------------------
-#
-# pystray menu callbacks run inside the tray's win32 message loop. Creating a
-# Tk window there never reliably gets foreground focus, so the password field
-# ignored keystrokes and the OK/Cancel buttons didn't respond. We therefore
-# render every dialog in a SEPARATE PROCESS (a re-exec of this same exe with
-# `--prompt`), which has its own clean main thread and message loop. The child
-# writes the result as JSON to a temp file we hand it.
-
-
-def _new_root(title: str) -> "tk.Tk":
-    root = tk.Tk()
-    root.title(title)
-    root.attributes("-topmost", True)
-    root.lift()
-    root.after(50, root.focus_force)
-    return root
-
-
-def _ask_password_dialog() -> str | None:
-    result: dict = {"value": None}
-    root = _new_root("GuardianNode — Parent verification")
-    root.geometry("380x170")
-    tk.Label(root, text="Enter your parent password:").pack(pady=(14, 6))
-    entry = tk.Entry(root, show="*", width=36)
-    entry.pack(pady=4)
-    entry.focus_set()
-
-    def _ok(*_):
-        result["value"] = entry.get()
-        root.destroy()
-
-    def _cancel(*_):
-        result["value"] = None
-        root.destroy()
-
-    btns = tk.Frame(root)
-    btns.pack(pady=12)
-    tk.Button(btns, text="OK", width=10, command=_ok, default="active").pack(side="left", padx=6)
-    tk.Button(btns, text="Cancel", width=10, command=_cancel).pack(side="left", padx=6)
-    root.bind("<Return>", _ok)
-    root.bind("<Escape>", _cancel)
-    root.protocol("WM_DELETE_WINDOW", _cancel)
-    root.mainloop()
-    return result["value"]
-
-
-def _ask_duration_dialog() -> int | None:
-    result: dict = {"value": None}
-    root = _new_root("Pause GuardianNode")
-    root.geometry("300x230")
-    tk.Label(root, text="Pause monitoring for:").pack(pady=10)
-    for label, seconds in DURATIONS:
-        def _pick(s=seconds):
-            result["value"] = s
-            root.destroy()
-        tk.Button(root, text=label, command=_pick, width=22).pack(pady=2)
-    tk.Button(root, text="Cancel", command=root.destroy, width=22).pack(pady=(8, 2))
-    root.protocol("WM_DELETE_WINDOW", root.destroy)
-    root.mainloop()
-    return result["value"]
-
-
-def _run_prompt_in_subprocess(kind: str) -> str | None:
-    """Re-exec this exe with --prompt <kind> to render the dialog cleanly."""
-    fd, out_path = tempfile.mkstemp(suffix=".gnprompt")
-    os.close(fd)
-    try:
-        if getattr(sys, "frozen", False):
-            args = [sys.executable, "--prompt", kind, "--out", out_path]
-        else:
-            args = [sys.executable, os.path.abspath(__file__), "--prompt", kind, "--out", out_path]
-        creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
-        subprocess.run(args, timeout=300, creationflags=creationflags)
-        raw = Path(out_path).read_text("utf-8") or "{}"
-        return json.loads(raw).get("value")
-    except Exception as e:
-        log.warning("prompt subprocess failed (%s); falling back to in-process dialog", e)
-        # Fallback keeps Exit/Pause usable even if the re-exec path breaks.
-        if kind == "password":
-            return _ask_password_dialog()
-        if kind == "duration":
-            d = _ask_duration_dialog()
-            return str(d) if d else None
-        return None
-    finally:
-        try:
-            os.remove(out_path)
-        except OSError:
-            pass
-
-
-def _ask_password() -> str | None:
-    return _run_prompt_in_subprocess("password")
-
-
-def _ask_duration() -> int | None:
-    val = _run_prompt_in_subprocess("duration")
-    try:
-        return int(val) if val else None
-    except (TypeError, ValueError):
-        return None
-
-
 def pause_flow() -> None:
-    pw = _ask_password()
-    if not pw:
-        return
-    duration = _ask_duration()
-    if not duration:
-        return
-    device_id = _device_id()
-    if not device_id:
-        log.warning("device not paired; cannot pause")
-        return
-    try:
-        BrokerClient().pause(duration, actor="local-tray", parent_password=pw)
-        log.info("requested broker pause for %d seconds", duration)
-    except Exception as e:
-        log.warning("pause failed: %s", e)
+    """Pause is parent-authoritative and therefore lives in the signed-in dashboard."""
+    _open_dashboard()
 
 
 def _pause_flag_path() -> str:
@@ -272,23 +139,10 @@ def _try_pystray() -> Callable[[], None] | None:
             icon.icon = yellow if is_paused() else green
 
         def _menu_resume(icon, item):  # noqa: ANN001
-            try:
-                pw = _ask_password()
-                if pw:
-                    BrokerClient().resume(actor="local-tray", parent_password=pw)
-            except Exception as e:
-                log.warning("resume failed: %s", e)
-            icon.icon = green
+            _open_dashboard()
 
         def _menu_exit(icon, item):  # noqa: ANN001
-            pw = _ask_password()
-            if not pw:
-                return
-            try:
-                BrokerClient().verify_parent(pw, actor="local-tray")
-                icon.stop()
-            except Exception as e:
-                log.warning("exit tray verification failed: %s", e)
+            icon.stop()
 
         def _status_text(*_args) -> str:
             # Diagnostics: which backend this device reports to + pairing state.
@@ -311,10 +165,10 @@ def _try_pystray() -> Callable[[], None] | None:
             pystray.MenuItem(_status_text, None, enabled=False),
             pystray.MenuItem(_device_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Pause monitoring", _menu_pause),
-            pystray.MenuItem("Resume", _menu_resume),
+            pystray.MenuItem("Pause monitoring in parent dashboard", _menu_pause),
+            pystray.MenuItem("Resume in parent dashboard", _menu_resume),
             pystray.MenuItem("Open dashboard", lambda *_: _open_dashboard()),
-            pystray.MenuItem("Exit tray (parent password required)", _menu_exit),
+            pystray.MenuItem("Exit tray", _menu_exit),
         )
         icon = pystray.Icon("GuardianNode", green if not is_paused() else yellow, "GuardianNode", menu)
         icon.run()
@@ -332,6 +186,7 @@ def _self_test() -> None:
     """Validate dependencies required by the frozen tray without opening UI."""
     import _tkinter  # noqa: F401
     import pystray  # noqa: F401
+    import tkinter as tk
     from PIL import Image  # noqa: F401
 
     interpreter = tk.Tcl()
@@ -342,8 +197,6 @@ def _self_test() -> None:
 def cli() -> None:
     parser = argparse.ArgumentParser(description="GuardianNode tray app")
     parser.add_argument("--config", default=str(default_config_path()))
-    parser.add_argument("--prompt", choices=["password", "duration"], help=argparse.SUPPRESS)
-    parser.add_argument("--out", help=argparse.SUPPRESS)
     parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -351,22 +204,6 @@ def cli() -> None:
 
     if args.self_test:
         _self_test()
-        return
-
-    # Dialog-rendering mode: a clean child process with its own main thread.
-    # Must run BEFORE the single-instance mutex so the tray can spawn it.
-    if args.prompt:
-        value = None
-        if args.prompt == "password":
-            value = _ask_password_dialog()
-        elif args.prompt == "duration":
-            d = _ask_duration_dialog()
-            value = str(d) if d else None
-        if args.out:
-            try:
-                Path(args.out).write_text(json.dumps({"value": value}), encoding="utf-8")
-            except Exception as e:
-                log.warning("could not write prompt result: %s", e)
         return
 
     if already_running():

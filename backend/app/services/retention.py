@@ -84,15 +84,18 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
         for blob in (
             session.query(EvidenceBlob).filter(EvidenceBlob.created_at < blob_cutoff).all()
         ):
-            for ev in session.query(Event).filter(Event.screenshot_blob_id == blob.blob_id).all():
-                ev.screenshot_blob_id = None
-            for ev in session.query(Event).filter(Event.image_blob_id == blob.blob_id).all():
-                ev.image_blob_id = None
-            purge.delete_blob(session, blob)
-            deleted["blobs"] += 1
+            if purge.delete_blob(session, blob):
+                for ev in session.query(Event).filter(Event.screenshot_blob_id == blob.blob_id).all():
+                    ev.screenshot_blob_id = None
+                for ev in session.query(Event).filter(Event.image_blob_id == blob.blob_id).all():
+                    ev.image_blob_id = None
+                deleted["blobs"] += 1
 
     # 4) Defensive sweep: blob rows whose event vanished some other way.
     deleted["blobs"] += purge.delete_orphaned_blob_files(session)
+    retry_counts = purge.retry_pending_deletions(session)
+    for key in ("alerts", "risk_results", "events", "blobs"):
+        deleted[key] += retry_counts[key]
 
     # 5) Audit logs
     audit_cutoff = _cutoff(r["audit_logs"])

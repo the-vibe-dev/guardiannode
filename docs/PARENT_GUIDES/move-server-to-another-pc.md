@@ -34,8 +34,9 @@ data.
 8. Start GuardianNode on the new server.
 9. Open the dashboard and confirm historical alerts, devices, and settings are
    present.
-10. Reconfigure each child-device agent to point to the new server URL, then test
-   that new events arrive.
+10. Re-pair each child device with a fresh code and `.gnpair` bundle from the
+    new server. This installs the new family CA pin and rotates its credential.
+11. Test that a synthetic event arrives from every device.
 
 Do not delete the old server data until you have verified the new server is
 working and you have a separate backup.
@@ -46,9 +47,11 @@ working and you have a separate backup.
   evidence master key.
 - If the evidence master key and portable backup are lost, encrypted evidence
   may not be recoverable.
-- Separated mode uses local-network HTTP unless you place GuardianNode behind
-  TLS, Tailscale, WireGuard, or a trusted reverse proxy.
-- Device token rotation during migration is planned, not currently automated.
+- Separated mode uses server-authenticated HTTPS with a local family CA. A VPN
+  is still recommended for network isolation; never expose the backend directly
+  to the public internet.
+- Device trust is deliberately re-enrolled after a server move rather than
+  silently copying a stale server identity.
 
 ## Planned Automated Migration
 

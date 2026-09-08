@@ -1,9 +1,39 @@
 // Typed API client. Uses cookie auth (no token to manage in localStorage).
+import type { components } from "./api-schema";
+
+export type Alert = components["schemas"]["AlertDTO"];
+export type AlertPage = components["schemas"]["AlertPage"];
+export type ChildRequest = components["schemas"]["ChildRequestDTO"];
+export type ChildRequestPage = components["schemas"]["ChildRequestPage"];
+export type Device = components["schemas"]["DeviceDTO"];
+export type Overview = components["schemas"]["Overview"];
+export type Profile = components["schemas"]["ProfileDTO"];
+export type PairStart = components["schemas"]["PairStartResponse"];
+
+export interface OnboardingStatus {
+  complete: boolean;
+  current_step: string | null;
+  steps: Array<{ id: string; complete: boolean }>;
+  checked_at: string;
+}
+
+export interface ConsentStatus {
+  notice_version: string;
+  active: boolean;
+  record: null | { consent_id: string; notice_version: string; status: string; choices: Record<string, unknown>; created_at: string };
+}
 
 const API_BASE = "/api";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 let cachedCsrfToken: string | null = null;
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public body: any) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 async function getCsrfToken(): Promise<string> {
   if (cachedCsrfToken) return cachedCsrfToken;
@@ -55,7 +85,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const body = await res.clone().json().catch(() => null);
     const message = body?.error?.message || body?.detail?.message ||
       (typeof body?.detail === "string" ? body.detail : null) || `Request failed (${res.status})`;
-    throw new Error(String(message));
+    throw new ApiError(String(message), res.status, body);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -88,9 +118,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ recovery_code, new_password }),
     }),
-  overview: () => request<any>("/dashboard/overview"),
-  devices: () => request<any[]>("/devices"),
-  startPair: () => request<{ code: string; expires_at: string }>("/devices/pair/start", { method: "POST" }),
+  overview: () => request<Overview>("/dashboard/overview"),
+  devices: () => request<Device[]>("/devices"),
+  startPair: () => request<PairStart>("/devices/pair/start", { method: "POST" }),
   pauseDevice: (device_id: string, duration_seconds: number) =>
     request<any>(`/devices/${device_id}/pause`, { method: "POST", body: JSON.stringify({ duration_seconds }) }),
   resumeDevice: (device_id: string) =>
@@ -101,7 +131,7 @@ export const api = {
     request<any>(`/devices/${device_id}/profile`, { method: "PATCH", body: JSON.stringify({ profile_id }) }),
   alerts: (params: Record<string, string> = {}) => {
     const q = new URLSearchParams(params).toString();
-    return request<any[]>(`/alerts${q ? `?${q}` : ""}`);
+    return request<AlertPage>(`/alerts${q ? `?${q}` : ""}`);
   },
   alert: (id: string) => request<any>(`/alerts/${id}`),
   guardianReviewProviders: () => request<any>("/guardian-review/providers"),
@@ -135,9 +165,12 @@ export const api = {
     request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes }) }),
   feedbackAlert: (id: string, feedback_type: string, notes?: string) =>
     request<any>(`/alerts/${id}/feedback`, { method: "POST", body: JSON.stringify({ feedback_type, notes }) }),
+  confirmedAlertAction: (id: string, body: { action: string; target?: string; duration_seconds?: number; message?: string; confirmed_preview?: string | null }) =>
+    request<any>(`/alerts/${id}/actions`, { method: "POST", body: JSON.stringify(body) }),
+  undoAction: (action_id: string) => request<any>(`/actions/${action_id}/undo`, { method: "POST" }),
   modelStatus: () => request<any>("/models/status"),
   testModel: (text: string) => request<any>("/models/test", { method: "POST", body: JSON.stringify({ text }) }),
-  profiles: () => request<any[]>("/profiles"),
+  profiles: () => request<Profile[]>("/profiles"),
   createProfile: (
     display_name: string,
     age_group: string,
@@ -169,6 +202,9 @@ export const api = {
     request<any>("/settings/notifications", { method: "PATCH", body: JSON.stringify(body) }),
   testNotificationSettings: () =>
     request<any>("/settings/notifications/test", { method: "POST" }),
+  familyLocale: () => request<{ timezone: string }>("/settings/family-locale"),
+  updateFamilyLocale: (timezone: string) =>
+    request<{ timezone: string }>("/settings/family-locale", { method: "PATCH", body: JSON.stringify({ timezone }) }),
   retentionSettings: () => request<any>("/settings/retention"),
   updateRetentionSettings: (body: any) =>
     request<any>("/settings/retention", { method: "PATCH", body: JSON.stringify(body) }),
@@ -195,5 +231,20 @@ export const api = {
     request<any>(`/policies/${profile_id}/effective`, {
       method: "PATCH",
       body: JSON.stringify({ config }),
+    }),
+  onboardingStatus: () => request<OnboardingStatus>("/onboarding/status"),
+  consentStatus: () => request<ConsentStatus>("/consent"),
+  grantConsent: (notice_version: string, choices: components["schemas"]["ConsentChoices"]) =>
+    request<ConsentStatus>("/consent", { method: "POST", body: JSON.stringify({ notice_version, choices }) }),
+  withdrawConsent: (evidence_disposition: "retain" | "delete") =>
+    request<ConsentStatus>("/consent/withdraw", { method: "POST", body: JSON.stringify({ evidence_disposition }) }),
+  childRequests: (params: Record<string, string> = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request<ChildRequestPage>(`/child-requests${q ? `?${q}` : ""}`);
+  },
+  reviewChildRequest: (request_id: string, status: "approved" | "denied" | "dismissed", response_note?: string) =>
+    request<ChildRequest>(`/child-requests/${request_id}/review`, {
+      method: "POST",
+      body: JSON.stringify({ status, response_note }),
     }),
 };

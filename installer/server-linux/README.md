@@ -22,23 +22,30 @@ What it does:
    GitHub-style top-level archive layouts
 5. Builds and import-checks a staged Python venv before replacing the live
    `/opt/guardiannode/src/` and `/opt/guardiannode/venv/`
-6. Archives the previous source/venv and rolls them back if the new service
-   fails its health check
-7. Installs Ollama via its upstream installer when needed
-8. Registers `guardiannode-backend.service` as systemd
-9. Starts the service and prints the local dashboard URL plus one-time setup token
+6. Rebinds the moved venv's editable metadata and entry-point shebang to the
+   final paths, then verifies that the packaged migration head is discoverable
+7. Archives the previous source/venv and rolls them back if finalization or the
+   new service health check fails
+8. Installs Ollama via its upstream installer when needed
+9. Registers `guardiannode-backend.service` as systemd
+10. Starts the service and prints the local dashboard URL plus one-time setup token
 
-Open the printed loopback URL in a browser on the server to complete first-run
-setup (admin account + recovery code). Fresh installs do not bind to the LAN.
+Open the printed `https://127.0.0.1:8787` URL in a browser on the server to
+complete first-run setup (admin account, recovery phrase, and consent). Fresh
+installs do not bind to the LAN. The service creates a private family CA and
+server certificate on first start; trust only that CA on parent-managed
+browsers that need dashboard access.
 For this alpha, enabling a separated-server deployment is a manual admin task:
-set both `GUARDIANNODE_BIND_HOST=0.0.0.0` and an explicit
-`GUARDIANNODE_ALLOWED_HOSTS` list in the systemd environment override, restart
-`guardiannode-backend`, and add an explicit firewall rule only for your trusted
-LAN or VPN.
+set `GUARDIANNODE_BIND_HOST=0.0.0.0`, an explicit
+`GUARDIANNODE_ALLOWED_HOSTS` list, and
+`GUARDIANNODE_ADVERTISED_SERVER_URL` with the exact child-reachable HTTPS
+origin in the systemd environment override. Restart `guardiannode-backend` and
+add an explicit firewall rule only for your trusted LAN or VPN.
 
 ```text
 GUARDIANNODE_BIND_HOST=0.0.0.0
 GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
+GUARDIANNODE_ADVERTISED_SERVER_URL=https://192.168.1.42:8787
 ```
 
 Replace the example IP/hostname with the exact LAN address/name child agents
@@ -91,11 +98,15 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 
 The host-network override requires `GUARDIANNODE_ALLOWED_HOSTS` in your shell,
 uses Docker Compose's `!reset` tag, and requires Docker Compose v2.24 or newer.
-Host networking exposes the backend according to `GUARDIANNODE_BIND_HOST` and
-the host firewall, so use it only on a trusted LAN/VPN after first-run setup.
+Host networking exposes the HTTPS backend according to
+`GUARDIANNODE_BIND_HOST` and the host firewall, so use it only on a trusted
+LAN/VPN after first-run setup. Include each child-reachable name or IP in
+`GUARDIANNODE_ALLOWED_HOSTS` and set the matching
+`GUARDIANNODE_ADVERTISED_SERVER_URL` before the certificate is issued.
 
-Do not expose the backend directly to the public internet. Use a trusted LAN,
-Tailscale/WireGuard, or a reverse proxy with TLS and access controls.
+Do not expose the backend directly to the public internet. Use a trusted LAN or
+Tailscale/WireGuard. A reverse proxy is an expert-only path because agents must
+pin its exact CA and URL during enrollment.
 
 Base and Ollama images are pinned by tag and manifest digest. Before a stable
 release, publish GuardianNode-built images with SBOM and provenance
@@ -119,7 +130,7 @@ docker exec guardiannode_ollama ollama pull llama3.2:3b
 docker exec guardiannode_ollama ollama pull qwen3-vl:8b-instruct
 ```
 
-Then open `http://127.0.0.1:8787/models` after setup to confirm the text and
+Then open `https://127.0.0.1:8787/models` after setup to confirm the text and
 vision endpoints can see the installed models.
 
 ## Uninstall

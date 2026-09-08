@@ -1,10 +1,10 @@
-"""Device token format, O(1) verification, legacy fallback, and abuse limits."""
+"""Device token format, keyed verification, beta break, and abuse limits."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
 from app.db.models import Device
-from app.services import device_tokens, pipeline_metrics, rate_limit
+from app.services import device_budget, device_tokens, pipeline_metrics, rate_limit
 from app.services.parent_auth import hash_password
 
 
@@ -15,6 +15,7 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     settings_mod.settings = settings_mod.Settings()
     settings_mod.settings.mdns_enabled = False
     rate_limit._clear_all()
+    device_budget.clear_for_tests()
     pipeline_metrics.reset_for_tests()
     from app.db.models import Base
     from app.db.session import get_engine
@@ -61,15 +62,14 @@ def test_new_pairing_issues_structured_token(monkeypatch, tmp_path):
     assert r.status_code == 200
 
 
-def test_legacy_opaque_token_still_authenticates(db_session):
+def test_legacy_opaque_token_is_rejected(db_session):
     legacy = "legacy-token-from-an-old-pairing"
     db_session.add(Device(
         device_id="olddev", hostname="old-pc", paired=True,
         token_hash=hash_password(legacy),
     ))
     db_session.commit()
-    device = device_tokens.authenticate(db_session, legacy)
-    assert device is not None and device.device_id == "olddev"
+    assert device_tokens.authenticate(db_session, legacy) is None
 
 
 def test_structured_token_with_wrong_secret_fails(db_session):
@@ -81,7 +81,7 @@ def test_structured_token_with_wrong_secret_fails(db_session):
     assert device_tokens.authenticate(db_session, "gn_dev_otherdev_whatever") is None
 
 
-def test_structured_token_full_hash_upgrade_fallback(db_session):
+def test_structured_token_with_legacy_password_hash_is_rejected(db_session):
     token, _token_hash = device_tokens.issue_token("dev1")
     db_session.add(Device(
         device_id="dev1",
@@ -90,7 +90,14 @@ def test_structured_token_full_hash_upgrade_fallback(db_session):
         token_hash=hash_password(token),
     ))
     db_session.commit()
-    assert device_tokens.authenticate(db_session, token) is not None
+    assert device_tokens.authenticate(db_session, token) is None
+
+
+def test_device_token_storage_is_keyed_digest_not_password_hash():
+    _token, token_hash = device_tokens.issue_token("dev1")
+    assert token_hash.startswith("hmac-sha256:")
+    assert token_hash.count(":") == 1
+    assert len(token_hash.removeprefix("hmac-sha256:")) == 64
 
 
 def test_revoked_device_token_fails(db_session):
@@ -167,3 +174,25 @@ def test_valid_auth_resets_failure_count(monkeypatch, tmp_path):
         headers={"Authorization": "Bearer wrong"},
     )
     assert r.status_code == 401
+
+
+def test_valid_device_heartbeat_has_per_device_burst_budget(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from app.services.device_bootstrap_token import ensure_device_bootstrap_token
+
+    paired = client.post(
+        "/api/devices/bootstrap-local",
+        json={"hostname": "kid-pc", "device_bootstrap_token": ensure_device_bootstrap_token()},
+    )
+    token = paired.json()["device_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for _ in range(3):
+        assert client.post(
+            "/api/devices/heartbeat", json={"queued_frames": 0}, headers=headers
+        ).status_code == 200
+    limited = client.post(
+        "/api/devices/heartbeat", json={"queued_frames": 0}, headers=headers
+    )
+    assert limited.status_code == 429
+    assert "Retry-After" in limited.headers

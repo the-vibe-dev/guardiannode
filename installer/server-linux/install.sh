@@ -8,17 +8,24 @@
 # Download, verify the published checksum/signature, review locally, then run:
 #   sudo ./install.sh
 
-set -Eeuo pipefail
+# Keep ERR at the top-level transaction boundary. Inheriting it into functions
+# and subshells can invoke rollback twice and move an already-restored release.
+set -euo pipefail
 
 # ---------- Config ----------
 GN_VERSION="${GN_VERSION:-v0.1.0-alpha.3}"
 GN_USER="${GN_USER:-guardiannode}"
+GN_SERVICE_NAME="${GN_SERVICE_NAME:-guardiannode-backend}"
+GN_SYSTEMD_UNIT_PATH="${GN_SYSTEMD_UNIT_PATH:-/etc/systemd/system/${GN_SERVICE_NAME}.service}"
 GN_HOME="${GN_HOME:-/opt/guardiannode}"
 GN_DATA="${GN_DATA:-/var/lib/guardiannode}"
 GN_LOG="${GN_LOG:-/var/log/guardiannode}"
 GN_BIND_HOST="${GN_BIND_HOST:-127.0.0.1}"
 GN_BIND_PORT="${GN_BIND_PORT:-8787}"
-GN_ALLOWED_HOSTS="${GN_ALLOWED_HOSTS:-127.0.0.1,localhost}"
+GN_ALLOWED_HOSTS="${GN_ALLOWED_HOSTS:-127.0.0.1,localhost,guardiannode.local}"
+GN_ADVERTISED_SERVER_URL="${GN_ADVERTISED_SERVER_URL:-}"
+GN_HEALTH_TIMEOUT_SECONDS="${GN_HEALTH_TIMEOUT_SECONDS:-300}"
+GN_VISION_TIMEOUT_SECONDS="${GN_VISION_TIMEOUT_SECONDS:-360}"
 GN_REPO_URL="${GN_REPO_URL:-https://github.com/the-vibe-dev/guardiannode}"
 GN_SRC_ZIP="${GN_SRC_ZIP:-}"     # if set, install from local zip instead of git
 GN_SRC_SHA256="${GN_SRC_SHA256:-}" # optional sha256 for GN_SRC_ZIP
@@ -43,6 +50,39 @@ require_root() {
   if [ "$(id -u)" -ne 0 ]; then
     red "This installer must run as root. Use: sudo $0"
     exit 1
+  fi
+}
+
+validate_install_config() {
+  if ! [[ "$GN_SERVICE_NAME" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
+    red "GN_SERVICE_NAME contains unsupported systemd unit characters."
+    exit 1
+  fi
+  if ! [[ "$GN_BIND_PORT" =~ ^[0-9]+$ ]] || [ "$GN_BIND_PORT" -lt 1 ] || [ "$GN_BIND_PORT" -gt 65535 ]; then
+    red "GN_BIND_PORT must be an integer from 1 through 65535."
+    exit 1
+  fi
+  if ! [[ "$GN_HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    red "GN_HEALTH_TIMEOUT_SECONDS must be a positive integer."
+    exit 1
+  fi
+  if ! [[ "$GN_VISION_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    red "GN_VISION_TIMEOUT_SECONDS must be a positive integer."
+    exit 1
+  fi
+  if [ -z "$GN_ADVERTISED_SERVER_URL" ]; then
+    case "$GN_BIND_HOST" in
+      127.0.0.1|localhost)
+        GN_ADVERTISED_SERVER_URL="https://127.0.0.1:${GN_BIND_PORT}"
+        ;;
+      ::1)
+        GN_ADVERTISED_SERVER_URL="https://[::1]:${GN_BIND_PORT}"
+        ;;
+      *)
+        red "LAN/VPN mode requires GN_ADVERTISED_SERVER_URL with the exact child-reachable HTTPS origin."
+        exit 1
+        ;;
+    esac
   fi
 }
 
@@ -254,10 +294,48 @@ activate_release() {
   chown -R "$GN_USER:$GN_USER" "$GN_HOME/src" "$GN_HOME/venv"
 }
 
+finalize_backend_install() {
+  # Python venv entry-point shebangs and PEP 660 editable-install metadata use
+  # absolute paths.  Both the source tree and venv were deliberately built in
+  # staging and then moved above, so refresh only the local project metadata at
+  # its final paths before systemd is allowed to start it.  --no-deps keeps this
+  # second pass from changing the dependency set selected during staging.
+  blue "Finalizing the backend at its active paths..."
+  (
+    # The invoking administrator's working directory may be mode 0700. pip's
+    # editable-path discovery stats every sys.path entry, so run from the
+    # service-owned source tree instead of inheriting an inaccessible cwd.
+    cd "$GN_HOME/src/backend"
+    sudo -u "$GN_USER" "$GN_HOME/venv/bin/python" -m pip install \
+      --quiet --no-deps --force-reinstall -e "$GN_HOME/src/backend"
+  )
+  (
+    cd "$GN_HOME/src/backend"
+    sudo -u "$GN_USER" "$GN_HOME/venv/bin/python" - "$GN_HOME/src/backend" <<'PY'
+import sys
+from pathlib import Path
+
+import app
+from alembic.script import ScriptDirectory
+from app.db.migrations import alembic_config
+
+expected = Path(sys.argv[1]).resolve()
+loaded = Path(app.__file__).resolve()
+if not loaded.is_relative_to(expected):
+    raise SystemExit(f"backend imported from {loaded}, expected it below {expected}")
+if ScriptDirectory.from_config(alembic_config()).get_current_head() is None:
+    raise SystemExit("Alembic migration head is missing")
+PY
+    sudo -u "$GN_USER" "$GN_HOME/venv/bin/guardiannode-backend" --help >/dev/null
+  )
+}
+
 rollback_release() {
   yellow "Rolling back to previous source/venv, if available..."
-  systemctl stop guardiannode-backend.service 2>/dev/null || true
+  systemctl stop "$GN_SERVICE_NAME.service" 2>/dev/null || true
   local failed_id
+  local restored_src=0
+  local restored_venv=0
   failed_id="$(date -u +%Y%m%dT%H%M%SZ)"
   if [ -e "$GN_HOME/src" ] || [ -L "$GN_HOME/src" ]; then
     mkdir -p "$GN_HOME/archived-src"
@@ -269,11 +347,20 @@ rollback_release() {
   fi
   if [ -n "$GN_PREV_SRC" ] && [ -e "$GN_PREV_SRC" ]; then
     mv "$GN_PREV_SRC" "$GN_HOME/src"
+    restored_src=1
   fi
   if [ -n "$GN_PREV_VENV" ] && [ -e "$GN_PREV_VENV" ]; then
     mv "$GN_PREV_VENV" "$GN_HOME/venv"
+    restored_venv=1
   fi
   chown -R "$GN_USER:$GN_USER" "$GN_HOME/src" "$GN_HOME/venv" 2>/dev/null || true
+  if [ "$restored_src" -eq 1 ] && [ "$restored_venv" -eq 1 ]; then
+    if systemctl start "$GN_SERVICE_NAME.service"; then
+      green "Previous GuardianNode release restored and restarted."
+    else
+      yellow "Previous release was restored but could not be restarted automatically."
+    fi
+  fi
   return 0
 }
 
@@ -332,7 +419,7 @@ install_ollama() {
 
 write_systemd_unit() {
   blue "Writing systemd unit..."
-  local unit_path="${GN_SYSTEMD_UNIT_PATH:-/etc/systemd/system/guardiannode-backend.service}"
+  local unit_path="$GN_SYSTEMD_UNIT_PATH"
   mkdir -p "$(dirname "$unit_path")"
   cat > "$unit_path" <<EOF
 [Unit]
@@ -348,6 +435,8 @@ Environment="GUARDIANNODE_DATA_DIR=$GN_DATA"
 Environment="GUARDIANNODE_BIND_HOST=$GN_BIND_HOST"
 Environment="GUARDIANNODE_BIND_PORT=$GN_BIND_PORT"
 Environment="GUARDIANNODE_ALLOWED_HOSTS=$GN_ALLOWED_HOSTS"
+Environment="GUARDIANNODE_ADVERTISED_SERVER_URL=$GN_ADVERTISED_SERVER_URL"
+Environment="GUARDIANNODE_TLS_ENABLED=true"
 Environment="GUARDIANNODE_MDNS_ENABLED=false"
 Environment="GUARDIANNODE_LOG_LEVEL=INFO"
 Environment="GUARDIANNODE_CLASSIFIER_TIER=$GN_TIER"
@@ -355,10 +444,10 @@ Environment="GUARDIANNODE_TEXT_MODEL=${GN_TEXT_MODEL-}"
 Environment="GUARDIANNODE_VISION_MODEL=${GN_VISION_MODEL-}"
 Environment="GUARDIANNODE_OLLAMA_URL=${GN_OLLAMA_URL:-http://127.0.0.1:11434}"
 Environment="GUARDIANNODE_CLASSIFIER_TIMEOUT_SECONDS=120"
-Environment="GUARDIANNODE_VISION_TIMEOUT_SECONDS=240"
+Environment="GUARDIANNODE_VISION_TIMEOUT_SECONDS=$GN_VISION_TIMEOUT_SECONDS"
 Environment="GUARDIANNODE_VISION_NUM_CTX=8192"
 WorkingDirectory=$GN_HOME/src/backend
-ExecStart=$GN_HOME/venv/bin/python -m uvicorn app.main:app --host $GN_BIND_HOST --port $GN_BIND_PORT
+ExecStart=$GN_HOME/venv/bin/guardiannode-backend
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -372,30 +461,54 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable guardiannode-backend.service
-  systemctl restart guardiannode-backend.service
+  systemctl enable "$GN_SERVICE_NAME.service"
+  systemctl restart "$GN_SERVICE_NAME.service"
   green "Service installed and started."
 }
 
 wait_for_health() {
   local tries=0
   blue "Waiting for backend health check..."
-  while [ $tries -lt 30 ]; do
-    if curl -sf "http://127.0.0.1:$GN_BIND_PORT/api/health/ready" >/dev/null; then
+  while [ "$tries" -lt "$GN_HEALTH_TIMEOUT_SECONDS" ]; do
+    if [ -f "$GN_DATA/tls/family-ca.pem" ] && \
+       curl --cacert "$GN_DATA/tls/family-ca.pem" -sf "https://127.0.0.1:$GN_BIND_PORT/api/health/ready" >/dev/null; then
       green "Backend is healthy."
       return 0
     fi
     sleep 1
     tries=$((tries + 1))
   done
-  red "Backend did not become healthy in 30s. Check logs: journalctl -u guardiannode-backend"
+  red "Backend did not become healthy in ${GN_HEALTH_TIMEOUT_SECONDS}s. Check logs: journalctl -u $GN_SERVICE_NAME"
   return 1
 }
 
+complete_activated_release() {
+  finalize_backend_install
+  probe_hardware_and_pick_tier
+  install_ollama
+  write_systemd_unit
+  wait_for_health
+}
+
+run_release_transaction() {
+  local transaction_rc
+  # Capture one transaction result explicitly. ERR inheritance can invoke a
+  # rollback once in a failing subshell and again when its caller returns,
+  # which would move the already-restored release out of the active paths.
+  set +e
+  (
+    set -e
+    complete_activated_release
+  )
+  transaction_rc=$?
+  set -e
+  if [ "$transaction_rc" -ne 0 ]; then
+    rollback_release
+    return "$transaction_rc"
+  fi
+}
+
 print_done() {
-  local ip
-  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  [ -z "$ip" ] && ip="127.0.0.1"
   echo
   green "=========================================="
   green "GuardianNode installed and running."
@@ -403,12 +516,12 @@ print_done() {
   echo
   echo "Open the parent dashboard at:"
   echo
-  echo "    http://127.0.0.1:${GN_BIND_PORT}"
+  echo "    https://127.0.0.1:${GN_BIND_PORT}"
   if [ "$GN_BIND_HOST" != "127.0.0.1" ]; then
     echo
     echo "Child installers on your private LAN/VPN can use:"
     echo
-    echo "    http://${ip}:${GN_BIND_PORT}"
+    echo "    ${GN_ADVERTISED_SERVER_URL}"
     echo
     echo "Allowed dashboard/API hosts:"
     echo
@@ -429,8 +542,8 @@ print_done() {
     echo "Keep TCP ${GN_BIND_PORT} firewalled to trusted child PCs only."
   fi
   echo
-  echo "Service:    systemctl status guardiannode-backend"
-  echo "Logs:       journalctl -u guardiannode-backend"
+  echo "Service:    systemctl status $GN_SERVICE_NAME"
+  echo "Logs:       journalctl -u $GN_SERVICE_NAME"
   echo "Data dir:   $GN_DATA"
   echo
   echo "mDNS:       disabled for fresh setup until LAN access is enabled."
@@ -439,6 +552,7 @@ print_done() {
 
 main() {
   require_root
+  validate_install_config
   detect_distro
   install_system_packages
   create_user
@@ -446,12 +560,7 @@ main() {
   fetch_source
   install_backend
   activate_release
-  trap 'rollback_release' ERR
-  probe_hardware_and_pick_tier
-  install_ollama
-  write_systemd_unit
-  wait_for_health
-  trap - ERR
+  run_release_transaction
   print_done
 }
 

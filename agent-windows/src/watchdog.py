@@ -1,11 +1,7 @@
-"""Watchdog process (runs as a SYSTEM service).
+"""Tray watchdog process (runs as a SYSTEM service).
 
-The agent and tray run per user session via scheduled tasks (Windows services
-live in session 0 and cannot touch a user's desktop). This watchdog provides
-resilience: if either disappears, it relaunches the missing executable in each
-active user session. Disconnected RDP sessions are observed but not relaunched
-until they become active again; locked local sessions remain active from the
-Terminal Services perspective and keep their existing agent/tray process.
+The privileged broker owns capture-process launch and identity tracking. This
+separate watchdog only keeps the child-visible tray alive in active sessions.
 
 The production installer runs one GuardianNode-branded watchdog service and
 uses SCM/WinSW recovery to restart it if it crashes. Ending the service still
@@ -29,7 +25,6 @@ log = logging.getLogger("guardiannode.watchdog")
 
 # (process image, scheduled-task name) pairs the watchdog keeps alive.
 WATCHED = [
-    ("GuardianNodeAgent.exe", "GuardianNodeAgent"),
     ("GuardianNodeTray.exe", "GuardianNodeTray"),
 ]
 MAINTENANCE_MARKER = Path(

@@ -1,139 +1,134 @@
 # Install GuardianNode with a separate server + child PC
 
-This guide is for advanced alpha operators testing a separate parent-owned
-server and child PC. GuardianNode 0.1.0-alpha.1 does not recommend separated
-raw-LAN HTTP for ordinary family use; use a trusted VPN/TLS setup and keep the
-backend off the public internet.
+This advanced closed-beta layout puts the backend on a parent-owned Windows or
+Linux server and capture on a Windows child PC. Connections use GuardianNode's
+local family CA and pinned HTTPS. Keep both systems on a trusted private LAN or
+VPN and never expose the backend directly to the public internet.
+
+The current installer build still requires clean-machine Windows
+requalification before distribution to ordinary families.
 
 ## Before you start
 
 You'll need:
-- One PC for the **server**: Windows 10/11 **or** Linux, ideally with 16+ GB RAM and a GPU (works without a GPU but is slower)
-- One PC for the **child**: Windows 10/11
-- Both on the same home network
-- About 45 minutes total
-- A pen and paper for the recovery code
 
-## Step 1 — Install the server first
+- A parent-owned Windows or Linux server, ideally with 16 GB or more RAM.
+- A Windows 11 child PC. Windows 10 is not currently qualified.
+- A trusted private LAN or VPN connecting them.
+- Administrator access and about 45 minutes.
+- Private storage for the recovery phrase and `.gnpair` trust bundle.
 
-### If your server is Windows
+## 1. Install the server
 
-1. Download `GuardianNodeServerSetup-0.1.0-alpha.1.exe` from the official
-   GitHub release and verify the published SHA-256 checksum.
-2. Run the installer as an administrator. The alpha installer is unsigned, so
-   Windows SmartScreen, Defender, or other antivirus software may warn before
-   trust reputation exists.
-3. On **Server access**, choose one:
-   - **Only this PC** for an all-local parent dashboard.
-   - **Private LAN/VPN child PCs can connect** when this PC will pair child PCs.
-4. If you choose private LAN/VPN, enter the exact host or IP the child installer will use, such as `192.168.1.42` or `guardian-server.local`. The installer writes the allowed-hosts setting and opens TCP 8787 for the Windows **Private** firewall profile.
-5. The installer detects hardware, installs/pulls the AI model, starts the backend, and opens the local setup page.
-6. Use the Start Menu **Show Setup Token** shortcut, enter that token in the setup page, then create the parent account and recovery code.
-7. Write down the child installer URL, for example `http://192.168.1.42:8787`.
+### Windows server
 
-Power users doing a silent Windows server install can enable the same private
-LAN/VPN mode with:
+1. Verify the release SHA-256, then run
+   `GuardianNodeServerSetup-0.1.0-alpha.3.exe` as administrator.
+2. Choose **Private LAN/VPN child PCs can connect**.
+3. Enter the exact child-reachable hostname or fixed IP, such as
+   `guardiannode.local` or `192.168.1.42`. The installer includes it in the
+   server certificate, allowed-host list, and Private-profile firewall rule.
+4. Let the installer finish the model and backend checks.
+5. Open `https://127.0.0.1:8787/setup`, use the Start Menu **Show Setup Token**
+   shortcut, create the parent account, save the recovery phrase, and complete
+   the consent checklist.
+
+Silent Windows server example:
 
 ```powershell
-GuardianNodeServerSetup-0.1.0-alpha.1.exe /VERYSILENT /LAN=1 /SERVERHOST=192.168.1.42
+GuardianNodeServerSetup-0.1.0-alpha.3.exe /VERYSILENT /LAN=1 /SERVERHOST=guardiannode.local
 ```
 
-### If your server is Linux
+### Native Linux server
 
-Open a terminal, download the tagged installer script, verify the published
-checksum or signature, review it locally, then run it:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh
-# Verify the published checksum or signature before running:
-sudo bash install.sh
-```
-
-Or with Docker (if you prefer):
-```bash
-git clone https://github.com/the-vibe-dev/guardiannode.git
-cd guardiannode/installer/server-linux
-docker compose up -d
-```
-
-For a native Linux server that child PCs will reach on a trusted private
-LAN/VPN, set the bind address and allowed host list during install:
+Download the tagged script, verify its published checksum or signature, review
+it locally, then run it. To serve child PCs, specify the exact trusted names or
+IPs before installation:
 
 ```bash
 sudo GN_BIND_HOST=0.0.0.0 \
-  GN_ALLOWED_HOSTS=127.0.0.1,localhost,192.168.1.42,guardian-server \
+  GN_ALLOWED_HOSTS=127.0.0.1,localhost,192.168.1.42,guardiannode.local \
   bash install.sh
 ```
 
-Replace `192.168.1.42` and `guardian-server` with the exact server LAN IP or
-hostname the child installer will use. Keep TCP 8787 firewalled to trusted child
-PCs only.
+Open `https://127.0.0.1:8787/setup` on the server and enter the printed setup
+token. The service generates its family CA and HTTPS certificate on first
+start. Keep TCP 8787 firewalled to the trusted child PCs or VPN only.
 
-For the native installer, open `http://127.0.0.1:8787/setup` on the server and
-enter the printed one-time setup token. For Docker, open
-`http://127.0.0.1:8787/setup` on the Docker host and read the token from the
-container logs or data volume.
+### Docker Compose
 
-Docker Compose keeps the host port bound to loopback by default. Change the
-backend port mapping to `8787:8787`, then run `docker compose up -d` again.
+```bash
+git clone https://github.com/the-vibe-dev/guardiannode.git
+cd guardiannode/installer/server-linux
+docker compose up --build -d
+```
 
-Separated mode currently uses local-network HTTP unless you add TLS, Tailscale,
-WireGuard, or a trusted reverse proxy. Treat raw LAN HTTP as a private lab test
-only, not a supported family deployment.
+Compose publishes `127.0.0.1:8787` by default. A separated deployment requires
+the host-network override or an explicit private port mapping, exact
+`GUARDIANNODE_ALLOWED_HOSTS`, and a matching certificate name. See
+[Secure LAN setup](../SECURE_LAN_SETUP.md). Do not change the mapping to a
+publicly reachable interface.
 
-## Step 2 — Open the dashboard and prepare a pairing code
+## 2. Create the secure pairing transaction
 
-Go to your dashboard URL (e.g. `http://192.168.1.42:8787`). Sign in.
+Open the dashboard at the exact child-reachable HTTPS URL shown during setup,
+for example `https://guardiannode.local:8787`, and sign in. If using a different
+parent browser, trust the family CA on that parent-managed device first.
 
-Click **Devices** in the left sidebar → **Add Device**. The dashboard shows you:
-- A **6-digit pairing code** (valid for 10 minutes)
+Go to **Devices -> Add device**. The dashboard provides:
 
-Keep this page open while you walk to the kid's PC.
+- A six-digit, single-use code valid for 10 minutes.
+- The exact HTTPS server URL.
+- CA check words and a SHA-256 fingerprint.
+- A short-lived `.gnpair` trust bundle.
 
-## Step 3 — Install on the child's PC
+Download the bundle, transfer it privately to the child PC, and compare the CA
+check words before continuing. The bundle does not contain a device bearer
+token, but delete it after pairing.
 
-1. Copy `GuardianNodeChildSetup-0.1.0-alpha.1.exe` from the official GitHub
-   release to the kid's PC and verify the published SHA-256 checksum.
-2. Run it. (See [SmartScreen guide](when-windows-says-protected-your-pc.md) if Windows complains.)
-3. On wizard page 2, pick **"Connect to existing GuardianNode server"**.
-4. Enter the explicit trusted VPN/TLS server URL. Use a raw `http://192.168...` URL only in a private lab test.
-5. Enter the 6-digit pairing code from your dashboard.
-6. Continue the installer.
+## 3. Install the child PC
 
-## Step 4 — Verify
+1. Verify and run `GuardianNodeChildSetup-0.1.0-alpha.3.exe`.
+2. Choose **Connect to existing GuardianNode server**.
+3. Enter the exact HTTPS URL and six-digit code from the dashboard.
+4. Select the transferred `.gnpair` file.
+5. Finish installation. The SYSTEM endpoint broker validates the bundle,
+   consumes the one-time code, stores the CA and credential under protected
+   ProgramData, and launches authorized capture helpers in active sessions.
 
-On your phone or any computer on the home network, open the dashboard URL. The new device should appear under **Devices** as online.
+Silent child example:
 
-Try opening a simple app on the kid's PC. Within a short period, an event may
-appear in the **Risk Feed** with risk level "none" or "low" if the pipeline
-captures a meaningful screen change. That confirms the pipeline works.
+```powershell
+GuardianNodeChildSetup-0.1.0-alpha.3.exe /VERYSILENT /MODE=child /SERVERURL=https://guardiannode.local:8787 /PAIRCODE=506755 /PAIRBUNDLE=C:\SafeTransfer\pairing.gnpair
+```
 
-For a stronger alpha smoke test, use a known-safe synthetic test phrase and
-confirm a risk event appears in the dashboard. Do not test with real child
-private messages. Logs are under `C:\ProgramData\GuardianNode\logs\` on Windows
-and the systemd journal on native Linux servers.
+Plain LAN HTTP is rejected. The only HTTP exception is an explicit loopback
+source-development configuration, which must never carry family data.
 
-## Stop, disable, or uninstall
+## 4. Verify the complete path
 
-- Windows server: Start Menu -> **GuardianNode Server** -> **Stop service**.
-- Windows child PC: use the visible GuardianNode tray icon to pause monitoring,
-  or uninstall from Windows Settings / Programs & Features as an administrator.
-- Native Linux server: `sudo systemctl stop guardiannode-backend`.
-- Windows uninstall removes services, scheduled tasks, and installed program
-  files. GuardianNode data under `C:\ProgramData\GuardianNode` may be retained
-  so parents can back up keys, logs, and evidence intentionally.
-- See [Troubleshooting](troubleshooting.md) for manual cleanup steps if
-  uninstall is interrupted.
+1. In **Devices**, assign the new device to the correct child profile and
+   confirm it becomes online.
+2. Confirm the tray icon remains visible in the child session.
+3. Use only a documented synthetic canary phrase; never use a child's real
+   private conversation as a test.
+4. Confirm capture, OCR/classification, alert creation, and parent review.
+5. Reboot and repeat the synthetic test. Also test sign-out/sign-in and user
+   switching before relying on a current build.
 
-## Pausing on the child's PC
+Logs are under `C:\ProgramData\GuardianNode\logs\` on Windows and the systemd
+journal on native Linux.
 
-When you use the kid's PC, right-click the GuardianNode tray icon → **Pause monitoring** → enter your parent password. In separated mode, local tray password verification requires either a local parent hash or an HTTPS backend URL; use the dashboard **Devices → Pause** button for plain-HTTP LAN setups.
+## Pause or remove monitoring
 
-## Multiple children
+Use the authenticated dashboard **Devices** page to pause or resume. The tray
+links to that page and never asks the child session for a parent password.
 
-For each additional child PC, repeat Step 3 — just create a new pairing code from the dashboard for each device. You can manage multiple children and devices from one parent server.
+Uninstall from Windows Settings as an administrator. Windows uninstall removes
+services, the tray task, any legacy agent task, firewall rules, and installed
+program files; retained ProgramData is reported so keys and evidence are not
+silently destroyed. Stop native Linux with
+`sudo systemctl stop guardiannode-backend`.
 
-## Got stuck?
-
-- The child PC installer requires the server URL explicitly in this alpha. Use the parent server's trusted VPN/TLS URL after first-run setup is complete.
-- See [Troubleshooting](troubleshooting.md) for more.
+For each additional child PC, create a separate pairing transaction and bundle.
+See [Troubleshooting](troubleshooting.md) if any stage fails.

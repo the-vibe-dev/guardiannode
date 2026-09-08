@@ -1,19 +1,22 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { api } from "./api";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Setup from "./pages/Setup";
-import Dashboard from "./pages/Dashboard";
-import Devices from "./pages/Devices";
-import Profiles from "./pages/Profiles";
-import RiskFeed from "./pages/RiskFeed";
-import AlertDetail from "./pages/AlertDetail";
-import ModelStatus from "./pages/ModelStatus";
-import Settings from "./pages/Settings";
-import Audit from "./pages/Audit";
-import GuardianReviewHistory from "./pages/GuardianReviewHistory";
-import Demo from "./pages/Demo";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Devices = lazy(() => import("./pages/Devices"));
+const Profiles = lazy(() => import("./pages/Profiles"));
+const RiskFeed = lazy(() => import("./pages/RiskFeed"));
+const AlertDetail = lazy(() => import("./pages/AlertDetail"));
+const ModelStatus = lazy(() => import("./pages/ModelStatus"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Audit = lazy(() => import("./pages/Audit"));
+const GuardianReviewHistory = lazy(() => import("./pages/GuardianReviewHistory"));
+const Demo = lazy(() => import("./pages/Demo"));
+const Requests = lazy(() => import("./pages/Requests"));
+const PrivacyConsent = lazy(() => import("./pages/PrivacyConsent"));
 
 type AuthState = "unknown" | "needs_setup" | "logged_out" | "logged_in";
 
@@ -78,19 +81,23 @@ export default function App() {
 
   return (
     <Layout user={me!} onLogout={onLogout}>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/devices" element={<Devices />} />
-        <Route path="/profiles" element={<Profiles />} />
-        <Route path="/risks" element={<RiskFeed />} />
-        <Route path="/alerts/:id" element={<AlertDetail />} />
-        <Route path="/models" element={<ModelStatus />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/audit" element={<Audit />} />
-        <Route path="/guardian-reviews" element={<GuardianReviewHistory />} />
-        <Route path="/demo" element={<Demo />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="page-status" role="status">Loading page…</div>}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/devices" element={<Devices />} />
+          <Route path="/profiles" element={<Profiles />} />
+          <Route path="/risks" element={<RiskFeed />} />
+          <Route path="/requests" element={<Requests />} />
+          <Route path="/privacy" element={<PrivacyConsent />} />
+          <Route path="/alerts/:id" element={<AlertDetail />} />
+          <Route path="/models" element={<ModelStatus />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/audit" element={<Audit />} />
+          <Route path="/guardian-reviews" element={<GuardianReviewHistory />} />
+          <Route path="/demo" element={<Demo />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }

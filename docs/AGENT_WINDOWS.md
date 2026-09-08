@@ -27,16 +27,22 @@ python -m src.main --dry-run
 
 `--dry-run` prints what would be sent without making network calls.
 
-To pair and run from Python source on a Windows child PC:
+To pair and run from Python source on a Windows child PC, download the
+short-lived `.gnpair` bundle from **Devices -> Add device** and transfer it
+privately with the six-digit code:
 
 ```powershell
 cd agent-windows
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[windows]"
-.\.venv\Scripts\python -m src.main --pair --server http://<server-ip>:8787 --code <pair-code>
+.\.venv\Scripts\python -m src.main --pair --pair-bundle C:\SafeTransfer\family.gnpair --code <pair-code>
 .\.venv\Scripts\python -m src.main
 ```
+
+The bundle supplies the exact HTTPS URL and pinned family CA. `--server` may be
+added as an exact-URL cross-check. Plain HTTP is accepted only for an explicit
+loopback source-development flow.
 
 Run the tray in a second terminal while testing from source:
 
@@ -49,7 +55,7 @@ Run the tray in a second terminal while testing from source:
 Local config at `C:\ProgramData\GuardianNode\agent.yaml`:
 
 ```yaml
-backend_url: http://127.0.0.1:8787
+backend_url: https://127.0.0.1:8787
 age_group: 10_13
 ocr_engine: tesseract
 ocr_cadence_seconds: 5
@@ -81,10 +87,12 @@ and is migrated by the broker when possible.
 - `broker_protocol.py` — bounded versioned local IPC protocol
 - `broker_client.py` — session-process client for the endpoint broker
 - `broker_service.py` — privileged endpoint broker service entrypoint
-- `backend_client.py` — HTTP client to backend
-- `tray_app.py` — pystray-based notification icon and local pause UI
-- `watchdog.py` — paired watchdog service using Windows Terminal Services APIs for active sessions
-- `parent_auth.py` — Argon2id credential hashing helpers; recovery codes do not authorize tray actions
+- `backend_client.py` — pinned-HTTPS client to the backend
+- `tray_app.py` — child-visible status icon and parent-dashboard shortcut
+- `watchdog.py` — service health helper; the broker owns per-session capture launch
+
+Pause and resume are parent-authoritative dashboard actions. The tray never
+collects or stores a reusable parent password.
 
 ## Tests
 

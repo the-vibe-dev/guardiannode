@@ -2,7 +2,7 @@
 <service>
   <id>GuardianNodeWatchdog</id>
   <name>GuardianNode Watchdog</name>
-  <description>Restarts the GuardianNode agent and tray if they're stopped</description>
+  <description>Restarts the GuardianNode child-visible tray if it is stopped</description>
   <executable>%BASE%\agent\GuardianNodeWatchdog.exe</executable>
   <arguments>--interval 5</arguments>
   <workingdirectory>%BASE%\agent</workingdirectory>

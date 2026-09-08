@@ -7,10 +7,13 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
+GUARDIANNODE_DEV_MODE=true GUARDIANNODE_TLS_ENABLED=false \
+  uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
 ```
 
-Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
+That command is an HTTP loopback-only development exception. Normal installs
+run `guardiannode-backend` with built-in TLS and open
+`https://127.0.0.1:8787/setup` after trusting the generated family CA.
 
 ## Environment variables
 
@@ -19,6 +22,9 @@ Dashboard at `http://127.0.0.1:8787/setup` for first-run wizard.
 | `GUARDIANNODE_DATA_DIR` | `~/.guardiannode` | Where DB + evidence + keys live |
 | `GUARDIANNODE_BIND_HOST` | `127.0.0.1` | Keep loopback for first-run setup; expose LAN only after setup is complete |
 | `GUARDIANNODE_BIND_PORT` | `8787` | |
+| `GUARDIANNODE_ADVERTISED_SERVER_URL` | `https://guardiannode.local:8787` | Exact origin placed in child pairing bundles; its host must be allowed and covered by the family certificate |
+| `GUARDIANNODE_TLS_ENABLED` | `true` | Required beyond loopback development |
+| `GUARDIANNODE_TLS_SAN_HOSTS` | `guardiannode.local` | Comma-separated family-server names/IPs placed in the certificate |
 | `GUARDIANNODE_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama |
 | `GUARDIANNODE_CLASSIFIER_MODE` | unset | Explicit mode: `rules_only`, `text_llm`, `vision`, or `full` |
 | `GUARDIANNODE_CLASSIFIER_TIER` | `text_only` | Legacy compatibility setting; `text_only` maps to `text_llm` and `vision_only` maps to `vision` |
@@ -76,7 +82,7 @@ runtime dependency, and `4` is a missing or failed model initialization.
 
 ## First run
 
-1. Backend creates the evidence master key (random 32 bytes, AES-GCM).
+1. Backend serially creates the evidence master key (random 32 bytes, AES-GCM).
    GuardianNode encrypts retained screenshot blobs and collected event text with
    AES-256-GCM. On new Windows installations, the key is wrapped with Windows
    DPAPI in LocalMachine scope and stored as `keys/master.key.dpapi`. On Linux,
@@ -84,9 +90,12 @@ runtime dependency, and `4` is a missing or failed model initialization.
    `keys/master.key` with restrictive filesystem permissions. Upgraded Windows
    installations may retain a legacy raw key after generating a DPAPI-wrapped
    copy; verify a portable backup before removing the legacy file.
-2. Backend creates `~/.guardiannode/guardiannode.db` (SQLite).
-3. Backend creates a one-time setup token in `keys/setup_token.json`.
-4. Setup wizard at `/setup` prompts for the setup token and admin account.
+2. Backend creates a private family CA and a 90-day server certificate. The CA
+   signing key and leaf private key are encrypted at rest with the evidence key;
+   the leaf key is materialized only for server startup and removed shortly after.
+3. Backend creates `~/.guardiannode/guardiannode.db` (SQLite).
+4. Backend creates a one-time setup token in `keys/setup_token.json`.
+5. Setup wizard at `/setup` prompts for the setup token and admin account.
 
 Create a portable, passphrase-encrypted key backup before moving the backend to
 another machine. From a source checkout, run this in the `backend/` directory or
@@ -149,4 +158,6 @@ portable evidence-key backup described above when recovering on another machine.
 
 ## API docs
 
-OpenAPI/Swagger at `http://127.0.0.1:8787/docs` (dev mode only).
+OpenAPI/Swagger is available at `https://127.0.0.1:8787/docs` in TLS dev mode,
+or at the loopback HTTP URL only when the explicit development exception above
+is active.

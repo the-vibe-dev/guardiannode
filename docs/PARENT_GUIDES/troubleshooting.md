@@ -9,7 +9,7 @@ before continuing.
 
 ### "User Account Control" loops
 The installer needs admin rights. If clicking Yes doesn't proceed:
-1. Right-click `GuardianNodeChildSetup-0.1.0-alpha.1.exe` → **Run as administrator**.
+1. Right-click `GuardianNodeChildSetup-0.1.0-alpha.3.exe` → **Run as administrator**.
 2. If that fails, your Windows account isn't an Administrator. Sign in as the Administrator user first, then run the installer.
 
 ### Install fails with "Could not download Ollama"
@@ -50,13 +50,16 @@ If that fails, Ollama isn't running. Start it via the Ollama tray icon, or run `
 ### Tray icon is missing
 The tray app runs in the user session, not as a service. If it crashed:
 1. Start menu → search "GuardianNode Tray" → click to relaunch.
-2. The installer registers a per-user logon scheduled task so the tray starts on future logins.
+2. The installer registers an all-user logon task for the tray. The endpoint
+   broker—not a scheduled agent task—launches the capture helper.
 
 ### Tray icon is red
 Red means the agent can't reach the backend. Hover over the icon for the specific error.
 
 ### "Kill agent" / Task Manager → it comes back
-That's the watchdog and scheduled-task supervision working as designed. To stop monitoring legitimately, pause from the tray/dashboard or uninstall GuardianNode from an administrator account.
+That's broker/watchdog supervision working as designed. To stop monitoring
+legitimately, use the authenticated dashboard or uninstall GuardianNode from an
+administrator account.
 
 ### Antivirus flagged the agent
 Some antivirus products flag PyInstaller-bundled apps as suspicious because the technique is sometimes used by malware. Add GuardianNode to your AV exception list:
@@ -72,13 +75,13 @@ Use Windows Settings or Programs & Features from an administrator account. The a
 
 ### Uninstall hangs or fails partway
 1. Reboot the PC.
-2. Run `GuardianNodeChildSetup-0.1.0-alpha.1.exe` again — the installer detects an existing install and offers **Repair** and **Uninstall** options.
+2. Run `GuardianNodeChildSetup-0.1.0-alpha.3.exe` again — the installer detects an existing install and offers **Repair** and **Uninstall** options.
 3. If that fails, manually:
    - Stop services: `sc stop GuardianNodeWatchdog; sc stop GuardianNodeBroker; sc stop GuardianNodeBackend`
    - Delete services: `sc delete GuardianNodeWatchdog; sc delete GuardianNodeBroker; sc delete GuardianNodeBackend`
    - Move the install folder aside: `Move-Item "C:\Program Files\GuardianNode" "C:\Program Files\GuardianNode.disabled"`
    - Move data aside only after backing up keys: `Move-Item "C:\ProgramData\GuardianNode" "C:\ProgramData\GuardianNode.disabled"`
-   - Delete scheduled tasks: `schtasks /Delete /TN GuardianNodeAgent /F; schtasks /Delete /TN GuardianNodeTray /F`
+   - Delete the tray task and any legacy agent task: `schtasks /Delete /TN GuardianNodeTray /F; schtasks /Delete /TN GuardianNodeAgent /F`
    - Manually clean up start-menu shortcuts.
 
 ## Performance

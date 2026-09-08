@@ -42,13 +42,16 @@ def test_empty_database_migrates_to_snapshotted_schema(monkeypatch, tmp_path: Pa
     assert sorted(inspect(engine).get_table_names()) == sorted(
         [
             *fixture["tables"],
-            "backup_runs",
-            "guardian_review_feedback",
+                "backup_runs",
+                "consent_records",
+                "device_commands",
+                "digest_runs",
+                "guardian_review_feedback",
             "guardian_review_previews",
             "guardian_reviews",
         ]
     )
-    assert schema_revisions(engine)[0] == "0005_guardian_review_feedback"
+    assert schema_revisions(engine)[0] == "0007_family_beta_workflows"
 
 
 def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_path: Path):
@@ -62,7 +65,7 @@ def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_pat
     engine = get_engine()
     result = upgrade_schema(engine)
     current, head = schema_revisions(engine)
-    assert current == head == "0005_guardian_review_feedback"
+    assert current == head == "0007_family_beta_workflows"
     assert result["backup"] is not None
     assert Path(result["backup"]).is_file()
     assert "session_revoked_at" in {col["name"] for col in inspect(engine).get_columns("users")}
@@ -87,7 +90,7 @@ def test_interrupted_unstamped_migration_recovers_without_losing_evidence(monkey
             "'2026-01-01', NULL)"
         )
     result = upgrade_schema(engine)
-    assert result["current_revision"] == "0005_guardian_review_feedback"
+    assert result["current_revision"] == "0007_family_beta_workflows"
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT encrypted_path FROM evidence_blobs WHERE blob_id='blob-1'"
@@ -129,6 +132,7 @@ def test_scheduled_backup_is_restorable_and_prunes_old_generations(monkeypatch, 
     from app import settings as settings_mod
     from app.archive import crypto
     from app.archive.format import restore_archive
+    from app.archive.identity import load_or_create
     from app.db import session as session_mod
     from app.db.migrations import upgrade_schema
     from app.db.session import get_engine
@@ -159,7 +163,10 @@ def test_scheduled_backup_is_restorable_and_prunes_old_generations(monkeypatch, 
 
     restored = tmp_path / "restore-drill"
     result = restore_archive(
-        scheduled, restored, private_key=crypto.load_private_key(private_key)
+        scheduled,
+        restored,
+        private_key=crypto.load_private_key(private_key),
+        trusted_signer=load_or_create(settings_mod.settings.keys_dir).public_key,
     )
     assert result["ok"]
     assert (restored / "guardiannode.db").is_file()

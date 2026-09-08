@@ -15,6 +15,7 @@ from app.archive.format import (
     restore_archive,
     verify_archive,
 )
+from app.archive.identity import load_or_create
 from app.db.migrations import upgrade_schema
 from app.db.session import configure_sqlite_engine
 from app.services import encryption
@@ -73,14 +74,17 @@ def test_passphrase_archive_round_trip_and_restore(archive_instance, tmp_path: P
         passphrase="correct horse battery staple",
     )
     assert result["mode"] == "portable"
-    assert inspect_archive(archive)["format"] == "guardiannode-archive-v1"
+    assert inspect_archive(archive)["format"] == "guardiannode-archive-v2"
     verified = verify_archive(archive, passphrase="correct horse battery staple")
     assert verified["manifest"]["record_counts"]["events"] == 1
     assert verified["manifest"]["evidence"]["file_count"] == 1
 
     target = tmp_path / "restored"
     restored = restore_archive(
-        archive, target, passphrase="correct horse battery staple"
+        archive,
+        target,
+        passphrase="correct horse battery staple",
+        trusted_signer=load_or_create(data_dir / "keys").public_key,
     )
     assert restored["ok"] is True
     assert (target / "evidence" / "aa" / "blob.enc").read_bytes() == b"exact-evidence-ciphertext"
@@ -141,8 +145,30 @@ def test_restore_requires_empty_target(archive_instance, tmp_path: Path):
     target.mkdir()
     (target / "existing").write_text("keep")
     with pytest.raises(ArchiveError, match="empty directory"):
-        restore_archive(archive, target, passphrase="correct horse battery staple")
+        restore_archive(
+            archive,
+            target,
+            passphrase="correct horse battery staple",
+            trusted_signer=load_or_create(data_dir / "keys").public_key,
+        )
     assert (target / "existing").read_text() == "keep"
+
+
+def test_restore_requires_external_recovery_signer(archive_instance, tmp_path: Path):
+    data_dir, database = archive_instance
+    archive = tmp_path / "family.gna"
+    create_archive(
+        archive,
+        data_dir=data_dir,
+        db_url=f"sqlite:///{database}",
+        passphrase="correct horse battery staple",
+    )
+    with pytest.raises(ArchiveError, match="enrolled recovery signer"):
+        restore_archive(
+            archive,
+            tmp_path / "target",
+            passphrase="correct horse battery staple",
+        )
 
 
 def test_missing_database_evidence_fails_closed(archive_instance, tmp_path: Path):

@@ -3,10 +3,11 @@
 GuardianNode is designed so a technical parent can inspect, build, and run it
 without trusting a black-box installer.
 
-The normal release installer is still the easiest path. It starts the agent and
-tray during install, registers all-user logon tasks so they launch for every
-Windows account at sign-in, and pairs the child node with the server when a
-pairing code is supplied.
+The normal release installer is still the easiest path. It starts the endpoint
+broker and watchdog services, registers the visible tray for user logon, and
+pairs the child node with the server when a trust bundle and pairing code are
+supplied. The broker launches the authorized capture helper in active desktop
+sessions; there is no independent agent scheduled task in the current design.
 
 ## Trust checks
 
@@ -58,13 +59,14 @@ Setup. The output is `GuardianNodeChildSetup-<version>.exe`.
 For separated installs, the installer can be scripted with:
 
 ```cmd
-GuardianNodeChildSetup-0.1.0-alpha.1.exe /VERYSILENT /MODE=child /SERVERURL=http://192.168.1.42:8787 /PAIRCODE=506755
+GuardianNodeChildSetup-0.1.0-alpha.3.exe /VERYSILENT /MODE=child /SERVERURL=https://guardiannode.local:8787 /PAIRCODE=506755 /PAIRBUNDLE=C:\SafeTransfer\pairing.gnpair
 ```
 
-Silent child installs require `/MODE=child`, an explicit `http://` or `https://`
-server URL, and a six-digit pairing code generated from the parent dashboard.
-Codes expire and are one-time use. Silent all-in-one installs use
-`/MODE=allinone` and must not include `/SERVERURL` or `/PAIRCODE`.
+Silent child installs require `/MODE=child`, the exact `https://` URL shown by
+the parent dashboard, a six-digit pairing code, and the downloaded `.gnpair`
+path. The bundle pins the server family CA and expires with the pairing
+transaction. Silent all-in-one installs use `/MODE=allinone` and must not
+include `/SERVERURL`, `/PAIRCODE`, or `/PAIRBUNDLE`.
 
 ## Build installers from Linux
 
@@ -95,7 +97,7 @@ cd guardiannode\agent-windows
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[windows]"
-.\.venv\Scripts\python -m src.main --pair --server http://<server-ip>:8787 --code <pair-code>
+.\.venv\Scripts\python -m src.main --pair --pair-bundle C:\SafeTransfer\family.gnpair --code <pair-code>
 .\.venv\Scripts\python -m src.main
 ```
 
@@ -128,7 +130,7 @@ start "GuardianNode Tray" "C:\path\to\guardiannode\agent-windows\.venv\Scripts\p
 On the server:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh
+curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.3/installer/server-linux/install.sh
 # Verify the published checksum or signature before running:
 sudo bash install.sh
 ```
@@ -136,11 +138,12 @@ sudo bash install.sh
 For test systems without model downloads:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.1/installer/server-linux/install.sh
+curl -fsSLO https://raw.githubusercontent.com/the-vibe-dev/guardiannode/v0.1.0-alpha.3/installer/server-linux/install.sh
 # Verify the published checksum or signature before running:
 sudo GN_NO_OLLAMA=1 bash install.sh
 ```
 
-After install, open `http://<server-ip>:8787/setup`, create the admin account,
-then use **Devices -> Add device** to generate the pairing code for the child
-node.
+After install, open `https://127.0.0.1:8787/setup` on the server, create the
+admin account, and complete the consent checklist. Then use **Devices -> Add
+device** to generate the code and download the `.gnpair` bundle for the child
+node. The local family CA must be trusted on browsers used for administration.

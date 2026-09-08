@@ -42,9 +42,31 @@ information, or other sensitive on-screen material.
   endpoint.
 - **Notifications:** SMTP/webhooks are sent only if the parent configures them.
 
-Separated mode currently uses local-network HTTP unless the operator adds TLS,
-Tailscale, WireGuard, or a trusted reverse proxy. Do not expose the backend
-directly to the public internet. See [docs/SECURE_LAN_SETUP.md](docs/SECURE_LAN_SETUP.md).
+Fresh installations use a GuardianNode family certificate authority and HTTPS.
+The parent transfers a short-lived `.gnpair` bundle containing the CA certificate,
+exact server URL, expiry, and fingerprint to the child installer. The agent pins
+that CA and refuses a different HTTPS issuer or server URL. Loopback HTTP remains
+available only for explicit source-development workflows. Built-in TLS does not
+make public internet exposure supported; keep the server on a family LAN or VPN.
+See [docs/SECURE_LAN_SETUP.md](docs/SECURE_LAN_SETUP.md).
+
+## Consent And Optional External Processing
+
+Monitoring stays gated until a parent records the current privacy choices and
+acknowledges showing the child-facing notice. The parent can later withdraw
+consent while retaining existing evidence through its normal retention window,
+or withdraw and queue the evidence for deletion. Device credentials are revoked
+in either case.
+
+External AI review is off by default. Enabling the privacy choice alone never
+sends evidence: every review also requires an exact minimized preview and a
+separate parent confirmation. Local rules and local Ollama processing do not
+depend on this optional feature.
+
+Use the [child monitoring notice](docs/CHILD_MONITORING_NOTICE.md) as a starting
+point for the required family conversation. The
+[data-destination inventory](docs/VENDOR_INVENTORY.md) describes every built-in
+local and optional external disclosure path.
 
 ## Evidence Storage
 
@@ -108,9 +130,11 @@ access, configurable retention/deletion, and no vendor cloud by default.
 ## Retention And Deletion
 
 Parents/admins control retention and deletion in the dashboard. Wipes remove
-database rows and encrypted evidence files from GuardianNode's storage. As with
-any application, deleted disk sectors may still be recoverable by forensic tools
-depending on the filesystem and storage hardware.
+database rows and encrypted evidence files from GuardianNode's storage. If a
+file operation fails, GuardianNode preserves a visible retry record instead of
+claiming deletion succeeded; pending-deletion evidence is excluded from new
+archives. As with any application, deleted disk sectors may still be recoverable
+by forensic tools depending on the filesystem and storage hardware.
 
 ## Sharing Data
 

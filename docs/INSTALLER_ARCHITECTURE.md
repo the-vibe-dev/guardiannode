@@ -4,8 +4,8 @@
 
 | Installer | Target | Tech | Output |
 |---|---|---|---|
-| Child Device (Windows) | Kid's Windows 10/11 PC, or all-in-one parent/child PC | Inno Setup 6 + PyInstaller bundle | `GuardianNodeChildSetup-0.1.0-alpha.1.exe` |
-| Server (Windows) | Parent's Windows server PC | Inno Setup 6 + PyInstaller backend bundle | `GuardianNodeServerSetup-0.1.0-alpha.1.exe` |
+| Child Device (Windows) | Kid's Windows 10/11 PC, or all-in-one parent/child PC | Inno Setup 6 + PyInstaller bundle | `GuardianNodeChildSetup-0.1.0-alpha.3.exe` |
+| Server (Windows) | Parent's Windows server PC | Inno Setup 6 + PyInstaller backend bundle | `GuardianNodeServerSetup-0.1.0-alpha.3.exe` |
 | Server (Linux) | Parent's Linux server PC | Shell script + systemd / Docker | `install.sh` + Docker Compose |
 
 ## Build Pipeline
@@ -22,9 +22,11 @@ The shipped child installer is implemented in
 Flow:
 
 1. Choose all-in-one mode or connect to an existing server.
-2. In separated mode, enter the explicit server URL and pairing code from the parent dashboard.
+2. In separated mode, enter the exact HTTPS URL and code and select the short-lived `.gnpair` bundle from the parent dashboard.
 3. In all-in-one mode, run a hardware probe and choose the model tier.
-4. Install the endpoint broker, agent, tray, watchdog services, optional backend, and scheduled logon tasks.
+4. Install the endpoint broker and watchdog services, visible tray logon task,
+   optional backend, and broker-launched per-session capture helper. Delete any
+   legacy independent agent task/service.
 5. Open the dashboard only when the installer knows the dashboard URL.
 
 Repair and upgrade installs preserve the established mode, pairing identity,
@@ -66,12 +68,11 @@ Target ACLs for clean-machine testing:
 | `%ProgramData%\GuardianNode\AgentSecure\queue.sqlite` and `queue.key` | Durable upload queue | Broker-owned target storage; SYSTEM + Administrators only after Windows ACL qualification |
 | `%ProgramData%\GuardianNode\logs\` | Agent/tray/backend logs | Service/agent append; Administrators read |
 
-The current architecture introduces the `GuardianNodeBroker` service so the
-interactive capture helper no longer needs to own the backend bearer token or
-durable queue. Clean Windows 11 alpha validation has qualified the installer
-path for technical-parent public alpha use. Re-run named-pipe ACL, ProgramData
-ACL, standard-user, upgrade/repair/uninstall, and multi-session checks before
-each public installer release.
+The `GuardianNodeBroker` service ensures the interactive capture helper does
+not own the backend bearer token or durable queue. Current broker/TLS changes
+invalidate older installer qualification evidence. Re-run named-pipe ACL,
+ProgramData ACL, standard-user, upgrade/repair/uninstall, sleep/wake, RDP, and
+multi-session checks on the exact artifacts before distribution.
 
 After installing on a Windows qualification machine, run the bundled ACL
 collector from an elevated PowerShell prompt:
@@ -95,7 +96,8 @@ Flow:
 1. Probe hardware and choose the model tier.
 2. Install Ollama and pull the chosen model(s).
 3. Install and start the WinSW backend service.
-4. Open the local web setup wizard at `http://127.0.0.1:8787/setup`.
+4. Generate the family CA/server certificate, trust that CA on the server, and
+   open `https://127.0.0.1:8787/setup`.
 
 Server repair/upgrade follows the same pre-upgrade snapshot and readiness gate,
 preserves `server.env`, and restarts the previous backend service if setup fails.
@@ -135,7 +137,8 @@ settings, loopback bind settings, and non-secret runtime defaults.
 7. Probes hardware, pulls Ollama models unless disabled, writes systemd, starts
    `guardiannode-backend.service`, and prints the local URL plus setup token.
 
-Fresh Linux installs bind to `127.0.0.1` and set `GUARDIANNODE_MDNS_ENABLED=false`.
+Fresh Linux installs enable TLS, bind to `127.0.0.1`, and set
+`GUARDIANNODE_MDNS_ENABLED=false`.
 Do not expose the service on a LAN until after first-run setup is complete.
 
 Docker Compose follows the same safety posture: the published port is bound to
@@ -143,10 +146,9 @@ Docker Compose follows the same safety posture: the published port is bound to
 
 ## Discovery
 
-mDNS is advisory only in this alpha. A child device must be configured with an
-explicit parent server URL because mDNS advertisements do not authenticate the
-server. Future enrollment should pin a server public key or certificate
-fingerprint together with a one-time enrollment secret.
+mDNS is advisory only. A child device uses the explicit HTTPS URL and family CA
+fingerprint carried in the parent-transferred `.gnpair` bundle; an mDNS
+advertisement alone is never trusted for enrollment.
 
 ## Service Naming
 

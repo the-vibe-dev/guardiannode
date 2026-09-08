@@ -1,6 +1,6 @@
 # When Windows says "Protected your PC"
 
-When you try to run `GuardianNodeChildSetup-0.1.0-alpha.1.exe` or `GuardianNodeServerSetup-0.1.0-alpha.1.exe`, Windows may show a blue popup that says:
+When you try to run `GuardianNodeChildSetup-0.1.0-alpha.3.exe` or `GuardianNodeServerSetup-0.1.0-alpha.3.exe`, Windows may show a blue popup that says:
 
 > **Windows protected your PC**
 > Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.
@@ -22,7 +22,7 @@ Before clicking through, you should make sure you downloaded the real GuardianNo
 1. **Check the file size** matches what's listed on the [Releases page](https://github.com/the-vibe-dev/guardiannode/releases).
 2. **Check the SHA-256 hash**. Open PowerShell (Win + R, type `powershell`, press Enter) and run:
    ```powershell
-   Get-FileHash -Algorithm SHA256 "$env:USERPROFILE\Downloads\GuardianNodeChildSetup-0.1.0-alpha.1.exe"
+   Get-FileHash -Algorithm SHA256 "$env:USERPROFILE\Downloads\GuardianNodeChildSetup-0.1.0-alpha.3.exe"
    ```
    Compare the output to the hash on the Releases page. They should match exactly.
 
