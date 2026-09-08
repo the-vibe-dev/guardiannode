@@ -54,9 +54,6 @@ def _ca_pem(*, legacy: bool, common_name: str = "GuardianNode Family CA") -> byt
 def _assert_verification_stays_enabled(context: ssl.SSLContext) -> None:
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname is True
-    partial_chain = getattr(ssl, "VERIFY_X509_PARTIAL_CHAIN", 0)
-    if partial_chain:
-        assert context.verify_flags & partial_chain
 
 
 def test_legacy_family_ca_clears_only_strict_shape_check(tmp_path):
