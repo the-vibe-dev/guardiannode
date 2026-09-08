@@ -117,6 +117,26 @@ def _sans() -> list[x509.GeneralName]:
     return names
 
 
+def _has_expected_authority_key_identifier(
+    cert: x509.Certificate,
+    ca_key: ec.EllipticCurvePrivateKey,
+) -> bool:
+    """Return whether a persisted leaf identifies the current family CA key.
+
+    Early beta certificates predated the Authority Key Identifier extension.
+    Python 3.13 enables OpenSSL's strict verifier by default and rejects those
+    otherwise valid leaves, so renew them under the unchanged family CA.
+    """
+    try:
+        actual = cert.extensions.get_extension_for_class(
+            x509.AuthorityKeyIdentifier
+        ).value
+    except x509.ExtensionNotFound:
+        return False
+    expected = x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key())
+    return actual.key_identifier == expected.key_identifier
+
+
 def ensure_server_certificate(*, renew_before_days: int = 30) -> tuple[str, str]:
     settings = settings_mod.settings
     ca_cert, ca_key = _load_or_create_ca()
@@ -127,7 +147,11 @@ def ensure_server_certificate(*, renew_before_days: int = 30) -> tuple[str, str]
         actual = {str(item.value) for item in cert.extensions.get_extension_for_class(
             x509.SubjectAlternativeName
         ).value}
-        if expires > datetime.now(UTC) + timedelta(days=renew_before_days) and expected == actual:
+        if (
+            expires > datetime.now(UTC) + timedelta(days=renew_before_days)
+            and expected == actual
+            and _has_expected_authority_key_identifier(cert, ca_key)
+        ):
             return str(settings.tls_cert_path), str(_materialize_leaf_key())
 
     key = ec.generate_private_key(ec.SECP256R1())
