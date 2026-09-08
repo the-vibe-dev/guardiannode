@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
+import json
 import sqlite3
+import time
+import zipfile
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import create_engine
 
 from app import settings as settings_mod
 from app.archive import crypto
 from app.archive.format import (
+    MANIFEST_FORMAT,
     ArchiveError,
+    _extract_validated,
+    _safe_member_target,
+    _safe_members,
     create_archive,
     inspect_archive,
     restore_archive,
@@ -179,3 +190,96 @@ def test_missing_database_evidence_fails_closed(archive_instance, tmp_path: Path
             tmp_path / "family.gna", data_dir=data_dir,
             db_url=f"sqlite:///{database}", passphrase="correct horse battery staple",
         )
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    [
+        r"..\outside.txt",
+        r"C:\outside.txt",
+        "C:/outside.txt",
+        r"\\server\share\outside.txt",
+        r"\\?\C:\outside.txt",
+        "payload/file.txt:stream",
+        "payload/CON.txt",
+        "payload/COM¹.txt",
+        "payload/CONOUT$",
+        "payload/name. ",
+        "payload//name.txt",
+    ],
+)
+def test_archive_rejects_windows_unsafe_member_names(member_name: str) -> None:
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(member_name, b"proof")
+    payload.seek(0)
+
+    with zipfile.ZipFile(payload) as archive:
+        with pytest.raises(ArchiveError, match="unsafe archive path"):
+            _safe_members(archive, deadline=time.monotonic() + 1)
+
+
+def test_archive_rejects_windows_case_collisions() -> None:
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("payload/Frame.jpg", b"one")
+        archive.writestr("payload/frame.jpg", b"two")
+    payload.seek(0)
+
+    with zipfile.ZipFile(payload) as archive:
+        with pytest.raises(ArchiveError, match="duplicate or non-portable"):
+            _safe_members(archive, deadline=time.monotonic() + 1)
+
+
+def test_archive_target_rejects_symlinked_parent(tmp_path: Path) -> None:
+    root = tmp_path / "destination"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "payload").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ArchiveError, match="uses a symlink"):
+        _safe_member_target(root.resolve(), "payload/outside.txt")
+
+    assert not (outside / "outside.txt").exists()
+
+
+def test_untrusted_archive_is_rejected_before_files_are_materialized(tmp_path: Path) -> None:
+    payload_bytes = b"attacker-controlled payload"
+    signer = Ed25519PrivateKey.generate()
+    public_bytes = signer.public_key().public_bytes_raw()
+    manifest = {
+        "format": MANIFEST_FORMAT,
+        "format_version": 2,
+        "record_counts": {"events": 0},
+        "files": [
+            {
+                "path": "payload.txt",
+                "size": len(payload_bytes),
+                "sha256": hashlib.sha256(payload_bytes).hexdigest(),
+            }
+        ],
+    }
+    manifest_bytes = crypto.canonical_json(manifest)
+    signature = {
+        "algorithm": "Ed25519",
+        "public_key": base64.b64encode(public_bytes).decode("ascii"),
+        "fingerprint": hashlib.sha256(public_bytes).hexdigest(),
+        "signature": base64.b64encode(signer.sign(manifest_bytes)).decode("ascii"),
+    }
+    zip_path = tmp_path / "untrusted.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("payload.txt", payload_bytes)
+        archive.writestr("manifest.json", manifest_bytes)
+        archive.writestr("manifest.sig", json.dumps(signature).encode("utf-8"))
+
+    destination = tmp_path / "extracted"
+    with pytest.raises(ArchiveError, match="enrolled recovery signer"):
+        _extract_validated(
+            zip_path,
+            destination,
+            trusted_signer=Ed25519PrivateKey.generate().public_key(),
+        )
+
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []

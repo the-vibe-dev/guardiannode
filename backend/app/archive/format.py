@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import tempfile
 import time
+import unicodedata
 import zipfile
 from contextlib import closing
 from datetime import UTC, datetime
@@ -35,6 +36,22 @@ MAX_TOTAL_SIZE = 12 * 1024 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 100
 MAX_EVENT_RECORDS = 1_000_000
 MAX_VALIDATION_SECONDS = 30 * 60
+MAX_MANIFEST_SIZE = 64 * 1024 * 1024
+MAX_SIGNATURE_SIZE = 64 * 1024
+
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+    *(f"COM{number}" for number in "¹²³"),
+    *(f"LPT{number}" for number in "¹²³"),
+}
+_WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"\\|?*')
 
 
 class ArchiveError(RuntimeError):
@@ -297,21 +314,60 @@ def _unlock(
     raise ArchiveError("unable to unlock archive: " + "; ".join(errors or ["no key slots"]))
 
 
+def _validated_member_path(name: str) -> PurePosixPath:
+    """Return one canonical archive-relative path safe on POSIX and Windows."""
+    raw = name[:-1] if name.endswith("/") else name
+    if not raw or "\x00" in raw or "\\" in raw:
+        raise ArchiveError(f"unsafe archive path: {name}")
+    path = PurePosixPath(raw)
+    if path.is_absolute() or not path.parts or path.as_posix() != raw:
+        raise ArchiveError(f"unsafe archive path: {name}")
+    for part in path.parts:
+        if part in {"", ".", ".."} or part.endswith((".", " ")):
+            raise ArchiveError(f"unsafe archive path: {name}")
+        if any(ord(char) < 32 or char in _WINDOWS_FORBIDDEN_CHARS for char in part):
+            raise ArchiveError(f"unsafe archive path: {name}")
+        if part.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+            raise ArchiveError(f"unsafe archive path: {name}")
+    return path
+
+
+def _portable_path_key(path: PurePosixPath) -> str:
+    """Windows-safe collision key for otherwise canonical member paths."""
+    return unicodedata.normalize("NFC", path.as_posix()).casefold()
+
+
+def _safe_member_target(root: Path, name: str) -> Path:
+    """Resolve a validated member under root immediately before filesystem use."""
+    relative = _validated_member_path(name)
+    native = root.joinpath(*relative.parts)
+    probe = native
+    while probe != root:
+        if probe.is_symlink():
+            raise ArchiveError(f"archive path uses a symlink: {name}")
+        probe = probe.parent
+    target = native.resolve(strict=False)
+    if target == root or not target.is_relative_to(root):
+        raise ArchiveError(f"archive path escapes extraction target: {name}")
+    return target
+
+
 def _safe_members(zf: zipfile.ZipFile, *, deadline: float) -> list[zipfile.ZipInfo]:
     members = zf.infolist()
     if len(members) > MAX_FILES:
         raise ArchiveError("archive contains too many files")
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     total_size = 0
     for member in members:
         if time.monotonic() > deadline:
             raise ArchiveError("archive validation time budget exceeded")
-        path = PurePosixPath(member.filename)
-        if path.is_absolute() or ".." in path.parts or not path.parts:
-            raise ArchiveError(f"unsafe archive path: {member.filename}")
-        if member.filename in seen:
-            raise ArchiveError(f"duplicate archive path: {member.filename}")
-        seen.add(member.filename)
+        path = _validated_member_path(member.filename)
+        key = _portable_path_key(path)
+        if key in seen:
+            raise ArchiveError(
+                f"duplicate or non-portable archive path: {member.filename} conflicts with {seen[key]}"
+            )
+        seen[key] = member.filename
         if member.file_size > MAX_MEMBER_SIZE:
             raise ArchiveError(f"archive member is too large: {member.filename}")
         total_size += member.file_size
@@ -325,6 +381,82 @@ def _safe_members(zf: zipfile.ZipFile, *, deadline: float) -> list[zipfile.ZipIn
     return members
 
 
+def _read_bounded_member(
+    zf: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    *,
+    limit: int,
+    label: str,
+    deadline: float,
+) -> bytes:
+    if member.is_dir() or member.file_size > limit:
+        raise ArchiveError(f"archive {label} is too large or invalid")
+    if time.monotonic() > deadline:
+        raise ArchiveError("archive validation time budget exceeded")
+    with zf.open(member, "r") as source:
+        value = source.read(limit + 1)
+    if len(value) > limit or len(value) != member.file_size:
+        raise ArchiveError(f"archive {label} is too large or invalid")
+    return value
+
+
+def _authenticate_manifest(
+    zf: zipfile.ZipFile,
+    members: list[zipfile.ZipInfo],
+    *,
+    deadline: float,
+    trusted_signer: Ed25519PublicKey | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    by_path = {_validated_member_path(member.filename).as_posix(): member for member in members}
+    try:
+        manifest_member = by_path["manifest.json"]
+        signature_member = by_path["manifest.sig"]
+    except KeyError as exc:
+        raise ArchiveError("archive manifest is missing or invalid") from exc
+    manifest_bytes = _read_bounded_member(
+        zf,
+        manifest_member,
+        limit=MAX_MANIFEST_SIZE,
+        label="manifest",
+        deadline=deadline,
+    )
+    signature_bytes = _read_bounded_member(
+        zf,
+        signature_member,
+        limit=MAX_SIGNATURE_SIZE,
+        label="signature",
+        deadline=deadline,
+    )
+    try:
+        manifest = json.loads(manifest_bytes)
+        signature = json.loads(signature_bytes)
+    except (TypeError, ValueError) as exc:
+        raise ArchiveError("archive manifest is missing or invalid") from exc
+    if not isinstance(manifest, dict) or not isinstance(signature, dict):
+        raise ArchiveError("archive manifest is missing or invalid")
+    if crypto.canonical_json(manifest) != manifest_bytes:
+        raise ArchiveError("archive manifest is not canonical")
+    if manifest.get("format") != MANIFEST_FORMAT or manifest.get("format_version") != 2:
+        raise ArchiveError("unsupported archive manifest")
+    try:
+        if signature.get("algorithm") != "Ed25519":
+            raise ValueError("unsupported signature algorithm")
+        public_raw = base64.b64decode(signature["public_key"], validate=True)
+        signed_value = base64.b64decode(signature["signature"], validate=True)
+        public = Ed25519PublicKey.from_public_bytes(public_raw)
+        public.verify(signed_value, manifest_bytes)
+        fingerprint = hashlib.sha256(public_raw).hexdigest()
+        if not secrets.compare_digest(fingerprint, str(signature["fingerprint"])):
+            raise ArchiveError("archive signer fingerprint does not match its public key")
+        if trusted_signer is not None:
+            trusted_raw = trusted_signer.public_bytes_raw()
+            if not secrets.compare_digest(public_raw, trusted_raw):
+                raise ArchiveError("archive signer is not the enrolled recovery signer")
+    except (InvalidSignature, KeyError, TypeError, ValueError) as exc:
+        raise ArchiveError("archive manifest signature is invalid") from exc
+    return manifest, signature
+
+
 def _extract_validated(
     zip_path: Path,
     destination: Path,
@@ -333,11 +465,18 @@ def _extract_validated(
 ) -> dict[str, Any]:
     deadline = time.monotonic() + MAX_VALIDATION_SECONDS
     destination.mkdir(parents=True, exist_ok=True)
+    root = destination.resolve(strict=True)
     with zipfile.ZipFile(zip_path) as zf:
         members = _safe_members(zf, deadline=deadline)
+        manifest, signature = _authenticate_manifest(
+            zf,
+            members,
+            deadline=deadline,
+            trusted_signer=trusted_signer,
+        )
         extracted_total = 0
         for member in members:
-            target = destination / PurePosixPath(member.filename)
+            target = _safe_member_target(root, member.filename)
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -357,29 +496,15 @@ def _extract_validated(
                     output.write(chunk)
             if written != member.file_size:
                 raise ArchiveError(f"archive member size changed during extraction: {member.filename}")
+    files = manifest.get("files")
+    if not isinstance(files, list) or any(not isinstance(entry, dict) for entry in files):
+        raise ArchiveError("archive manifest file inventory is invalid")
     try:
-        manifest_bytes = (destination / "manifest.json").read_bytes()
-        manifest = json.loads(manifest_bytes)
-        signature = json.loads((destination / "manifest.sig").read_text("utf-8"))
-    except (OSError, ValueError) as exc:
-        raise ArchiveError("archive manifest is missing or invalid") from exc
-    if crypto.canonical_json(manifest) != manifest_bytes:
-        raise ArchiveError("archive manifest is not canonical")
-    if manifest.get("format") != MANIFEST_FORMAT or manifest.get("format_version") != 2:
-        raise ArchiveError("unsupported archive manifest")
-    try:
-        public = Ed25519PublicKey.from_public_bytes(base64.b64decode(signature["public_key"]))
-        public.verify(base64.b64decode(signature["signature"]), manifest_bytes)
-        public_raw = base64.b64decode(signature["public_key"])
-        if hashlib.sha256(public_raw).hexdigest() != signature["fingerprint"]:
-            raise ArchiveError("archive signer fingerprint does not match its public key")
-        if trusted_signer is not None:
-            trusted_raw = trusted_signer.public_bytes_raw()
-            if not secrets.compare_digest(public_raw, trusted_raw):
-                raise ArchiveError("archive signer is not the enrolled recovery signer")
-    except (InvalidSignature, KeyError, TypeError, ValueError) as exc:
-        raise ArchiveError("archive manifest signature is invalid") from exc
-    expected_paths = {entry["path"] for entry in manifest.get("files", [])}
+        expected_paths = {_validated_member_path(str(entry["path"])).as_posix() for entry in files}
+    except KeyError as exc:
+        raise ArchiveError("archive manifest file inventory is invalid") from exc
+    if len(expected_paths) != len(files):
+        raise ArchiveError("archive manifest contains duplicate file paths")
     if int(manifest.get("record_counts", {}).get("events", 0)) > MAX_EVENT_RECORDS:
         raise ArchiveError("archive contains too many event records")
     actual_paths = {
@@ -388,10 +513,15 @@ def _extract_validated(
     }
     if actual_paths != expected_paths:
         raise ArchiveError("archive file inventory does not match payload")
-    for entry in manifest["files"]:
-        path = destination / PurePosixPath(entry["path"])
-        if path.stat().st_size != entry["size"] or _sha256(path) != entry["sha256"]:
-            raise ArchiveError(f"archive file failed integrity verification: {entry['path']}")
+    for entry in files:
+        member_path = str(entry["path"])
+        path = _safe_member_target(root, member_path)
+        try:
+            matches = path.stat().st_size == int(entry["size"]) and _sha256(path) == entry["sha256"]
+        except (KeyError, OSError, TypeError, ValueError) as exc:
+            raise ArchiveError(f"archive file inventory is invalid: {member_path}") from exc
+        if not matches:
+            raise ArchiveError(f"archive file failed integrity verification: {member_path}")
     return {"manifest": manifest, "signer": signature}
 
 
