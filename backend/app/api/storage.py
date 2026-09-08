@@ -251,7 +251,7 @@ def export_storage(
         actor=str(user.id),
         action="storage.export",
         target=export_id,
-        details={"size_bytes": dest.stat().st_size, "format": "guardiannode-archive-v1"},
+        details={"size_bytes": dest.stat().st_size, "format": "guardiannode-archive-v2"},
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
@@ -282,8 +282,8 @@ def wipe_storage(
     deleted = {"blobs": 0, "low_alerts": 0, "low_risk_results": 0, "low_events": 0, "old_events": 0}
     if req.screenshots:
         for blob in db.query(EvidenceBlob).filter(EvidenceBlob.kind == "screenshot").all():
-            purge.delete_blob(db, blob)
-            deleted["blobs"] += 1
+            if purge.delete_blob(db, blob):
+                deleted["blobs"] += 1
         for event in db.query(Event).filter(Event.screenshot_blob_id.isnot(None)).all():
             event.screenshot_blob_id = None
 

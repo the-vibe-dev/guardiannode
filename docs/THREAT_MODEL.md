@@ -23,16 +23,16 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
 ## 2. Trust boundaries
 
 ```
-[Child PC] agent ──HTTP on trusted LAN/VPN/TLS──> [Local backend] <──cookie auth── [Parent browser]
+[Child PC] agent ──pinned family-CA HTTPS──> [Local backend] <──secure cookie── [Parent browser]
  (screenshots + OCR text)            │
                                      ├─ encrypted evidence at rest (master key)
                                      └─ Ollama vision/text inference (LAN, no SaaS)
 ```
 
-- **Agent -> backend**: device-token authenticated. The agent reviews visible
+- **Agent -> backend**: family-CA TLS plus device-token authentication. The agent reviews visible
   screen content from the configured Windows session. Runs on loopback, a
   trusted family LAN, or a VPN/reverse proxy. No GuardianNode cloud is in the
-  path by default.
+  path by default. Mutual TLS is not implemented.
 - **Parent → backend**: cookie-based session after password login; recovery code
   for reset.
 - **Backend → inference (Ollama)**: LAN endpoints the operator controls. No model
@@ -41,8 +41,9 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
 ## 3. Adversaries and what we do about them
 
 ### 3.1 A curious or motivated child (on the monitored device)
-- **Monitoring interruption.** Mitigation: agent runs as a scheduled task; the
-  backend tracks `last_seen` and surfaces offline/heartbeat gaps to the parent. We
+- **Monitoring interruption.** Mitigation: the SYSTEM endpoint broker launches
+  one capture process per active Windows session; a watchdog and backend
+  heartbeat tracking surface interruptions to the parent. We
   do **not** hide the agent — GuardianNode is visible monitoring by design (a tray
   icon and clear install footprint), not stealthware.
 - **Local pause abuse.** Windows installer builds keep pause state under the
@@ -52,11 +53,13 @@ Related reading: [PRIVACY.md](https://github.com/the-vibe-dev/guardiannode/blob/
   parents and is not a tamper-proof consumer product.
 
 ### 3.2 Network attacker on the LAN
-- **Sniff agent->backend traffic.** Mitigation: use all-in-one mode, a trusted
-  LAN, VPN, or reverse-proxy TLS. Evidence is encrypted at rest regardless. mDNS
-  advertising can be disabled.
+- **Sniff or redirect agent->backend traffic.** Mitigation: the family server
+  issues a local CA, pairing exports the CA and exact URL in an expiring bundle,
+  and the agent pins both. A trusted VPN remains useful for network isolation.
+  Evidence is encrypted at rest regardless. mDNS advertising can be disabled.
 - **Reach the backend ingest API.** Ingest is device-token authenticated; in
-  all-in-one mode the backend binds `127.0.0.1` only.
+  all-in-one mode the backend binds `127.0.0.1` only. Tokens use a keyed digest
+  lookup, per-device budgets, replay-safe idempotency, and bounded request bodies.
 
 ### 3.3 Attacker who steals the backend disk / database
 - **Read evidence directly.** Mitigation: evidence blobs and redacted text are

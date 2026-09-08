@@ -23,11 +23,12 @@ backup.
 
 Options:
 
-- **Reinstall fresh.** This wipes the GuardianNode database and starts over. All historical alerts are lost. The agent and dashboard continue to work going forward. To do this, run the installer again with the `/FORCE_RESET` switch:
-  ```cmd
-  GuardianNodeChildSetup-0.1.0-alpha.1.exe /FORCE_RESET
-  ```
-  ⚠️ This is irreversible. Only do this if you've truly lost both keys.
+- **Start fresh only after a backup.** The installer does not expose a
+  `/FORCE_RESET` shortcut. Stop GuardianNode, back up the complete ProgramData
+  directory, uninstall, and have a technical administrator move the old data
+  directory aside before reinstalling. Do not delete it until you have decided
+  historical evidence is no longer needed. A fresh install requires every
+  child device to be paired again.
 
 - **Restore from a backup.** If you backed up the backend data directory and
   evidence master key, restore that backup. DPAPI-wrapped Windows keys are

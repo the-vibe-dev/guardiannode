@@ -20,9 +20,6 @@ ALLOWED_ACTIONS = {
     "health",
     "status",
     "submit_screenshot",
-    "pause",
-    "resume",
-    "verify_parent",
 }
 
 
@@ -142,23 +139,6 @@ def _validate_payload(action: str, payload: dict[str, Any]) -> None:
                 if not isinstance(value, str):
                     raise ProtocolError(f"{key} must be a string")
                 _bound_string(key, value, MAX_STRING_BYTES)
-        return
-    if action in {"pause", "resume", "verify_parent"}:
-        actor = payload.get("actor", "")
-        if actor is not None:
-            if not isinstance(actor, str):
-                raise ProtocolError("actor must be a string")
-            _bound_string("actor", actor, MAX_STRING_BYTES)
-        parent_password = payload.get("parent_password")
-        if not isinstance(parent_password, str) or not parent_password:
-            raise ProtocolError("parent_password is required")
-        _bound_string("parent_password", parent_password, MAX_STRING_BYTES)
-        duration = payload.get("duration_seconds")
-        if action == "pause":
-            if not isinstance(duration, int) or duration <= 0:
-                raise ProtocolError("duration_seconds must be a positive integer")
-            if duration > 24 * 60 * 60:
-                raise ProtocolError("duration_seconds exceeds maximum")
         return
     if payload:
         for key, value in payload.items():

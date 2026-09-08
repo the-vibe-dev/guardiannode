@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -26,14 +27,23 @@ log = logging.getLogger(__name__)
 
 
 def delete_blob(session: Session, blob: EvidenceBlob) -> bool:
-    """Delete one evidence blob row and its encrypted file. Returns True if the
-    row was deleted (file-unlink failures are logged but don't strand the row)."""
+    """Delete one blob only after its file is gone; retain failures for retry."""
+    now = datetime.now(UTC)
+    blob.deletion_state = "pending_delete"
+    blob.delete_requested_at = blob.delete_requested_at or now
+    blob.delete_attempts = int(blob.delete_attempts or 0) + 1
     try:
         resolve_stored_evidence_path(blob.encrypted_path).unlink(missing_ok=True)
-    except (FileNotFoundError, UnsafeEvidencePathError) as e:
-        log.warning("skipping unsafe or missing evidence file %s: %s", blob.encrypted_path, e)
+    except UnsafeEvidencePathError as e:
+        blob.deletion_state = "delete_failed"
+        blob.last_delete_error = str(e)[:2048]
+        log.warning("refusing unsafe evidence deletion %s: %s", blob.encrypted_path, e)
+        return False
     except Exception as e:
+        blob.deletion_state = "delete_failed"
+        blob.last_delete_error = str(e)[:2048]
         log.warning("could not unlink evidence file %s: %s", blob.encrypted_path, e)
+        return False
     session.delete(blob)
     return True
 
@@ -52,8 +62,29 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
 
+        rows = session.query(Event).filter(Event.event_id.in_(chunk)).all()
+        deletable_ids: list[str] = []
+        for event in rows:
+            blobs = session.query(EvidenceBlob).filter(EvidenceBlob.event_id == event.event_id).all()
+            failed = False
+            for blob in blobs:
+                if delete_blob(session, blob):
+                    deleted["blobs"] += 1
+                else:
+                    failed = True
+            if not failed:
+                deletable_ids.append(event.event_id)
+            else:
+                event.deletion_state = "pending_delete"
+                event.deletion_requested_at = (
+                    event.deletion_requested_at or datetime.now(UTC)
+                )
+
+        if not deletable_ids:
+            continue
         risk_ids = [
-            r[0] for r in session.query(RiskResult.risk_id).filter(RiskResult.event_id.in_(chunk)).all()
+            r[0] for r in session.query(RiskResult.risk_id)
+            .filter(RiskResult.event_id.in_(deletable_ids)).all()
         ]
         if risk_ids:
             alert_ids = [
@@ -78,12 +109,8 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
                 session.query(RiskResult).filter(RiskResult.risk_id.in_(risk_ids)).delete(synchronize_session=False)
             )
 
-        for blob in session.query(EvidenceBlob).filter(EvidenceBlob.event_id.in_(chunk)).all():
-            delete_blob(session, blob)
-            deleted["blobs"] += 1
-
         deleted["events"] += (
-            session.query(Event).filter(Event.event_id.in_(chunk)).delete(synchronize_session=False)
+            session.query(Event).filter(Event.event_id.in_(deletable_ids)).delete(synchronize_session=False)
         )
     return deleted
 
@@ -98,6 +125,27 @@ def delete_orphaned_blob_files(session: Session) -> int:
         .all()
     )
     for blob in orphans:
-        delete_blob(session, blob)
-        n += 1
+        if delete_blob(session, blob):
+            n += 1
     return n
+
+
+def retry_pending_deletions(session: Session, *, limit: int = 100) -> dict[str, int]:
+    """Retry failed blob unlinks and finish their pending event cascades."""
+    blobs = (
+        session.query(EvidenceBlob)
+        .filter(EvidenceBlob.deletion_state.in_(["pending_delete", "delete_failed"]))
+        .order_by(EvidenceBlob.delete_requested_at.asc())
+        .limit(limit)
+        .all()
+    )
+    event_ids = {blob.event_id for blob in blobs if blob.event_id}
+    removed = sum(1 for blob in blobs if delete_blob(session, blob))
+    session.flush()
+    finished = {"events": 0, "risk_results": 0, "alerts": 0, "blobs": removed, "guardian_reviews": 0}
+    for event_id in event_ids:
+        if session.query(EvidenceBlob).filter(EvidenceBlob.event_id == event_id).count() == 0:
+            counts = delete_events(session, [event_id])
+            for key, value in counts.items():
+                finished[key] += value
+    return finished

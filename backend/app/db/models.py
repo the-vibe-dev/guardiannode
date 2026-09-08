@@ -132,6 +132,10 @@ class Event(Base):
     event_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     key_version: Mapped[int] = mapped_column(Integer, default=1)
+    deletion_state: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class RiskResult(Base):
@@ -276,6 +280,12 @@ class EvidenceBlob(Base):
     key_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    deletion_state: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    delete_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    delete_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_delete_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AuditLog(Base):
@@ -357,6 +367,7 @@ class ChildRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class Setting(Base):
@@ -388,3 +399,55 @@ class BackupRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     restore_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ConsentRecord(Base):
+    __tablename__ = "consent_records"
+    __table_args__ = (Index("ix_consent_records_user_time", "user_id", "created_at"),)
+
+    consent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    notice_version: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32))  # granted | withdrawn
+    choices: Mapped[dict] = mapped_column(JSON, default=dict)
+    supersedes_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DeviceCommand(Base):
+    __tablename__ = "device_commands"
+    __table_args__ = (
+        Index("ix_device_commands_device_status_time", "device_id", "status", "created_at"),
+        Index("ix_device_commands_alert_time", "alert_id", "created_at"),
+    )
+
+    command_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(64), ForeignKey("devices.device_id"))
+    alert_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    command_type: Mapped[str] = mapped_column(String(32))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    preview: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    undo_of: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class DigestRun(Base):
+    __tablename__ = "digest_runs"
+    __table_args__ = (
+        Index("ux_digest_runs_local_day", "local_date", "timezone", unique=True),
+        Index("ix_digest_runs_status_time", "status", "created_at"),
+    )
+
+    digest_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    local_date: Mapped[str] = mapped_column(String(10))
+    timezone: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

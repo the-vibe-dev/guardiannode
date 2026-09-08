@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,11 +33,58 @@ from app.services import encryption, screenshot_ingest
 
 log = logging.getLogger(__name__)
 
-_queue: asyncio.Queue | None = None
+_queue: FairDeviceQueue | None = None
 _MAX_PENDING = 500  # backpressure: refuse new frames if the server is this far behind
+_MAX_PENDING_BYTES = 1024 * 1024 * 1024
+_MAX_DEVICE_PENDING = 50
+_MAX_DEVICE_PENDING_BYTES = 256 * 1024 * 1024
 _MAX_ATTEMPTS = 5
 _BACKOFF_SECONDS = (30, 120, 300, 900, 1800)
 _PENDING_STATE_READY = "ready"
+
+
+class FairDeviceQueue:
+    """FIFO per child, round-robin across children."""
+
+    def __init__(self, maxsize: int) -> None:
+        self.maxsize = maxsize
+        self._ready_devices: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
+        self._by_device: dict[str, deque[str]] = defaultdict(deque)
+        self._size = 0
+
+    def qsize(self) -> int:
+        return self._size
+
+    def full(self) -> bool:
+        return self._size >= self.maxsize
+
+    def put_nowait(self, token: str) -> None:
+        if self.full():
+            raise asyncio.QueueFull
+        meta = _load_meta(token) or {}
+        device_id = str(meta.get("device_id") or "unknown")
+        device_queue = self._by_device[device_id]
+        if not device_queue:
+            self._ready_devices.put_nowait(device_id)
+        device_queue.append(token)
+        self._size += 1
+
+    async def get(self) -> str:
+        device_id = await self._ready_devices.get()
+        self._ready_devices.task_done()
+        device_queue = self._by_device[device_id]
+        token = device_queue.popleft()
+        self._size -= 1
+        if device_queue:
+            self._ready_devices.put_nowait(device_id)
+        else:
+            del self._by_device[device_id]
+        return token
+
+    def task_done(self) -> None:
+        # Work accounting belongs to the durable files; the ready-device queue
+        # is acknowledged in get(). Kept for asyncio.Queue-compatible callers.
+        return None
 
 
 def _pending_dir() -> Path:
@@ -51,7 +99,7 @@ def _dead_letter_dir() -> Path:
     return p
 
 
-def get_queue() -> asyncio.Queue:
+def get_queue() -> FairDeviceQueue:
     global _queue
     try:
         running_loop = asyncio.get_running_loop()
@@ -64,7 +112,7 @@ def get_queue() -> asyncio.Queue:
         # A fresh ASGI lifespan may run on a new event loop (notably service
         # restarts and concurrent TestClient qualification). Pending frames are
         # durable on disk and loop() replays them into this new queue.
-        _queue = asyncio.Queue(maxsize=_MAX_PENDING)
+        _queue = FairDeviceQueue(maxsize=_MAX_PENDING)
     return _queue
 
 
@@ -78,6 +126,39 @@ def pending_count() -> int:
 
 def max_pending() -> int:
     return _MAX_PENDING
+
+
+def pending_usage(device_id: str | None = None) -> tuple[int, int]:
+    """Return durable pending frame and encrypted-byte totals."""
+    count = total = 0
+    directory = _pending_dir()
+    for metadata_path in directory.glob("*.json"):
+        meta = _load_meta(metadata_path.stem)
+        if meta is None or (device_id is not None and meta.get("device_id") != device_id):
+            continue
+        encrypted_path = directory / f"{metadata_path.stem}.enc"
+        if not encrypted_path.is_file():
+            continue
+        count += 1
+        try:
+            total += encrypted_path.stat().st_size
+        except OSError:
+            pass
+    return count, total
+
+
+def can_accept(device_id: str, incoming_bytes: int) -> tuple[bool, str | None]:
+    family_count, family_bytes = pending_usage()
+    device_count, device_bytes = pending_usage(device_id)
+    if device_count >= _MAX_DEVICE_PENDING:
+        return False, "This device has 50 frames waiting for review."
+    if device_bytes + incoming_bytes > _MAX_DEVICE_PENDING_BYTES:
+        return False, "This device has 256 MiB waiting for review."
+    if family_count >= _MAX_PENDING:
+        return False, "The family classifier queue has 500 frames waiting."
+    if family_bytes + incoming_bytes > _MAX_PENDING_BYTES:
+        return False, "The family classifier queue has reached 1 GiB."
+    return True, None
 
 
 def _now_iso() -> str:
@@ -281,7 +362,7 @@ def _ready_tokens() -> list[str]:
     return tokens
 
 
-def requeue_pending(q: asyncio.Queue | None = None) -> int:
+def requeue_pending(q: Any | None = None) -> int:
     """Requeue viable pending frames newest-first and discard stale backlog."""
     queue = q or get_queue()
     replay_limit = int(

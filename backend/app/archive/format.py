@@ -5,9 +5,11 @@ import base64
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import sqlite3
 import tempfile
+import time
 import zipfile
 from contextlib import closing
 from datetime import UTC, datetime
@@ -25,10 +27,14 @@ from app.archive.identity import identity_path, load_or_create
 from app.db.maintenance import backup_database, database_schema_revision, sqlite_path_from_url
 from app.services import encryption
 
-FORMAT = "guardiannode-archive-v1"
-MANIFEST_FORMAT = "guardiannode-archive-manifest-v1"
+FORMAT = "guardiannode-archive-v2"
+MANIFEST_FORMAT = "guardiannode-archive-manifest-v2"
 MAX_FILES = 100_000
-MAX_MEMBER_SIZE = 8 * 1024 * 1024 * 1024
+MAX_MEMBER_SIZE = 2 * 1024 * 1024 * 1024
+MAX_TOTAL_SIZE = 12 * 1024 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 100
+MAX_EVENT_RECORDS = 1_000_000
+MAX_VALIDATION_SECONDS = 30 * 60
 
 
 class ArchiveError(RuntimeError):
@@ -86,7 +92,10 @@ def _write_logical_records(database: Path, records_dir: Path) -> dict[str, int]:
             column_names = [str(row[1]) for row in info]
             count = 0
             with (records_dir / f"{table}.jsonl").open("wb") as output:
-                for row in conn.execute(f"SELECT * FROM {quoted}"):
+                where = ""
+                if "deletion_state" in column_names and table in {"events", "evidence_blobs"}:
+                    where = " WHERE deletion_state = 'active'"
+                for row in conn.execute(f"SELECT * FROM {quoted}{where}"):
                     record_id = _record_id(primary, row) if primary else {"row_number": count}
                     payload = {
                         "record_id": record_id,
@@ -108,26 +117,17 @@ def _copy_evidence(
     destination = payload / "evidence"
     count = total = 0
     destination.mkdir(parents=True)
-    for path in source.rglob("*") if source.exists() else ():
-        if path.is_symlink():
-            raise ArchiveError(f"refusing symlink in evidence directory: {path}")
-        if not path.is_file():
-            continue
-        relative = path.relative_to(source)
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(path, target)
-        count += 1
-        total += target.stat().st_size
-    archived = {
-        path.relative_to(destination).as_posix()
-        for path in destination.rglob("*") if path.is_file()
-    }
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         has_table = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence_blobs'"
         ).fetchone()
-        rows = conn.execute("SELECT blob_id, encrypted_path FROM evidence_blobs").fetchall() if has_table else []
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(evidence_blobs)").fetchall()
+        } if has_table else set()
+        where = " WHERE deletion_state = 'active'" if "deletion_state" in columns else ""
+        rows = conn.execute(
+            f"SELECT blob_id, encrypted_path FROM evidence_blobs{where}"
+        ).fetchall() if has_table else []
     root = source.resolve()
     evidence_map: dict[str, str] = {}
     for blob_id, stored_path in rows:
@@ -137,8 +137,18 @@ def _copy_evidence(
         if not resolved.is_relative_to(root):
             raise ArchiveError(f"evidence path escapes the evidence directory: {blob_id}")
         relative_path = resolved.relative_to(root).as_posix()
-        if relative_path not in archived:
+        probe = candidate
+        while probe != root:
+            if probe.is_symlink():
+                raise ArchiveError(f"database-referenced evidence uses a symlink: {blob_id}")
+            probe = probe.parent
+        if not resolved.is_file():
             raise ArchiveError(f"database-referenced evidence is missing: {blob_id}")
+        target = destination / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(resolved, target)
+        count += 1
+        total += target.stat().st_size
         evidence_map[str(blob_id)] = relative_path
     return count, total, evidence_map
 
@@ -213,7 +223,7 @@ def create_archive(
             key_path.write_bytes(encryption.get_master_key())
         manifest = {
             "format": MANIFEST_FORMAT,
-            "format_version": 1,
+            "format_version": 2,
             "application_version": __version__,
             "schema_version": database_schema_revision(database),
             "export_timestamp": datetime.now(UTC).isoformat(),
@@ -248,7 +258,7 @@ def create_archive(
         _zip_payload(payload, zip_path)
         header = {
             "format": FORMAT,
-            "format_version": 1,
+            "format_version": 2,
             "application_version": __version__,
             "schema_version": manifest["schema_version"],
             "created_at": manifest["export_timestamp"],
@@ -267,7 +277,7 @@ def inspect_archive(path: Path) -> dict[str, Any]:
             header, _ = crypto.read_header(stream)
     except (OSError, crypto.CryptoError) as exc:
         raise ArchiveError(str(exc)) from exc
-    if header.get("format") != FORMAT or header.get("format_version") != 1:
+    if header.get("format") != FORMAT or header.get("format_version") != 2:
         raise ArchiveError("unsupported GuardianNode archive version")
     return header
 
@@ -287,12 +297,15 @@ def _unlock(
     raise ArchiveError("unable to unlock archive: " + "; ".join(errors or ["no key slots"]))
 
 
-def _safe_members(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+def _safe_members(zf: zipfile.ZipFile, *, deadline: float) -> list[zipfile.ZipInfo]:
     members = zf.infolist()
     if len(members) > MAX_FILES:
         raise ArchiveError("archive contains too many files")
     seen: set[str] = set()
+    total_size = 0
     for member in members:
+        if time.monotonic() > deadline:
+            raise ArchiveError("archive validation time budget exceeded")
         path = PurePosixPath(member.filename)
         if path.is_absolute() or ".." in path.parts or not path.parts:
             raise ArchiveError(f"unsafe archive path: {member.filename}")
@@ -301,15 +314,49 @@ def _safe_members(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
         seen.add(member.filename)
         if member.file_size > MAX_MEMBER_SIZE:
             raise ArchiveError(f"archive member is too large: {member.filename}")
+        total_size += member.file_size
+        if total_size > MAX_TOTAL_SIZE:
+            raise ArchiveError("archive aggregate expansion is too large")
+        if member.file_size > 1024 * 1024:
+            if member.compress_size <= 0 or member.file_size / member.compress_size > MAX_COMPRESSION_RATIO:
+                raise ArchiveError(f"archive member compression ratio is too high: {member.filename}")
         if (member.external_attr >> 16) & 0o170000 == 0o120000:
             raise ArchiveError(f"archive links are not allowed: {member.filename}")
     return members
 
 
-def _extract_validated(zip_path: Path, destination: Path) -> dict[str, Any]:
+def _extract_validated(
+    zip_path: Path,
+    destination: Path,
+    *,
+    trusted_signer: Ed25519PublicKey | None = None,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + MAX_VALIDATION_SECONDS
+    destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as zf:
-        members = _safe_members(zf)
-        zf.extractall(destination, members=members)
+        members = _safe_members(zf, deadline=deadline)
+        extracted_total = 0
+        for member in members:
+            target = destination / PurePosixPath(member.filename)
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            written = 0
+            with zf.open(member, "r") as source, target.open("xb") as output:
+                while True:
+                    if time.monotonic() > deadline:
+                        raise ArchiveError("archive validation time budget exceeded")
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    extracted_total += len(chunk)
+                    if written > member.file_size or extracted_total > MAX_TOTAL_SIZE:
+                        raise ArchiveError("archive expanded beyond its declared bounds")
+                    output.write(chunk)
+            if written != member.file_size:
+                raise ArchiveError(f"archive member size changed during extraction: {member.filename}")
     try:
         manifest_bytes = (destination / "manifest.json").read_bytes()
         manifest = json.loads(manifest_bytes)
@@ -318,7 +365,7 @@ def _extract_validated(zip_path: Path, destination: Path) -> dict[str, Any]:
         raise ArchiveError("archive manifest is missing or invalid") from exc
     if crypto.canonical_json(manifest) != manifest_bytes:
         raise ArchiveError("archive manifest is not canonical")
-    if manifest.get("format") != MANIFEST_FORMAT or manifest.get("format_version") != 1:
+    if manifest.get("format") != MANIFEST_FORMAT or manifest.get("format_version") != 2:
         raise ArchiveError("unsupported archive manifest")
     try:
         public = Ed25519PublicKey.from_public_bytes(base64.b64decode(signature["public_key"]))
@@ -326,9 +373,15 @@ def _extract_validated(zip_path: Path, destination: Path) -> dict[str, Any]:
         public_raw = base64.b64decode(signature["public_key"])
         if hashlib.sha256(public_raw).hexdigest() != signature["fingerprint"]:
             raise ArchiveError("archive signer fingerprint does not match its public key")
+        if trusted_signer is not None:
+            trusted_raw = trusted_signer.public_bytes_raw()
+            if not secrets.compare_digest(public_raw, trusted_raw):
+                raise ArchiveError("archive signer is not the enrolled recovery signer")
     except (InvalidSignature, KeyError, TypeError, ValueError) as exc:
         raise ArchiveError("archive manifest signature is invalid") from exc
     expected_paths = {entry["path"] for entry in manifest.get("files", [])}
+    if int(manifest.get("record_counts", {}).get("events", 0)) > MAX_EVENT_RECORDS:
+        raise ArchiveError("archive contains too many event records")
     actual_paths = {
         path.relative_to(destination).as_posix() for path in destination.rglob("*")
         if path.is_file() and path.name not in {"manifest.json", "manifest.sig"}
@@ -345,6 +398,7 @@ def _extract_validated(zip_path: Path, destination: Path) -> dict[str, Any]:
 def verify_archive(
     path: Path, *, passphrase: str | None = None,
     private_key: X25519PrivateKey | None = None, master_key: bytes | None = None,
+    trusted_signer: Ed25519PublicKey | None = None,
 ) -> dict[str, Any]:
     header = inspect_archive(path)
     key = _unlock(header, passphrase=passphrase, private_key=private_key, master_key=master_key)
@@ -353,7 +407,7 @@ def verify_archive(
         zip_path = root / "payload.zip"
         try:
             crypto.decrypt_file(path, zip_path, key)
-            result = _extract_validated(zip_path, root / "payload")
+            result = _extract_validated(zip_path, root / "payload", trusted_signer=trusted_signer)
         except (OSError, zipfile.BadZipFile, crypto.CryptoError) as exc:
             raise ArchiveError(str(exc)) from exc
     return {"ok": True, "header": header, **result}
@@ -362,6 +416,7 @@ def verify_archive(
 def extract_archive(
     path: Path, destination: Path, *, passphrase: str | None = None,
     private_key: X25519PrivateKey | None = None, master_key: bytes | None = None,
+    trusted_signer: Ed25519PublicKey | None = None,
 ) -> dict[str, Any]:
     if destination.exists():
         raise ArchiveError(f"refusing to overwrite extraction target: {destination}")
@@ -375,7 +430,7 @@ def extract_archive(
     zip_path = staging.with_name(f".{destination.name}.payload.partial.zip")
     try:
         crypto.decrypt_file(path, zip_path, key)
-        result = _extract_validated(zip_path, staging)
+        result = _extract_validated(zip_path, staging, trusted_signer=trusted_signer)
         zip_path.unlink()
         os.replace(staging, destination)
         return {"ok": True, "header": header, **result, "destination": str(destination)}
@@ -388,12 +443,21 @@ def extract_archive(
 def restore_archive(
     path: Path, target: Path, *, passphrase: str | None = None,
     private_key: X25519PrivateKey | None = None, dry_run: bool = False,
+    trusted_signer: Ed25519PublicKey | None = None,
 ) -> dict[str, Any]:
+    if trusted_signer is None:
+        raise ArchiveError("restore requires an enrolled recovery signer public key")
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise ArchiveError("restore target must be an empty directory")
     with tempfile.TemporaryDirectory(prefix="guardiannode-restore-") as temporary:
         extracted = Path(temporary) / "archive"
-        result = extract_archive(path, extracted, passphrase=passphrase, private_key=private_key)
+        result = extract_archive(
+            path,
+            extracted,
+            passphrase=passphrase,
+            private_key=private_key,
+            trusted_signer=trusted_signer,
+        )
         manifest = result["manifest"]
         if manifest.get("export_mode") != "portable":
             raise ArchiveError("clean-host restore requires a portable archive")
@@ -419,15 +483,40 @@ def restore_archive(
                         "UPDATE evidence_blobs SET encrypted_path=? WHERE blob_id=?",
                         (relative_path, blob_id),
                     )
+                # Restored active state is quarantined. A parent must explicitly
+                # re-pair devices and re-enable every integration on the new host.
+                conn.execute(
+                    "UPDATE devices SET paired=0, token_hash=NULL, status='re_pair_required'"
+                )
+                conn.execute(
+                    "UPDATE users SET session_revoked_at=?",
+                    (datetime.now(UTC).isoformat(),),
+                )
+                conn.execute("UPDATE pairing_codes SET used=1")
+                conn.execute("UPDATE notification_jobs SET status='cancelled'")
+                for key in ("notification_settings", "complete_backup_config"):
+                    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+                    if row:
+                        try:
+                            config = json.loads(row[0])
+                        except (TypeError, ValueError):
+                            config = {}
+                        config["enabled"] = False
+                        for secret_key in (
+                            "password_enc", "smtp_password", "webhook_url", "hook_argv",
+                            "recipient_public_key",
+                        ):
+                            config.pop(secret_key, None)
+                        conn.execute(
+                            "UPDATE settings SET value=? WHERE key=?",
+                            (json.dumps(config, sort_keys=True), key),
+                        )
                 conn.commit()
-            for directory in ("evidence", "configuration", "key_material"):
+            for directory in ("evidence", "key_material"):
                 source = extracted / directory
                 if source.exists():
                     destination = staging / ("keys" if directory == "key_material" else directory)
                     shutil.copytree(source, destination, dirs_exist_ok=True)
-            server_env = staging / "configuration" / "server.env"
-            if server_env.exists():
-                shutil.copy2(server_env, staging / "server.env")
             for directory_path in (staging, staging / "keys", staging / "evidence"):
                 if os.name != "nt" and directory_path.exists():
                     os.chmod(directory_path, 0o700)

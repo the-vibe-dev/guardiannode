@@ -50,7 +50,7 @@ Name: "{commonappdata}\GuardianNode\keys"; Permissions: system-modify
 Name: "{commonappdata}\GuardianNode\evidence"; Permissions: system-modify
 
 [Icons]
-Name: "{commonprograms}\GuardianNode Server\Open Dashboard"; Filename: "http://127.0.0.1:8787/setup"
+Name: "{commonprograms}\GuardianNode Server\Open Dashboard"; Filename: "https://127.0.0.1:8787/setup"
 Name: "{commonprograms}\GuardianNode Server\Show Setup Token"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\show_setup_token.ps1"""
 Name: "{commonprograms}\GuardianNode Server\Stop service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "stop"
 Name: "{commonprograms}\GuardianNode Server\Start service"; Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"
@@ -66,9 +66,10 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""Guardia
 ; Install backend service
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing backend service..."; Check: ShouldInstallBackendService
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; AfterInstall: RequireBackendHealth
+Filename: "certutil.exe"; Parameters: "-f -addstore Root ""{commonappdata}\GuardianNode\tls\family-ca.pem"""; Flags: runhidden waituntilterminated; StatusMsg: "Trusting this family's local GuardianNode certificate..."
 
 ; Open setup wizard
-Filename: "http://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsilent; Description: "Open Setup Wizard"
+Filename: "https://127.0.0.1:8787/setup"; Flags: shellexec postinstall skipifsilent; Description: "Open Setup Wizard"
 
 [UninstallRun]
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""GuardianNode Backend (Private LAN)"""; Flags: runhidden waituntilterminated
@@ -423,7 +424,7 @@ var
   ResultCode: Integer;
 begin
   Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health/ready''; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
+    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); $ca=''' + ExpandConstant('{commonappdata}\GuardianNode\tls\family-ca.pem') + '''; do { if (Test-Path -LiteralPath $ca) { & curl.exe --silent --fail --cacert $ca https://127.0.0.1:8787/api/health/ready; if ($LASTEXITCODE -eq 0) { exit 0 } }; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
     FailAndRollbackBackendHealth

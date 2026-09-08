@@ -1,21 +1,25 @@
 """Device management + pairing endpoints."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from ulid import ULID
 
+from app import settings as settings_mod
 from app.api.deps import current_device, current_user, get_db_dep, require_recent_auth
-from app.db.models import Device, User
+from app.db.models import Device, DeviceCommand, PairingCode, User
 from app.db.session import begin_immediate_if_sqlite
-from app.services import device_tokens, rate_limit
+from app.services import consent, device_tokens, rate_limit
 from app.services import pairing as pairing_svc
 from app.services.audit import log_action
 from app.services.device_bootstrap_token import verify_and_consume_device_bootstrap_token
 from app.services.device_state import effective_paused_until, is_device_paused
+from app.services.input_bounds import InputBoundsError, sanitize_metadata
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -97,8 +101,13 @@ class PairStartRequest(BaseModel):
 
 
 class PairStartResponse(BaseModel):
+    pairing_id: str
     code: str
     expires_at: datetime
+    server_url: str
+    ca_sha256: str
+    ca_words: list[str]
+    bundle_url: str
 
 
 @router.post("/pair/start", response_model=PairStartResponse)
@@ -108,14 +117,74 @@ def pair_start(
     user: User = Depends(current_user),
     _: None = Depends(require_recent_auth),
 ):
+    if not consent.monitoring_allowed(db):
+        raise HTTPException(409, "Current parental consent is required before pairing")
     code, expires_at = pairing_svc.issue(db)
+    pairing_row = db.query(PairingCode).order_by(PairingCode.id.desc()).first()
+    if pairing_row is None:
+        raise HTTPException(500, "Pairing transaction was not created")
+    from app.services import local_tls
+
+    server_url = settings_mod.settings.pairing_server_url()
     log_action(
         db, actor=str(user.id), action="device.pair.issue",
         details={"expires_at": expires_at.isoformat()},
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
-    return PairStartResponse(code=code, expires_at=expires_at)
+    return PairStartResponse(
+        pairing_id=str(pairing_row.id),
+        code=code,
+        expires_at=expires_at,
+        server_url=server_url,
+        ca_sha256=local_tls.ca_fingerprint(),
+        ca_words=local_tls.fingerprint_words(),
+        bundle_url=f"/api/devices/pair/{pairing_row.id}/bundle",
+    )
+
+
+@router.get("/pair/{pairing_id}/bundle")
+def pairing_bundle(
+    pairing_id: int,
+    db: Session = Depends(get_db_dep),
+    _: User = Depends(current_user),
+):
+    row = db.get(PairingCode, pairing_id)
+    expires_at = row.expires_at if row is not None else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if row is None or row.used or expires_at is None or expires_at <= datetime.now(UTC):
+        raise HTTPException(404, "Pairing transaction not found or expired")
+    from app import settings as settings_mod
+    from app.services import local_tls
+
+    server_url = settings_mod.settings.pairing_server_url()
+    return Response(
+        content=json.dumps({
+            "format": "guardiannode-pairing-bundle-v1",
+            "pairing_id": str(row.id),
+            "expires_at": expires_at.isoformat(),
+            "server_url": server_url,
+            "ca_sha256": local_tls.ca_fingerprint(),
+            "ca_words": local_tls.fingerprint_words(),
+            "ca_pem": local_tls.ca_pem(),
+        }, sort_keys=True),
+        media_type="application/vnd.guardiannode.pairing+json",
+        headers={"Content-Disposition": f'attachment; filename="pairing-{row.id}.gnpair"'},
+    )
+
+
+@router.get("/tls/ca")
+def download_family_ca(
+    _: User = Depends(current_user),
+):
+    from app.services import local_tls
+
+    return Response(
+        content=local_tls.ca_pem(),
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": 'attachment; filename="guardiannode-family-ca.pem"'},
+    )
 
 
 class PairCompleteRequest(BaseModel):
@@ -202,6 +271,9 @@ def pair_complete(
         )
         db.commit()
         raise HTTPException(status_code=400, detail="Invalid or expired pairing code")
+    if not consent.monitoring_allowed(db):
+        db.rollback()
+        raise HTTPException(409, "Current parental consent is required before pairing")
     rate_limit.reset("pairing", client_ip)
     return _create_paired_device(
         db, hostname=req.hostname, platform=req.platform,
@@ -216,6 +288,8 @@ def bootstrap_local(
     request: Request,
     db: Session = Depends(get_db_dep),
 ):
+    if not consent.monitoring_allowed(db):
+        raise HTTPException(409, "Current parental consent is required before pairing")
     client_ip = request.client.host if request.client else "unknown"
     blocked, retry_after = rate_limit.is_blocked("pairing", client_ip)
     if blocked:
@@ -294,6 +368,88 @@ def heartbeat(
     pipeline_metrics.record_agent_queue(device.device_id, device.hostname, req.queued_frames)
     db.commit()
     return {"ok": True, "paused_until": paused_until}
+
+
+class DeviceCommandDTO(BaseModel):
+    command_id: str
+    command_type: str
+    payload: dict[str, Any]
+    preview: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class DeviceCommandResult(BaseModel):
+    command_id: str = Field(max_length=64)
+    status: str = Field(pattern="^(succeeded|failed|rejected)$")
+    result: dict[str, Any] = Field(default_factory=dict, max_length=50)
+
+
+@router.get("/commands", response_model=list[DeviceCommandDTO])
+def claim_commands(
+    db: Session = Depends(get_db_dep),
+    device: Device = Depends(current_device),
+):
+    now = datetime.now(UTC)
+    db.query(DeviceCommand).filter(
+        DeviceCommand.device_id == device.device_id,
+        DeviceCommand.status.in_(["queued", "claimed"]),
+        DeviceCommand.expires_at <= now,
+    ).update({"status": "expired"}, synchronize_session=False)
+    db.query(DeviceCommand).filter(
+        DeviceCommand.device_id == device.device_id,
+        DeviceCommand.status == "claimed",
+        DeviceCommand.claimed_at < now - timedelta(minutes=15),
+    ).update({"status": "queued", "claimed_at": None}, synchronize_session=False)
+    rows = (
+        db.query(DeviceCommand)
+        .filter(
+            DeviceCommand.device_id == device.device_id,
+            DeviceCommand.status == "queued",
+            DeviceCommand.expires_at > now,
+        )
+        .order_by(DeviceCommand.created_at.asc())
+        .limit(10)
+        .all()
+    )
+    for row in rows:
+        row.status = "claimed"
+        row.claimed_at = now
+    db.commit()
+    return rows
+
+
+@router.post("/commands/result")
+def complete_command(
+    req: DeviceCommandResult,
+    db: Session = Depends(get_db_dep),
+    device: Device = Depends(current_device),
+):
+    command = db.get(DeviceCommand, req.command_id)
+    if command is None or command.device_id != device.device_id:
+        raise HTTPException(404, "Command not found")
+    if command.status in {"succeeded", "failed", "rejected"}:
+        if command.status != req.status:
+            raise HTTPException(409, "Command already completed with a different result")
+        return {"ok": True, "status": command.status}
+    if command.status not in {"queued", "claimed"}:
+        raise HTTPException(409, f"Command is {command.status}")
+    try:
+        result = sanitize_metadata(req.result)
+    except InputBoundsError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    command.status = req.status
+    command.result = result
+    command.completed_at = datetime.now(UTC)
+    log_action(
+        db,
+        actor=device.device_id,
+        action="device.command.result",
+        target=command.command_id,
+        details={"status": req.status, "result": result},
+    )
+    db.commit()
+    return {"ok": True, "status": command.status}
 
 
 class PauseRequest(BaseModel):

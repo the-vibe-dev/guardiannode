@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
-pytest.importorskip("fastapi")
-
-from fastapi.testclient import TestClient
+fastapi_testclient = pytest.importorskip("fastapi.testclient")
+TestClient = fastapi_testclient.TestClient
+# This suite is executed from ``backend/`` by the backend CI job.  The separate
+# release-script job intentionally installs only pytest and runs ``tests/``
+# from the repository root.  If FastAPI happens to be present in that runner's
+# global environment, skip cleanly unless the GuardianNode backend package is
+# also discoverable instead of becoming host-environment dependent.  Do not
+# import ``app`` here: settings must first see the temporary data directory set
+# by ``_fresh_client`` below.
+if importlib.util.find_spec("app") is None:
+    pytest.skip("GuardianNode backend package is not importable", allow_module_level=True)
 
 
 CORPUS_PATH = Path(__file__).resolve().parents[1] / "corpus" / "safety_test_cases.json"
@@ -29,7 +38,13 @@ def _fresh_client(monkeypatch, tmp_path) -> TestClient:
     session_mod._SessionLocal = None
     rate_limit._clear_all()
     Base.metadata.create_all(bind=get_engine())
-    return TestClient(create_app(), client=("127.0.0.1", 50000))
+    # Production sessions are Secure because the family server uses local TLS.
+    # Exercise the real cookie boundary instead of silently downgrading it.
+    return TestClient(
+        create_app(),
+        base_url="https://testserver",
+        client=("127.0.0.1", 50000),
+    )
 
 
 def _setup_parent(client: TestClient, tmp_path: Path) -> None:
@@ -52,6 +67,22 @@ def _setup_parent(client: TestClient, tmp_path: Path) -> None:
     csrf = client.get("/api/auth/csrf")
     assert csrf.status_code == 200
     client.headers["X-CSRF-Token"] = csrf.json()["csrf_token"]
+    notice_version = client.get("/api/consent").json()["notice_version"]
+    consent = client.post(
+        "/api/consent",
+        json={
+            "notice_version": notice_version,
+            "choices": {
+                "screenshots": True,
+                "apps_and_urls": True,
+                "retention": True,
+                "notifications": False,
+                "external_ai": False,
+                "child_notice_acknowledged": True,
+            },
+        },
+    )
+    assert consent.status_code == 200
 
 
 def _pair_device(client: TestClient) -> tuple[str, str]:
@@ -150,7 +181,7 @@ def test_synthetic_event_lifecycle(monkeypatch, tmp_path):
 
     alerts = client.get("/api/alerts")
     assert alerts.status_code == 200
-    alert_rows = alerts.json()
+    alert_rows = alerts.json()["items"]
     assert len(alert_rows) == expected_alerts
     assert {row["severity"] for row in alert_rows} >= {"medium", "high", "critical"}
 

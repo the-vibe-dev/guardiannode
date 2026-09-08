@@ -1,0 +1,1 @@
+var e=/(Z|[+-]\d{2}:?\d{2})$/;function t(t){if(e.test(t))return new Date(t);let n=t.includes(`T`)?t:t.replace(` `,`T`);return new Date(n+`Z`)}function n(e){if(e==null||e===``)return`—`;try{let n=typeof e==`string`?t(e):new Date(e);return isNaN(n.getTime())?`—`:n.toLocaleString()}catch{return`—`}}export{n as t};

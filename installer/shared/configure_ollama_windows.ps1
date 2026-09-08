@@ -22,6 +22,14 @@ param(
     [string]$VisionModel = "",
     [string]$OllamaUrl = "http://127.0.0.1:11434",
     [string]$LogPath = "C:\ProgramData\GuardianNode\logs\install-ollama.log",
+    [string]$TesseractInstallerUrl = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-5.5.3.20260724.exe",
+    [ValidatePattern("^[0-9a-fA-F]{64}$")]
+    [string]$TesseractInstallerSha256 = "bee9e3434bd94fd65387d9be28cd467a41f61b1275383b55b0f59a1331270ae4",
+    [ValidatePattern("^[0-9a-fA-F]{40}$")]
+    [string]$TesseractSignerThumbprint = "2F92CB990D57719BDCCA2D72134378614A040D9B",
+    [string]$OllamaInstallerUrl = "https://github.com/ollama/ollama/releases/download/v0.32.14/OllamaSetup.exe",
+    [ValidatePattern("^[0-9a-fA-F]{64}$")]
+    [string]$OllamaInstallerSha256 = "63061ab02eab0644ec8db56807d8f3e79be19ade9e7c5839014bfc01fd6f1a01",
     [switch]$TesseractOnly
 )
 
@@ -96,6 +104,45 @@ function Download-File {
     }
 }
 
+function Assert-TrustedInstaller {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$ExpectedSha256,
+        [string]$ExpectedSignerThumbprint = ""
+    )
+
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $expected = $ExpectedSha256.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        throw "Downloaded installer SHA-256 mismatch: expected $expected, got $actual"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if (-not $signature.SignerCertificate) {
+        throw "Downloaded installer has no Authenticode signer certificate"
+    }
+    $actualSigner = $signature.SignerCertificate.Thumbprint.Replace(" ", "").ToUpperInvariant()
+    $expectedSigner = $ExpectedSignerThumbprint.Replace(" ", "").ToUpperInvariant()
+    if ($expectedSigner -and $actualSigner -ne $expectedSigner) {
+        throw "Downloaded installer Authenticode signer does not match the pinned certificate"
+    }
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+        # Current official Mannheim Tesseract assets are timestamped but still
+        # carry their retired 2023 code-signing certificate. Windows reports
+        # UnknownError in 2026. Accept only the exact release digest plus the
+        # pinned signer and this one expiry-specific status; all other failures
+        # (including hash mismatch, unsigned, or an unexpected signer) abort.
+        $isPinnedExpiredSigner = $expectedSigner -and
+            ($signature.Status -eq [System.Management.Automation.SignatureStatus]::UnknownError) -and
+            ($signature.StatusMessage -match "not within its validity period")
+        if (-not $isPinnedExpiredSigner) {
+            throw "Downloaded installer Authenticode signature is not valid: $($signature.Status)"
+        }
+        Write-Log "Verified pinned SHA-256 and expected Authenticode signer; the pinned signer certificate is expired."
+        return
+    }
+    Write-Log "Verified pinned SHA-256 and Authenticode signer: $($signature.SignerCertificate.Subject)"
+}
+
 function Get-TesseractExecutable {
     $tesseract = Get-Command tesseract.exe -ErrorAction SilentlyContinue
     if ($tesseract) {
@@ -168,7 +215,7 @@ function Install-Tesseract {
         return $true
     }
 
-    $url = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+    $url = $TesseractInstallerUrl
     $installDir = Join-Path $env:ProgramFiles "Tesseract-OCR"
     $dst = Join-Path $env:TEMP ("TesseractSetup-{0}.exe" -f ([Guid]::NewGuid().ToString("N")))
     Write-Log "Tesseract not found. Downloading Tesseract OCR installer from UB Mannheim build ..."
@@ -177,7 +224,9 @@ function Install-Tesseract {
             Write-Log "Tesseract installer download failed or produced an empty file."
             return $false
         }
-        Write-Log "Downloaded to $dst, running silent Tesseract install ..."
+        Assert-TrustedInstaller -Path $dst -ExpectedSha256 $TesseractInstallerSha256 `
+            -ExpectedSignerThumbprint $TesseractSignerThumbprint
+        Write-Log "Downloaded and verified $dst; running silent Tesseract install ..."
         # UB Mannheim's Tesseract package is NSIS. /S is silent and /D=...
         # must be the final switch; the rest of the line is treated as the path.
         $argLine = '/S /D={0}' -f $installDir
@@ -356,14 +405,15 @@ function Install-Ollama {
     }
 
     Write-Log "Ollama not reachable at $OllamaUrl. Downloading OllamaSetup.exe ..."
-    $url = "https://ollama.com/download/OllamaSetup.exe"
+    $url = $OllamaInstallerUrl
     $dst = Join-Path $env:TEMP ("OllamaSetup-{0}.exe" -f ([Guid]::NewGuid().ToString("N")))
     try {
         if (-not (Download-File -Url $url -Destination $dst)) {
             Write-Log "Ollama installer download failed or produced an empty file."
             return $false
         }
-        Write-Log "Downloaded to $dst, running silent install ..."
+        Assert-TrustedInstaller -Path $dst -ExpectedSha256 $OllamaInstallerSha256
+        Write-Log "Downloaded and verified $dst; running silent install ..."
         # Ollama installer uses /VERYSILENT-style flags or InstallShield; try common ones.
         $p = Start-Process -FilePath $dst -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru -ErrorAction Stop
         Write-Log "Installer exit code: $($p.ExitCode)"

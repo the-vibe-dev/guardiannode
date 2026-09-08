@@ -22,8 +22,8 @@ JSON Schema files live in `shared/schemas/`. Pydantic equivalents in `shared/pyt
   "metadata": {
     "ocr_confidence": 0.87,
     "foreground": true,
-    "rules_version": "0.1.0-alpha.1",
-    "agent_version": "0.1.0-alpha.1"
+    "rules_version": "0.1.0-alpha.3",
+    "agent_version": "0.1.0-alpha.3"
   }
 }
 ```
@@ -51,7 +51,7 @@ JSON Schema files live in `shared/schemas/`. Pydantic equivalents in `shared/pyt
   "rules_triggered": ["off_platform_contact", "secrecy_phrase"],
   "confidence": 0.84,
   "prompt_version": "abc1234",
-  "rules_version": "0.1.0-alpha.1"
+  "rules_version": "0.1.0-alpha.3"
 }
 ```
 

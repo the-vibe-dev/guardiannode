@@ -4,18 +4,17 @@ Used in separated mode to link a child device's agent to the parent's server.
 
 ## How pairing actually executes
 
-The installer never talks to the backend itself. It writes
-`C:\ProgramData\GuardianNode\pending_pairing.json` containing the wizard's
-server URL and 6-digit code (or `{"local_bootstrap": true}` for all-in-one
-installs). In current broker-enabled builds, the GuardianNode Endpoint Broker
-reads this file and stores the resulting device credential in broker-owned
-storage. Legacy/source agent mode checks the same file before its main loop
-(`pairing_client.bootstrap_pairing`):
+The parent starts pairing in **Devices**, downloads the short-lived `.gnpair`
+trust bundle, and privately transfers it to the child PC. The child installer
+writes a protected `pending_pairing.json` containing the exact HTTPS server URL,
+6-digit code, and bundle path (or a purpose-bound local bootstrap for all-in-one
+installs). The SYSTEM GuardianNode Endpoint Broker reads this transaction and
+stores the resulting CA and device credential in broker-owned storage:
 
 - If broker-owned `Secure\device.json` or legacy `device.json` already holds a
   token, the pending file is ignored.
-- The agent requires an explicit server URL. mDNS discovery is advisory only in
-  this alpha because a LAN advertisement does not authenticate the parent server.
+- The bundle must be current, name the exact server URL, contain a currently
+  valid CA certificate, and match its SHA-256 fingerprint. mDNS remains advisory.
 - Transient failures (server still booting) retry 5 times, 10s apart, then
   leave the file in place for the next agent start.
 - A definitive pairing-code rejection (HTTP 4xx) deletes the file — codes are
@@ -24,8 +23,14 @@ storage. Legacy/source agent mode checks the same file before its main loop
   installer repair can issue a fresh device-bootstrap token and resume
   enrollment.
 
-Manual pairing is also available:
-`GuardianNodeAgent.exe --pair --server http://192.168.1.42:8787 --code 123456`
+Manual source pairing is also available:
+
+```powershell
+GuardianNodeAgent.exe --pair --pair-bundle C:\SafeTransfer\family.gnpair --code 123456
+```
+
+`--server` may be supplied as an additional exact-URL check. HTTP is accepted
+only for an explicit loopback source-development flow.
 
 ## Local bootstrap (all-in-one installs)
 
@@ -58,9 +63,9 @@ Parent dashboard          Backend                    Child PC
        │                     │ TTL = 10 min             │
        │                     │ hash + store             │
        │◄────────────────────┤                          │
-       │ display code+QR     │                          │
+       │ display code, URL, CA words, bundle            │
        │                                                │
-       │ parent walks code over to child PC             │
+       │ parent transfers bundle and code to child PC   │
        │                                                │
        │                                                │ enter server URL
        │                                                │ enter 6-digit code
@@ -82,23 +87,24 @@ Parent dashboard          Backend                    Child PC
 
 ## Token
 
-- Format: `gn_dev_<device_id>_<random_secret>` (the embedded device id lets the
-  backend verify exactly one Argon2 hash per request instead of scanning all
-  devices; legacy opaque tokens from older pairings keep working)
+- Format: `gn_dev_<device_id>_<random_secret>` (the embedded device id provides
+  one bounded lookup instead of scanning all devices)
 - Stored on child device at `C:\ProgramData\GuardianNode\device.json` in legacy
   source-agent mode, or broker-owned secure storage in current public-alpha
   installer mode. The ProgramData ACL model was validated for the Windows 11
   public alpha installers and must be revalidated before each public installer
   release.
 - Used in `Authorization: Bearer <token>` header for all subsequent API calls
-- Backend stores only the Argon2 hash of the secret
+- Backend stores only an HMAC-SHA256 digest under a separate server-only pepper.
+  The family-beta migration revokes legacy Argon2 device credentials, requiring
+  a one-time re-pair.
 - Invalid-token requests are rate-limited per source IP
 - Revokable from the dashboard (Devices → ⋮ → Revoke)
 
 ## mDNS discovery
 
 The backend can advertise `_guardiannode._tcp.local` with TXT records:
-- `version=0.1.0-alpha.1`
+- `version=0.1.0-alpha.3`
 - `path=/api`
 
 mDNS is not trusted for automatic pairing. If the agent has no configured
@@ -111,10 +117,11 @@ stored in `device.json`, logged, and shown in the tray menu diagnostics.
 
 Type the URL and pairing code by hand.
 
-## QR code
+## Trust bundle
 
-QR pairing is planned for a later fingerprint-pinning flow. In this alpha, type
-the trusted server URL and pairing code explicitly.
+The `.gnpair` bundle is the out-of-band server identity handoff. It contains no
+device bearer token, but it is short-lived and should still be transferred
+privately. Compare the human-readable CA words on both screens before continuing.
 
 ## Failure modes
 

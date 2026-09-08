@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import Device, Event, RiskResult
+from app.db.models import Alert, Device, Event, RiskResult
 from app.services import classifier, encryption, redaction
 from app.services.input_bounds import sanitize_metadata
 from app.services.profile_resolution import resolve_profile
@@ -31,6 +31,31 @@ async def ingest_event(
 
     Returns a small dict with event_id, risk_id (if classified), and severity.
     """
+    requested_event_id = payload.get("event_id")
+    if requested_event_id:
+        existing = session.get(Event, requested_event_id)
+        if existing is not None:
+            if existing.device_id != device_id:
+                raise ValueError("event_id is already owned by another device")
+            risk = (
+                session.query(RiskResult)
+                .filter(RiskResult.event_id == existing.event_id)
+                .order_by(RiskResult.created_at.desc())
+                .first()
+            )
+            alert = (
+                session.query(Alert).filter(Alert.risk_id == risk.risk_id).first()
+                if risk else None
+            )
+            return {
+                "event_id": existing.event_id,
+                "risk_id": risk.risk_id if risk else None,
+                "alert_id": alert.alert_id if alert else None,
+                "risk_level": risk.risk_level if risk else "none",
+                "score": risk.score if risk else 0,
+                "categories": list(risk.categories or []) if risk else [],
+            }
+
     text = payload.get("redacted_text") or ""
     if text:
         red = redaction.redact(text)

@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import logging
 import os
 import socket
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 from src.config import default_device_path
 
@@ -75,6 +81,9 @@ def pair_with_server(
     hostname: str,
     platform: str = "windows",
     agent_version: str = "0.1.0-alpha.3",
+    *,
+    ca_path: Path | str | None = None,
+    allow_loopback_http: bool = False,
 ) -> tuple[str, str]:
     """Run the pair/complete handshake. Returns (device_id, device_token)."""
     body = {
@@ -83,7 +92,8 @@ def pair_with_server(
         "platform": platform,
         "agent_version": agent_version,
     }
-    with httpx.Client(timeout=20.0) as c:
+    verify = _transport_verify(backend_url, ca_path, allow_loopback_http=allow_loopback_http)
+    with httpx.Client(timeout=20.0, verify=verify) as c:
         r = c.post(f"{backend_url.rstrip('/')}/api/devices/pair/complete", json=body)
         r.raise_for_status()
         data = r.json()
@@ -96,6 +106,8 @@ def bootstrap_local_with_server(
     hostname: str,
     platform: str = "windows",
     agent_version: str = "0.1.0-alpha.3",
+    *,
+    ca_path: Path | str | None = None,
 ) -> tuple[str, str]:
     """Enroll the first all-in-one device with the purpose-bound local token."""
     body = {
@@ -104,18 +116,33 @@ def bootstrap_local_with_server(
         "platform": platform,
         "agent_version": agent_version,
     }
-    with httpx.Client(timeout=20.0) as c:
+    verify = _transport_verify(backend_url, ca_path, allow_loopback_http=True)
+    with httpx.Client(timeout=20.0, verify=verify) as c:
         r = c.post(f"{backend_url.rstrip('/')}/api/devices/bootstrap-local", json=body)
         r.raise_for_status()
         data = r.json()
     return data["device_id"], data["device_token"]
 
 
-def save_credentials(device_id: str, token: str, backend_url: str, path: Path | None = None) -> Path:
+def save_credentials(
+    device_id: str,
+    token: str,
+    backend_url: str,
+    path: Path | None = None,
+    *,
+    ca_path: Path | str | None = None,
+    ca_sha256: str = "",
+) -> Path:
     path = path or default_device_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"device_id": device_id, "device_token": token, "backend_url": backend_url}),
+        json.dumps({
+            "device_id": device_id,
+            "device_token": token,
+            "backend_url": backend_url,
+            "ca_path": str(ca_path) if ca_path else "",
+            "ca_sha256": ca_sha256.lower(),
+        }),
         encoding="utf-8",
     )
     # The device token authenticates this child PC to the backend; keep the
@@ -142,6 +169,144 @@ def load_credentials(path: Path | None = None) -> dict | None:
 def pending_pairing_path() -> Path:
     """Installer drop-file with the wizard's server URL + pairing code."""
     return default_device_path().parent / "pending_pairing.json"
+
+
+def default_ca_path(device_path: Path | None = None) -> Path:
+    """Broker-owned copy of the enrolled family CA."""
+    return (device_path or default_device_path()).parent / "family-ca.pem"
+
+
+def enroll_pairing_bundle(
+    bundle_path: Path,
+    *,
+    backend_url: str | None = None,
+    device_path: Path | None = None,
+) -> tuple[str, Path, str]:
+    """Validate a parent-exported bundle and enroll its CA for manual pairing."""
+    try:
+        bundle = json.loads(bundle_path.read_text("utf-8-sig"))
+    except Exception as exc:
+        raise ValueError("pairing bundle is unreadable") from exc
+    if not isinstance(bundle, dict):
+        raise ValueError("unsupported pairing bundle format")
+    enrolled_url = str(backend_url or bundle.get("server_url") or "").rstrip("/")
+    if not enrolled_url:
+        raise ValueError("pairing bundle has no server URL")
+    ca_path, fingerprint = _enroll_bundle(
+        {"bundle": bundle}, enrolled_url, device_path
+    )
+    if ca_path is None:
+        raise ValueError("pairing bundle did not enroll a family CA")
+    return enrolled_url, ca_path, fingerprint
+
+
+def _transport_verify(
+    backend_url: str,
+    ca_path: Path | str | None,
+    *,
+    allow_loopback_http: bool,
+) -> bool | str:
+    parsed = urlsplit(backend_url)
+    if parsed.scheme == "https":
+        if not ca_path:
+            raise ValueError("HTTPS pairing requires a GuardianNode pairing bundle with a pinned CA")
+        path = Path(ca_path)
+        if not path.is_file():
+            raise ValueError("the enrolled GuardianNode family CA is missing")
+        return str(path)
+    if parsed.scheme == "http" and allow_loopback_http and parsed.hostname in {"127.0.0.1", "::1", "localhost"}:
+        return True
+    raise ValueError("pairing requires HTTPS; HTTP is allowed only for loopback bootstrap")
+
+
+def _parse_expiry(value: object) -> datetime:
+    text = str(value or "").strip().replace("Z", "+00:00")
+    try:
+        result = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError("pairing bundle has an invalid expiry") from exc
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=UTC)
+    return result.astimezone(UTC)
+
+
+def _enroll_bundle(
+    pending: dict,
+    backend_url: str,
+    device_path: Path | None,
+) -> tuple[Path | None, str]:
+    """Validate and persist an authenticated CA supplied out-of-band by the parent."""
+    bundle = pending.get("bundle")
+    bundle_path = str(pending.get("bundle_path") or "").strip()
+    if bundle is None and bundle_path:
+        try:
+            bundle = json.loads(Path(bundle_path).read_text("utf-8-sig"))
+        except Exception as exc:
+            raise ValueError("pairing bundle is unreadable") from exc
+    if bundle is None:
+        ca_source_path = str(pending.get("ca_path") or "").strip()
+        if ca_source_path:
+            pem = Path(ca_source_path).read_text("ascii")
+            bundle = {
+                "format": "guardiannode-pairing-bundle-v1",
+                "server_url": backend_url,
+                "expires_at": pending.get("expires_at") or "2999-01-01T00:00:00+00:00",
+                "ca_pem": pem,
+                "ca_sha256": pending.get("ca_sha256") or _certificate_fingerprint(pem),
+            }
+    parsed = urlsplit(backend_url)
+    if bundle is None:
+        if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1", "localhost"}:
+            return None, ""
+        raise ValueError("HTTPS pairing requires the .gnpair bundle downloaded by the parent")
+    if not isinstance(bundle, dict) or bundle.get("format") != "guardiannode-pairing-bundle-v1":
+        raise ValueError("unsupported pairing bundle format")
+    if _parse_expiry(bundle.get("expires_at")) <= datetime.now(UTC):
+        raise ValueError("pairing bundle has expired")
+    bundle_url = str(bundle.get("server_url") or "").rstrip("/")
+    if bundle_url != backend_url.rstrip("/"):
+        raise ValueError("pairing bundle server URL does not match the requested server")
+    pem = str(bundle.get("ca_pem") or "")
+    actual = _certificate_fingerprint(pem)
+    expected = str(bundle.get("ca_sha256") or "").lower().replace(":", "")
+    if not expected or not hmac.compare_digest(actual, expected):
+        raise ValueError("pairing bundle CA fingerprint mismatch")
+    enrolled = default_ca_path(device_path)
+    _restricted_write(enrolled, pem.encode("ascii"))
+    return enrolled, actual
+
+
+def _certificate_fingerprint(pem: str) -> str:
+    try:
+        cert = x509.load_pem_x509_certificate(pem.encode("ascii"))
+    except Exception as exc:
+        raise ValueError("pairing bundle CA certificate is invalid") from exc
+    now = datetime.now(UTC)
+    if cert.not_valid_before_utc > now or cert.not_valid_after_utc <= now:
+        raise ValueError("pairing bundle CA certificate is not currently valid")
+    try:
+        constraints = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+    except x509.ExtensionNotFound as exc:
+        raise ValueError("pairing bundle certificate is not a CA") from exc
+    if not constraints.ca:
+        raise ValueError("pairing bundle certificate is not a CA")
+    der = cert.public_bytes(serialization.Encoding.DER)
+    return hashlib.sha256(der).hexdigest()
+
+
+def _restricted_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name != "nt":
+            os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _read_local_device_bootstrap_token(
@@ -220,20 +385,37 @@ def bootstrap_pairing(
         )
         return None
 
+    try:
+        ca_path, ca_sha256 = _enroll_bundle(pending, backend_url, device_path)
+    except (OSError, ValueError) as exc:
+        log.error("pairing trust validation failed: %s", exc)
+        return None
+
     for attempt in range(1, attempts + 1):
         try:
             if local_bootstrap:
                 device_id, token = bootstrap_local_with_server(
                     backend_url, device_bootstrap_token, hostname, agent_version=agent_version,
+                    ca_path=ca_path,
                 )
             else:
                 device_id, token = pair_with_server(
                     backend_url, code, hostname, agent_version=agent_version,
+                    ca_path=ca_path,
                 )
-            save_credentials(device_id, token, backend_url, device_path)
+            save_credentials(
+                device_id, token, backend_url, device_path,
+                ca_path=ca_path, ca_sha256=ca_sha256,
+            )
             pending_path.unlink(missing_ok=True)
             log.info("paired with %s as device %s", backend_url, device_id)
-            return {"device_id": device_id, "device_token": token, "backend_url": backend_url}
+            return {
+                "device_id": device_id,
+                "device_token": token,
+                "backend_url": backend_url,
+                "ca_path": str(ca_path) if ca_path else "",
+                "ca_sha256": ca_sha256,
+            }
         except httpx.HTTPStatusError as e:
             log.error("pairing rejected by %s: %s", backend_url, e.response.status_code)
             if 400 <= e.response.status_code < 500:

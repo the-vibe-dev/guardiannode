@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -36,12 +37,12 @@ from src.config import AgentConfig, default_config_path, default_device_path
 from src.durable_queue import DurableScreenshotQueue, default_key_path, default_queue_path
 from src.main import screenshot_sender_loop
 from src.pairing_client import bootstrap_pairing, load_credentials, pending_pairing_path, save_credentials
-from src.parent_auth import _credentials_path as legacy_parent_credentials_path
-from src.parent_auth import verify_password
 
 log = logging.getLogger("guardiannode.broker")
 
 MAX_ACTIVE_REQUEST_IDS = 512
+MAX_PIPE_CLIENTS = 8
+PIPE_READ_DEADLINE_SECONDS = 5.0
 
 
 def default_secure_dir() -> Path:
@@ -103,16 +104,12 @@ class BrokerCommandHandler:
         pause_path: Path | None = None,
         credential_path: Path | None = None,
         legacy_credential_path: Path | None = None,
-        parent_credential_path: Path | None = None,
-        legacy_parent_credential_path: Path | None = None,
         replay_cache: RequestReplayCache | None = None,
     ):
         self.queue = queue
         self.pause_path = pause_path or broker_pause_path()
         self.credential_path = credential_path or broker_device_path()
         self.legacy_credential_path = legacy_credential_path or default_device_path()
-        self.parent_credential_path = parent_credential_path or broker_parent_credentials_path()
-        self.legacy_parent_credential_path = legacy_parent_credential_path or legacy_parent_credentials_path()
         self.replay_cache = replay_cache or RequestReplayCache()
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -152,19 +149,6 @@ class BrokerCommandHandler:
             payload = self._screenshot_payload(request.payload)
             self.queue.put_nowait(payload)
             return {"status": "queued", "queue_depth": self.queue.qsize()}
-        if request.action == "pause":
-            self._require_parent_password(request.payload)
-            until = int(time.time()) + int(request.payload["duration_seconds"])
-            actor = str(request.payload.get("actor") or "local-parent")[:128]
-            self._save_pause(PauseState(paused_until=until, actor=actor))
-            return {"paused": True, "paused_until": until}
-        if request.action == "resume":
-            self._require_parent_password(request.payload)
-            self._save_pause(PauseState())
-            return {"paused": False, "paused_until": 0}
-        if request.action == "verify_parent":
-            self._require_parent_password(request.payload)
-            return {"verified": True}
         raise ProtocolError("unsupported action")
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
@@ -178,6 +162,8 @@ class BrokerCommandHandler:
                 str(legacy["device_token"]),
                 str(legacy["backend_url"]),
                 self.credential_path,
+                ca_path=legacy.get("ca_path"),
+                ca_sha256=str(legacy.get("ca_sha256") or ""),
             )
             log.info("migrated legacy device credential into broker-owned storage: %s", saved)
             return load_credentials(self.credential_path) or {}
@@ -204,14 +190,6 @@ class BrokerCommandHandler:
                 out[key] = value
         return out
 
-    def _require_parent_password(self, payload: dict[str, Any]) -> None:
-        password = str(payload.get("parent_password") or "")
-        if verify_password(password, self.parent_credential_path):
-            return
-        if verify_password(password, self.legacy_parent_credential_path):
-            return
-        raise ProtocolError("parent verification failed")
-
     def _load_pause(self) -> PauseState:
         try:
             data = json.loads(self.pause_path.read_text("utf-8"))
@@ -237,15 +215,108 @@ class BrokerCommandHandler:
         tmp.replace(self.pause_path)
 
 
+class CaptureProcessManager:
+    """Launch one capture process in each active Windows session and track its PID."""
+
+    def __init__(self, agent_exe: Path | None = None):
+        self.agent_exe = agent_exe or Path(sys.executable).resolve().with_name("GuardianNodeAgent.exe")
+        self._pids_by_session: dict[int, int] = {}
+        self._lock = threading.Lock()
+
+    def is_authorized(self, pid: int) -> bool:
+        with self._lock:
+            return pid in self._pids_by_session.values() and self._pid_is_running(pid)
+
+    @staticmethod
+    def _pid_is_running(pid: int) -> bool:
+        try:
+            import psutil
+
+            return psutil.pid_exists(pid)
+        except Exception:
+            return False
+
+    def serve_forever(self) -> None:
+        if os.name != "nt":
+            return
+        while True:
+            try:
+                self._reconcile_sessions()
+            except Exception:
+                log.exception("could not reconcile broker-owned capture processes")
+            time.sleep(10)
+
+    def _reconcile_sessions(self) -> None:
+        import win32ts  # type: ignore
+
+        active_sessions = {
+            int(row["SessionId"])
+            for row in win32ts.WTSEnumerateSessions(None, 1, 0)
+            if row.get("State") == win32ts.WTSActive
+        }
+        with self._lock:
+            for session_id, pid in list(self._pids_by_session.items()):
+                if session_id not in active_sessions or not self._pid_is_running(pid):
+                    self._pids_by_session.pop(session_id, None)
+            missing = active_sessions - self._pids_by_session.keys()
+        for session_id in missing:
+            pid = self._launch_in_session(session_id)
+            with self._lock:
+                self._pids_by_session[session_id] = pid
+            log.info("launched authorized capture process pid=%d session=%d", pid, session_id)
+
+    def _launch_in_session(self, session_id: int) -> int:
+        import win32con  # type: ignore
+        import win32process  # type: ignore
+        import win32profile  # type: ignore
+        import win32security  # type: ignore
+        import win32ts  # type: ignore
+
+        if not self.agent_exe.is_file():
+            raise RuntimeError(f"capture executable is missing: {self.agent_exe}")
+        token_attributes = win32security.SECURITY_ATTRIBUTES()
+        primary = win32security.DuplicateTokenEx(
+            win32ts.WTSQueryUserToken(session_id),
+            win32security.SecurityImpersonation,
+            win32con.MAXIMUM_ALLOWED,
+            win32security.TokenPrimary,
+            token_attributes,
+        )
+        environment = win32profile.CreateEnvironmentBlock(primary, False)
+        startup = win32process.STARTUPINFO()
+        process, thread, pid, _tid = win32process.CreateProcessAsUser(
+            primary,
+            str(self.agent_exe),
+            f'"{self.agent_exe}" --broker-capture',
+            None,
+            None,
+            False,
+            win32con.CREATE_UNICODE_ENVIRONMENT | win32con.CREATE_NO_WINDOW,
+            environment,
+            str(self.agent_exe.parent),
+            startup,
+        )
+        process.Close()
+        thread.Close()
+        primary.Close()
+        return int(pid)
+
+
 class WindowsNamedPipeServer:
-    def __init__(self, handler: BrokerCommandHandler, pipe_name: str = PIPE_NAME):
+    def __init__(
+        self,
+        handler: BrokerCommandHandler,
+        pipe_name: str = PIPE_NAME,
+        capture_processes: CaptureProcessManager | None = None,
+    ):
         self.handler = handler
         self.pipe_name = pipe_name
+        self.capture_processes = capture_processes or CaptureProcessManager()
+        self._slots = threading.BoundedSemaphore(MAX_PIPE_CLIENTS)
 
     def serve_forever(self) -> None:
         if os.name != "nt":
             raise RuntimeError("named pipe broker is only supported on Windows")
-        import pywintypes  # type: ignore
         import win32file  # type: ignore
         import win32pipe  # type: ignore
         import win32security  # type: ignore
@@ -267,41 +338,84 @@ class WindowsNamedPipeServer:
                 0,
                 security,
             )
+            win32pipe.ConnectNamedPipe(pipe, None)
+            if not self._slots.acquire(blocking=False):
+                win32file.CloseHandle(pipe)
+                continue
+            threading.Thread(
+                target=self._handle_pipe,
+                args=(pipe,),
+                name="GuardianNodeBrokerClient",
+                daemon=True,
+            ).start()
+
+    def _handle_pipe(self, pipe) -> None:  # noqa: ANN001
+        import pywintypes  # type: ignore
+        import win32file  # type: ignore
+        import win32pipe  # type: ignore
+
+        try:
+            frame = self._read_frame(pipe)
+            client_pid = self._client_pid(pipe)
+            if client_pid is None:
+                response = make_response("", ok=False, error="unauthorized client")
+            else:
+                message = decode_frame(frame)
+                if (
+                    message.get("action") == "submit_screenshot"
+                    and not self.capture_processes.is_authorized(client_pid)
+                ):
+                    response = make_response("", ok=False, error="unauthorized capture process")
+                else:
+                    response = self.handler.handle_message(message)
+            win32file.WriteFile(pipe, encode_frame(response))
+            win32file.FlushFileBuffers(pipe)
+        except (pywintypes.error, ProtocolError) as exc:
+            log.warning("named pipe request failed: %s", exc)
+        finally:
             try:
-                win32pipe.ConnectNamedPipe(pipe, None)
-                frame = self._read_frame(pipe)
-                if not self._validate_client_identity(pipe):
-                    win32file.WriteFile(pipe, encode_frame(make_response("", ok=False, error="unauthorized client")))
-                    win32file.FlushFileBuffers(pipe)
-                    continue
-                response = self.handler.handle_message(decode_frame(frame))
-                win32file.WriteFile(pipe, encode_frame(response))
-                win32file.FlushFileBuffers(pipe)
-            except pywintypes.error as exc:
-                log.warning("named pipe request failed: %s", exc)
-            finally:
-                try:
-                    win32pipe.DisconnectNamedPipe(pipe)
-                except Exception:
-                    pass
-                try:
-                    win32file.CloseHandle(pipe)
-                except Exception:
-                    pass
+                win32pipe.DisconnectNamedPipe(pipe)
+            except Exception:
+                pass
+            try:
+                win32file.CloseHandle(pipe)
+            except Exception:
+                pass
+            self._slots.release()
 
     @staticmethod
     def _read_frame(pipe) -> bytes:  # noqa: ANN001
-        import win32file  # type: ignore
-
-        _, header = win32file.ReadFile(pipe, 4)
+        header = WindowsNamedPipeServer._read_exact(pipe, 4)
         size = int.from_bytes(header, "big")
         if size > MAX_MESSAGE_BYTES:
             raise ProtocolError("message too large")
-        _, body = win32file.ReadFile(pipe, size)
+        body = WindowsNamedPipeServer._read_exact(pipe, size)
         return header + body
 
     @staticmethod
-    def _validate_client_identity(pipe) -> bool:  # noqa: ANN001
+    def _read_exact(pipe, size: int) -> bytes:  # noqa: ANN001
+        import win32file  # type: ignore
+        import win32pipe  # type: ignore
+
+        deadline = time.monotonic() + PIPE_READ_DEADLINE_SECONDS
+        chunks: list[bytes] = []
+        remaining = size
+        while remaining:
+            if time.monotonic() >= deadline:
+                raise ProtocolError("pipe read deadline exceeded")
+            _peeked, available, _left = win32pipe.PeekNamedPipe(pipe, 0)
+            if not available:
+                time.sleep(0.01)
+                continue
+            _status, chunk = win32file.ReadFile(pipe, min(remaining, available))
+            if not chunk:
+                raise ProtocolError("short frame")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    @staticmethod
+    def _client_pid(pipe) -> int | None:  # noqa: ANN001
         import win32api  # type: ignore
         import win32con  # type: ignore
         import win32security  # type: ignore
@@ -315,11 +429,14 @@ class WindowsNamedPipeServer:
             )
             user_sid, _attrs = win32security.GetTokenInformation(token, win32security.TokenUser)
             sid_text = win32security.ConvertSidToStringSid(user_sid)
-            log.debug("accepted local broker client sid=%s", sid_text)
-            return True
+            import win32pipe  # type: ignore
+
+            pid = int(win32pipe.GetNamedPipeClientProcessId(pipe))
+            log.debug("accepted local broker client sid=%s pid=%d", sid_text, pid)
+            return pid
         except Exception:
             log.warning("could not validate named pipe client identity", exc_info=True)
-            return False
+            return None
         finally:
             try:
                 win32security.RevertToSelf()
@@ -337,7 +454,44 @@ async def _run_sender(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
         if not token:
             await asyncio.sleep(10)
             continue
-        await screenshot_sender_loop(BackendClient(backend_url, token), handler.queue)  # type: ignore[arg-type]
+        await screenshot_sender_loop(
+            BackendClient(backend_url, token, ca_path=creds.get("ca_path")),
+            handler.queue,
+        )  # type: ignore[arg-type]
+
+
+async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
+    from src.backend_client import BackendClient
+    from src.enforcement import WindowsEnforcer
+
+    enforcer = WindowsEnforcer()
+    while True:
+        enforcer.reconcile()
+        creds = handler.ensure_broker_credentials()
+        token = str(creds.get("device_token") or "")
+        if not token:
+            await asyncio.sleep(10)
+            continue
+        client = BackendClient(
+            str(creds.get("backend_url") or cfg.backend_url),
+            token,
+            ca_path=creds.get("ca_path"),
+        )
+        try:
+            await client.heartbeat(queued_frames=handler.queue.qsize())
+            for command in await client.get_commands():
+                command_id = str(command.get("command_id") or "")
+                try:
+                    result = enforcer.execute(command)
+                    await client.report_command(command_id, "succeeded", result)
+                except ValueError as exc:
+                    await client.report_command(command_id, "rejected", {"error": str(exc)[:500]})
+                except Exception as exc:
+                    log.exception("device command %s failed", command_id)
+                    await client.report_command(command_id, "failed", {"error": str(exc)[:500]})
+        except Exception as exc:
+            log.debug("device control poll failed: %s", exc)
+        await asyncio.sleep(10)
 
 
 def build_handler(cfg: AgentConfig) -> BrokerCommandHandler:
@@ -357,7 +511,38 @@ def cli() -> None:
     parser.add_argument("--self-test", action="store_true", help="validate broker imports and configuration")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    log_handlers: list[logging.Handler] = []
+    if os.name == "nt":
+        try:
+            from logging.handlers import RotatingFileHandler
+
+            log_path = (
+                Path(os.environ.get("PROGRAMDATA", "C:/ProgramData"))
+                / "GuardianNode"
+                / "logs"
+                / "broker.log"
+            )
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                log_path,
+                maxBytes=2_000_000,
+                backupCount=3,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(logging.INFO)
+            log_handlers.append(file_handler)
+        except Exception:
+            pass
+    try:
+        log_handlers.append(logging.StreamHandler())
+    except Exception:
+        pass
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=log_handlers or None,
+        force=True,
+    )
     cfg = AgentConfig.from_path(Path(args.config))
     handler = build_handler(cfg)
     try:
@@ -379,8 +564,15 @@ def cli() -> None:
 
     loop = asyncio.new_event_loop()
     loop.create_task(_run_sender(handler, cfg))
+    loop.create_task(_run_device_control(handler, cfg))
     threading.Thread(target=loop.run_forever, name="GuardianNodeBrokerSender", daemon=True).start()
-    WindowsNamedPipeServer(handler).serve_forever()
+    capture_processes = CaptureProcessManager()
+    threading.Thread(
+        target=capture_processes.serve_forever,
+        name="GuardianNodeCaptureLauncher",
+        daemon=True,
+    ).start()
+    WindowsNamedPipeServer(handler, capture_processes=capture_processes).serve_forever()
 
 
 if __name__ == "__main__":  # pragma: no cover

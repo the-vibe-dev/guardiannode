@@ -1,6 +1,7 @@
 """Browser session expiry and revocation controls."""
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 PASSWORD = "correct horse battery"
@@ -188,3 +189,52 @@ def test_specific_lan_bind_is_reported_as_beyond_loopback(monkeypatch, tmp_path)
     assert settings_mod.Settings(data_dir=tmp_path, bind_host="localhost").binds_beyond_loopback() is False
     assert settings_mod.Settings(data_dir=tmp_path, bind_host="192.168.1.42").binds_beyond_loopback() is True
     assert settings_mod.Settings(data_dir=tmp_path, bind_host="guardian-server").binds_beyond_loopback() is True
+
+
+def test_pairing_server_url_defaults_to_local_name(tmp_path):
+    from app import settings as settings_mod
+
+    configured = settings_mod.Settings(
+        data_dir=tmp_path,
+        tls_enabled=True,
+    )
+
+    assert configured.pairing_server_url() == "https://guardiannode.local:8787"
+
+
+def test_pairing_server_url_supports_an_allowed_lan_ip(tmp_path):
+    from app import settings as settings_mod
+
+    configured = settings_mod.Settings(
+        data_dir=tmp_path,
+        tls_enabled=True,
+        bind_host="192.168.1.159",
+        allowed_hosts="192.168.1.159",
+        advertised_server_url="https://192.168.1.159:8787/",
+    )
+
+    assert configured.pairing_server_url() == "https://192.168.1.159:8787"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://192.168.1.159:8787",
+        "https://other-host:8787",
+        "https://192.168.1.159:8787/setup",
+        "https://user:password@192.168.1.159:8787",
+    ],
+)
+def test_pairing_server_url_rejects_unsafe_or_unreachable_origins(tmp_path, url):
+    from app import settings as settings_mod
+
+    configured = settings_mod.Settings(
+        data_dir=tmp_path,
+        tls_enabled=True,
+        bind_host="192.168.1.159",
+        allowed_hosts="192.168.1.159",
+        advertised_server_url=url,
+    )
+
+    with pytest.raises(ValueError):
+        configured.pairing_server_url()

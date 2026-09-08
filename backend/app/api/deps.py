@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app import settings as settings_mod
 from app.db.models import Device, User
 from app.db.session import get_db
-from app.services import device_tokens, rate_limit
+from app.services import device_budget, device_tokens, rate_limit
 from app.services.audit import log_action
 
 log = logging.getLogger(__name__)
@@ -171,6 +171,17 @@ def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Devic
     device = device_tokens.authenticate(db, token)
     if device is not None:
         rate_limit.reset("device_auth", client_ip)
+        operation = device_budget.operation_for_path(request.url.path, request.method)
+        if operation is not None:
+            try:
+                body_bytes = int(getattr(request.state, "request_body_bytes", 0) or 0)
+                device_budget.consume(device.device_id, operation, body_bytes)
+            except device_budget.BudgetExceededError as exc:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Device request budget exceeded.",
+                    headers={"Retry-After": str(exc.retry_after)},
+                ) from exc
         return device
 
     rate_limit.record_failure("device_auth", client_ip)

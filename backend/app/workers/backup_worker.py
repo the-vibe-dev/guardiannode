@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import shutil
-import subprocess
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +18,7 @@ from ulid import ULID
 
 from app import settings as settings_mod
 from app.archive.format import create_archive, verify_archive
+from app.archive.identity import load_or_create
 from app.db.maintenance import sqlite_path_from_url
 from app.db.models import BackupRun, Setting
 from app.db.session import get_sessionmaker
@@ -40,7 +40,6 @@ def default_config() -> dict[str, Any]:
         "retention_count": max(1, int(settings.database_backup_keep)),
         "interval_seconds": max(300, int(settings.database_backup_interval_seconds)),
         "incremental_evidence": False,
-        "hook_argv": [],
     }
 
 
@@ -138,14 +137,13 @@ def run_once(config: dict[str, Any] | None = None) -> Path | None:
             recipient_key=_public_key(str(cfg["recipient_public_key"])),
             include_instance_key_slot=True,
         )
-        verified = verify_archive(archive, master_key=encryption.get_master_key())
+        verified = verify_archive(
+            archive,
+            master_key=encryption.get_master_key(),
+            trusted_signer=load_or_create(settings_mod.settings.keys_dir).public_key,
+        )
         if not verified["manifest"]["evidence"]["covered"]:
             raise RuntimeError("backup verification reported incomplete evidence coverage")
-        hook = cfg.get("hook_argv") or []
-        if hook:
-            if not isinstance(hook, list) or not all(isinstance(item, str) for item in hook):
-                raise RuntimeError("backup hook must be an argument list")
-            subprocess.run([*hook, str(archive)], check=True, timeout=300)
         now = datetime.now(UTC)
         _record_finished(
             backup_id,

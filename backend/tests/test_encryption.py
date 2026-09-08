@@ -2,10 +2,22 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from app.services import encryption
+
+
+def test_concurrent_first_use_returns_one_durable_master_key():
+    encryption._reset_cache()
+    with ThreadPoolExecutor(max_workers=24) as pool:
+        keys = list(pool.map(lambda _index: encryption.get_master_key(), range(96)))
+
+    assert len(set(keys)) == 1
+    assert encryption._key_path().read_bytes() == keys[0]
+    encryption._reset_cache()
+    assert encryption.get_master_key() == keys[0]
 
 
 def test_encrypt_decrypt_text_roundtrip():

@@ -162,11 +162,42 @@ def test_delete_blob_refuses_path_outside_evidence_root(db_session, tmp_path):
 
     blob = s.get(EvidenceBlob, "b-outside")
     assert blob is not None
-    purge.delete_blob(s, blob)
+    assert purge.delete_blob(s, blob) is False
     s.commit()
 
-    assert s.get(EvidenceBlob, "b-outside") is None
+    retained = s.get(EvidenceBlob, "b-outside")
+    assert retained is not None
+    assert retained.deletion_state == "delete_failed"
     assert outside_path.exists()
+
+
+def test_unlink_failure_is_durable_and_retryable(db_session, tmp_path, monkeypatch):
+    s = db_session
+    event_id, risk_id, blob_id, blob_path = _mk_chain(
+        s, tmp_path, suffix="retry", severity="high", age_days=0
+    )
+    real_unlink = type(blob_path).unlink
+
+    def fail_once(path, *args, **kwargs):
+        if path == blob_path:
+            raise PermissionError("file is in use")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(blob_path), "unlink", fail_once)
+    counts = purge.delete_events(s, [event_id])
+    s.commit()
+    assert counts["events"] == 0
+    assert s.get(Event, event_id).deletion_state == "pending_delete"
+    assert s.get(EvidenceBlob, blob_id).deletion_state == "delete_failed"
+    assert s.get(RiskResult, risk_id) is not None
+
+    monkeypatch.setattr(type(blob_path), "unlink", real_unlink)
+    retried = purge.retry_pending_deletions(s)
+    s.commit()
+    assert retried["events"] == 1
+    assert s.get(Event, event_id) is None
+    assert s.get(EvidenceBlob, blob_id) is None
+    assert not blob_path.exists()
 
 
 def test_wipe_low_severity_removes_chain(db_session, tmp_path):

@@ -73,7 +73,7 @@ if (!$SkipAgent) {
   Invoke-Checked $agentPython @("-m", "PyInstaller", "--clean", "--noconfirm", "guardiannode_agent.spec") $agentProject
 
   $agentDist = Join-Path $agentProject "dist\GuardianNodeAgent"
-  foreach ($exeName in @("GuardianNodeAgent.exe", "GuardianNodeTray.exe", "GuardianNodeWatchdog.exe")) {
+  foreach ($exeName in @("GuardianNodeAgent.exe", "GuardianNodeBroker.exe", "GuardianNodeTray.exe", "GuardianNodeWatchdog.exe")) {
     if (!(Test-Path (Join-Path $agentDist $exeName))) {
       throw "Agent build did not produce $exeName"
     }

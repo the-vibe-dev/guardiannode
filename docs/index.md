@@ -32,7 +32,7 @@ parent dashboard.
 </div>
 <div class="gn-card" markdown>
 <h3>👨‍👩‍👧 Family First</h3>
-<p>Built for parents, not IT departments. Pairing uses a 6-digit code and an explicit server URL, and alerts explain what happened and what to do next.</p>
+<p>Built for parents, not IT departments. Pairing uses pinned HTTPS, a short-lived trust bundle, and a one-time code; alerts explain what happened and what to do next.</p>
 </div>
 <div class="gn-card" markdown>
 <h3>🤝 Trustworthy</h3>
@@ -77,20 +77,20 @@ No GPU in the kid's PC? Use the [two-machine setup](PARENT_GUIDES/install-server
 
 ## Quick Start
 
-**Alpha scope:** GuardianNode 0.1.0-alpha.1 is a public alpha for technical
-parents and early evaluators. Windows 11 installers are allowed alpha artifacts
-when published from the tagged release with checksums. This is not a finished
-consumer product for ordinary non-technical families, and it must not be exposed
-directly to the public internet.
+**Alpha scope:** GuardianNode 0.1.0-alpha.3 is a closed-beta candidate for
+technical parents and evaluators. The current TLS/broker installer build needs a
+fresh clean-Windows qualification and remains unsigned. This is not a finished
+consumer product for ordinary families, and it must not be exposed directly to
+the public internet.
 
 | Mode | Alpha support |
 |---|---|
-| Windows 11 all-in-one installer | Supported public alpha path for technical parents |
-| Windows 11 server installer | Supported public alpha path for parent-owned server PCs |
-| Windows 11 child-only installer | Supported public alpha path when paired to a trusted parent server |
+| Windows 11 all-in-one installer | Closed-beta candidate; current build needs clean-machine requalification |
+| Windows 11 server installer | Closed-beta candidate; current build needs clean-machine requalification |
+| Windows 11 child-only installer | Closed-beta candidate; current build needs clean-machine requalification |
 | Source backend on loopback | Supported for technical evaluation |
 | Source all-in-one Windows evaluation | Supported for technical evaluation |
-| Separated private LAN/VPN deployment | Advanced alpha path; explicit opt-in, trusted LAN/VPN/TLS required |
+| Separated private LAN/VPN deployment | Advanced candidate; pinned HTTPS and an isolated trusted network required |
 | Public Internet exposure | Unsupported |
 
 For Windows, start with [Install on one PC](PARENT_GUIDES/install-on-one-pc.md)
@@ -118,6 +118,8 @@ GUARDIANNODE_MDNS_ENABLED=false \
 GUARDIANNODE_CLASSIFIER_TIER=text_only \
 GUARDIANNODE_TEXT_MODEL= \
 GUARDIANNODE_VISION_MODEL= \
+GUARDIANNODE_DEV_MODE=true \
+GUARDIANNODE_TLS_ENABLED=false \
 uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8787
 ```
 
@@ -146,6 +148,7 @@ cd dashboard
 npm ci
 npm run typecheck
 npm test -- --run
+npm run test:e2e
 npm run build
 ```
 

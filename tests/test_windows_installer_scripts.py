@@ -91,6 +91,15 @@ def test_windows_installers_fail_if_ollama_bootstrap_fails() -> None:
     assert 'Source: "..\\shared\\configure_ollama_windows.ps1"; Flags: dontcopy' in server_text
 
 
+def test_windows_installer_health_probe_uses_valid_pascal_string_quoting() -> None:
+    """A quoted PowerShell path needs three Pascal quotes around concatenation."""
+    for path in (CHILD_INSTALLER, SERVER_INSTALLER):
+        text = path.read_text(encoding="utf-8")
+        assert "$ca='''' + ExpandConstant" not in text
+        assert "$ca=''' + ExpandConstant" in text
+        assert "+ '''; do { if (Test-Path -LiteralPath $ca)" in text
+
+
 def test_windows_ollama_bootstrap_registers_persistent_task() -> None:
     text = OLLAMA_BOOTSTRAP.read_text(encoding="utf-8")
     clean_text = CLEAN_WINDOWS.read_text(encoding="utf-8")
@@ -132,7 +141,12 @@ def test_windows_bootstrap_installs_tesseract_for_screenshot_text_detection() ->
     assert "Get-TesseractExecutable" in text
     assert "Install-Tesseract" in text
     assert "[switch]$TesseractOnly" in text
-    assert "tesseract-ocr-w64-setup-5.5.0.20241111.exe" in text
+    assert "tesseract-ocr-w64-setup-5.5.3.20260724.exe" in text
+    assert "bee9e3434bd94fd65387d9be28cd467a41f61b1275383b55b0f59a1331270ae4" in text
+    assert "2F92CB990D57719BDCCA2D72134378614A040D9B" in text
+    assert "$isPinnedExpiredSigner" in text
+    assert 'SignatureStatus]::UnknownError' in text
+    assert 'StatusMessage -match "not within its validity period"' in text
     assert "Tesseract-OCR\\tesseract.exe" in text
     assert "'/S /D={0}'" in text
     assert "WaitForExit(600000)" in text
@@ -203,12 +217,12 @@ def test_child_installer_installs_endpoint_broker_before_session_tasks() -> None
     assert "Broker.xml" in build_script
 
     broker_start = _line_number(text, 'GuardianNodeBrokerService.exe"; Parameters: "start"')
-    agent_task = _line_number(text, 'TaskName ""GuardianNodeAgent""')
     tray_task = _line_number(text, 'TaskName ""GuardianNodeTray""')
     watchdog_start = _line_number(text, 'GuardianNodeWatchdogService.exe"; Parameters: "start"')
-    assert broker_start < agent_task
     assert broker_start < tray_task
     assert broker_start < watchdog_start
+    assert 'TaskName ""GuardianNodeAgent""' not in text
+    assert 'Parameters: "/Delete /TN GuardianNodeAgent /F"' in text
 
     assert "stop GuardianNodeBroker" in text
     assert 'GuardianNodeBrokerService.exe"; Parameters: "uninstall"' in text

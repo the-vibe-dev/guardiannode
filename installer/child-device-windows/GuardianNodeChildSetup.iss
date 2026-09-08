@@ -52,10 +52,9 @@ Source: "..\..\LICENSE";     DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md";   DestDir: "{app}"; Flags: ignoreversion
 
 ; ---- WinSW service wrapper (downloaded during build into stage/) ----
-; The agent itself is NOT a service: services live in session 0 and cannot
-; capture a logged-in user's desktop. The agent runs per user session via the
-; GuardianNodeAgent scheduled task (see register_agent_task.ps1). Only the
-; endpoint broker, watchdog, and optional backend are services.
+; The agent itself is NOT a service: the SYSTEM broker launches one authorized
+; capture process into each active desktop session. The endpoint broker,
+; watchdog, and optional backend are services.
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeBrokerService.exe"; Flags: ignoreversion
 Source: "..\build\stage\winsw\Broker.xml";      DestDir: "{app}"; DestName: "GuardianNodeBrokerService.xml"; Flags: ignoreversion
 Source: "..\build\stage\winsw\WinSW.exe";       DestDir: "{app}"; DestName: "GuardianNodeWatchdogService.exe"; Flags: ignoreversion
@@ -108,6 +107,7 @@ Filename: "cmd.exe"; Parameters: "/C exit /B 0"; Flags: runhidden waituntiltermi
 ; ---- All-in-one mode: install + start the backend service first so the agent can pair against it ----
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Backend service..."; Check: ShouldInstallBackendService
 Filename: "{app}\GuardianNodeBackendService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; Check: IsAllInOne; AfterInstall: RequireBackendHealth
+Filename: "certutil.exe"; Parameters: "-f -addstore Root ""{commonappdata}\GuardianNode\tls\family-ca.pem"""; Flags: runhidden waituntilterminated; Check: IsAllInOne; StatusMsg: "Trusting this family's local GuardianNode certificate..."
 
 ; ---- Clean up the agent service from older installs (the agent is a scheduled
 ; task now — a session-0 service cannot capture the desktop and caused duplicate
@@ -122,12 +122,13 @@ Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "install"; Flags: r
 Filename: "sc.exe"; Parameters: "sdset GuardianNodeBroker {#GuardianNodeServiceSddl}"; Flags: runhidden waituntilterminated
 Filename: "{app}\GuardianNodeBrokerService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; StatusMsg: "Starting GuardianNode Endpoint Broker service..."
 
-; ---- Register the agent + tray as logon scheduled tasks for ALL users and start them ----
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeAgent.exe"" -TaskName ""GuardianNodeAgent"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode monitoring for all users..."
+; ---- The SYSTEM broker launches and tracks the capture process in each active
+; session. Only the child-visible tray remains a public logon task. ----
+Filename: "schtasks.exe"; Parameters: "/Delete /TN GuardianNodeAgent /F"; Flags: runhidden waituntilterminated
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_agent_task.ps1"" -AgentExe ""{app}\agent\GuardianNodeTray.exe"" -TaskName ""GuardianNodeTray"""; Flags: runhidden waituntilterminated; StatusMsg: "Registering GuardianNode tray for all users..."
 
 ; ---- Install + start one watchdog service. WinSW/SCM recovery restarts the
-; watchdog itself; the watchdog keeps the agent/tray scheduled tasks healthy. ----
+; watchdog itself; the watchdog keeps the tray scheduled task healthy. ----
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Installing GuardianNode Watchdog service..."; Check: ShouldInstallWatchdogService
 Filename: "{app}\GuardianNodeWatchdogService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 
@@ -312,7 +313,7 @@ begin
     Exit;
   end;
   if (ModeParam = 'child') or (InstallerParam('SERVERURL') <> '') or
-     (InstallerParam('PAIRCODE') <> '') then begin
+     (InstallerParam('PAIRCODE') <> '') or (InstallerParam('PAIRBUNDLE') <> '') then begin
     Result := False;
     Exit;
   end;
@@ -379,7 +380,6 @@ begin
     RunHidden('{sys}\sc.exe', 'start GuardianNodeBroker');
   if GNServiceExists('GuardianNodeWatchdog') then
     RunHidden('{sys}\sc.exe', 'start GuardianNodeWatchdog');
-  RunHidden('{sys}\schtasks.exe', '/Run /TN GuardianNodeAgent');
   RunHidden('{sys}\schtasks.exe', '/Run /TN GuardianNodeTray');
 end;
 
@@ -456,7 +456,7 @@ var
   ResultCode: Integer;
 begin
   Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do { try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ''http://127.0.0.1:8787/api/health/ready''; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
+    '-NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); $ca=''' + ExpandConstant('{commonappdata}\GuardianNode\tls\family-ca.pem') + '''; do { if (Test-Path -LiteralPath $ca) { & curl.exe --silent --fail --cacert $ca https://127.0.0.1:8787/api/health/ready; if ($LASTEXITCODE -eq 0) { exit 0 } }; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline); exit 1"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
     FailAndRollbackBackendHealth;
@@ -734,7 +734,7 @@ end;
 
 function ValidateInstallInputs(var ErrorMessage: String): Boolean;
 var
-  Mode, ServerUrl, PairCode: String;
+  Mode, ServerUrl, PairCode, PairBundle: String;
 begin
   // Repair/upgrade installs retain their established mode, endpoint, and
   // credentials. Requiring a new pairing code here would make unattended
@@ -750,6 +750,7 @@ begin
   Mode := Lowercase(InstallerParam('MODE'));
   ServerUrl := Trim(ServerConnectionPage.Values[0]);
   PairCode := Trim(ServerConnectionPage.Values[1]);
+  PairBundle := Trim(ServerConnectionPage.Values[2]);
 
   if Mode = '' then begin
     if WizardSilent() then begin
@@ -775,17 +776,21 @@ begin
       ErrorMessage := 'Child mode requires /SERVERURL with the trusted LAN/VPN GuardianNode server URL.';
       Exit;
     end;
-    if not IsValidServerUrl(ServerUrl) then begin
-      ErrorMessage := 'Server URL must be http:// or https:// with a valid host, optional port, no credentials, and no fragment/query.';
+    if (Pos('https://', Lowercase(ServerUrl)) <> 1) or (not IsValidServerUrl(ServerUrl)) then begin
+      ErrorMessage := 'Server URL must be the exact https:// URL shown by the parent dashboard.';
       Exit;
     end;
     if not HasOnlyAsciiDigits(PairCode, 6) then begin
       ErrorMessage := 'Pairing code must be exactly six ASCII digits.';
       Exit;
     end;
+    if (PairBundle = '') or (not FileExists(PairBundle)) then begin
+      ErrorMessage := 'Select the .gnpair trust bundle downloaded from the parent dashboard.';
+      Exit;
+    end;
   end else begin
-    if (ServerUrl <> '') or (PairCode <> '') then begin
-      ErrorMessage := '/SERVERURL and /PAIRCODE are only valid with /MODE=child.';
+    if (ServerUrl <> '') or (PairCode <> '') or (PairBundle <> '') then begin
+      ErrorMessage := '/SERVERURL, /PAIRCODE, and /PAIRBUNDLE are only valid with /MODE=child.';
       Exit;
     end;
   end;
@@ -796,7 +801,7 @@ end;
 function GetDashboardUrl(Param: String): String;
 begin
   if IsAllInOne then
-    Result := 'http://127.0.0.1:8787'
+    Result := 'https://127.0.0.1:8787'
   else
     // Child-only: the dashboard lives on the parent server. Never fall back
     // to 127.0.0.1 here — there is no local backend on a child-only machine.
@@ -812,12 +817,13 @@ end;
 
 procedure InitializeWizard;
 var
-  ModeParam, ServerUrlParam, PairCodeParam: String;
+  ModeParam, ServerUrlParam, PairCodeParam, PairBundleParam: String;
 begin
   ProbeHardware;
   ModeParam := Lowercase(InstallerParam('MODE'));
   ServerUrlParam := InstallerParam('SERVERURL');
   PairCodeParam := InstallerParam('PAIRCODE');
+  PairBundleParam := InstallerParam('PAIRBUNDLE');
 
   // -- Mode selection --
   ModePage := CreateInputOptionPage(wpWelcome,
@@ -838,10 +844,12 @@ begin
     'Connect to GuardianNode server',
     'Enter the pairing code shown on your parent dashboard (Devices > Add device).',
     'Enter the exact server URL from the parent dashboard or setup guide.');
-  ServerConnectionPage.Add('Server URL (e.g. http://192.168.1.42:8787):', False);
+  ServerConnectionPage.Add('Server URL (for example https://guardiannode.local:8787):', False);
   ServerConnectionPage.Add('6-digit pairing code:', False);
+  ServerConnectionPage.Add('Downloaded .gnpair bundle path:', False);
   ServerConnectionPage.Values[0] := ServerUrlParam;
   ServerConnectionPage.Values[1] := PairCodeParam;
+  ServerConnectionPage.Values[2] := PairBundleParam;
 
   // -- Hardware summary (only used in all-in-one mode) --
   HardwareSummaryPage := CreateOutputMsgPage(ServerConnectionPage.ID,
@@ -907,7 +915,7 @@ begin
   if not FileExists(CfgPath) then begin
     SetArrayLength(CfgFile, 8);
     if IsAllInOne or (ServerUrl = '') then
-      CfgFile[0] := 'backend_url: http://127.0.0.1:8787'
+      CfgFile[0] := 'backend_url: https://127.0.0.1:8787'
     else
       CfgFile[0] := 'backend_url: ' + ServerUrl;
     CfgFile[1] := 'ocr_engine: tesseract';
@@ -931,10 +939,12 @@ begin
      (not FileExists(AddBackslash(ServerDataDir) + 'device.json')) then begin
     SetArrayLength(PairFile, 1);
     if IsAllInOne then
-      PairFile[0] := '{"backend_url": "http://127.0.0.1:8787", "local_bootstrap": true}'
+      PairFile[0] := '{"backend_url": "https://127.0.0.1:8787", "local_bootstrap": true, "ca_path": "' +
+        JsonEscape(AddBackslash(ServerDataDir) + 'tls\family-ca.pem') + '"}'
     else
       PairFile[0] := '{"backend_url": "' + JsonEscape(ServerUrl) + '", "code": "' +
-        JsonEscape(Trim(ServerConnectionPage.Values[1])) + '"}';
+        JsonEscape(Trim(ServerConnectionPage.Values[1])) + '", "bundle_path": "' +
+        JsonEscape(Trim(ServerConnectionPage.Values[2])) + '"}';
     SaveStringsAtomic(PairPath, PairFile);
   end;
 end;
@@ -952,5 +962,7 @@ begin
   RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\Secure" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F');
   RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\AgentSecure" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F');
   RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\keys" /inheritance:r /grant:r SYSTEM:(OI)(CI)F /grant:r Administrators:(OI)(CI)F');
+  if FileExists(DataRoot + '\pending_pairing.json') then
+    RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\pending_pairing.json" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F');
   RunHidden('{sys}\icacls.exe', '"' + DataRoot + '\server.env" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F');
 end;

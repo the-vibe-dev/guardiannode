@@ -23,8 +23,7 @@ GuardianNode assumes:
 - A parent/admin controls the backend machine and dashboard credentials.
 - The child-device agent runs on a Windows device the parent is allowed to
   administer.
-- The deployment is all-in-one, on a trusted home LAN, or behind a trusted VPN or
-  reverse proxy.
+- The deployment is all-in-one, on a trusted home LAN, or behind a trusted VPN.
 - The backend is not exposed directly to the public internet.
 
 Security boundaries:
@@ -38,8 +37,13 @@ Security boundaries:
 
 Important limitations:
 
-- Separated mode currently uses local-network HTTP unless the operator adds TLS,
-  a VPN such as Tailscale/WireGuard, or a trusted reverse proxy.
+- Fresh separated-mode installs use the local family CA and a short-lived
+  `.gnpair` trust bundle. The agent pins the CA certificate and exact HTTPS
+  server URL. Loopback HTTP is retained only for source development.
+- The built-in transport is server-authenticated TLS, not mutual TLS. Device
+  authentication still uses a high-entropy bearer credential stored as a keyed
+  digest on the backend. A stolen live child credential remains usable until it
+  is revoked.
 - GuardianNode does not encrypt the whole SQLite database in this alpha. App
   names, window titles, URLs, timestamps, device/profile IDs, child profile
   fields, risk summaries, snippets, alert notes, audit details, and source IPs
@@ -53,6 +57,9 @@ Important limitations:
   reconstruct, wrap, or back up the evidence encryption key.
 - A determined local Windows administrator can eventually disable or remove any
   user-space monitoring software.
+- Parent-confirmed Windows enforcement is defense in depth, not an emergency or
+  punishment system. The broker accepts only bounded actions and exact targets,
+  and only undoes state it owns.
 - Classifier output is not a security boundary and may be wrong.
 
 ## Evidence Encryption And Recovery
@@ -98,6 +105,10 @@ private maintainer contact channel. Do not include child screenshots, private
 messages, raw evidence, secrets, pairing codes, or logs containing personal
 information in public issues.
 
+Maintainers triage and contain reports using the
+[incident-response plan](docs/INCIDENT_RESPONSE.md). That plan does not replace
+jurisdiction-specific legal/privacy advice.
+
 Include in private reports:
 
 - A description of the issue and its impact
@@ -121,8 +132,8 @@ The maintainers do not support and do not want contributions that enable:
 ## Operational Guidance
 
 - Prefer all-in-one mode for early alpha testing.
-- For separated mode, use a trusted LAN or VPN and do not port-forward the
-  backend to the internet.
+- For separated mode, compare the CA words shown by the dashboard and child
+  installer, keep the `.gnpair` file private, and do not port-forward the backend.
 - Set a strong parent password and store the recovery code offline.
 - Back up the backend data directory and create a portable master-key backup if
   you need evidence recovery.

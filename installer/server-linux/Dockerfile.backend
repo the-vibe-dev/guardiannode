@@ -1,5 +1,5 @@
 # GuardianNode backend Docker image.
-# Multi-stage: build dashboard with Node, install backend Python deps, run with uvicorn.
+# Multi-stage: build dashboard, install backend dependencies, run its TLS-aware entrypoint.
 
 # ---- Stage 1: build dashboard ----
 FROM node:24-alpine3.22@sha256:191c9f0080fcbbc6547a85dc0ff7988072214a355aabdc1d2ec55a7dae5eea8a AS dashboard-build
@@ -50,4 +50,4 @@ USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8787
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "/app/backend", "--host", "0.0.0.0", "--port", "8787"]
+CMD ["guardiannode-backend"]

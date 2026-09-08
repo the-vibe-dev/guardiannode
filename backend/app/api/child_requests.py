@@ -1,10 +1,11 @@
 """Child-originated requests for time/site/app exceptions."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
@@ -24,6 +25,8 @@ class ChildRequestCreate(BaseModel):
 
 
 class ChildRequestDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     request_id: str
     device_id: str | None
     profile_id: str | None
@@ -35,6 +38,25 @@ class ChildRequestDTO(BaseModel):
     created_at: datetime
     reviewed_by: str | None
     reviewed_at: datetime | None
+    expires_at: datetime | None
+
+
+class ChildRequestPage(BaseModel):
+    items: list[ChildRequestDTO]
+    next_cursor: str | None
+    open_count: int
+
+
+def _expire_open(db: Session) -> int:
+    now = datetime.now(UTC)
+    rows = db.query(ChildRequest).filter(
+        ChildRequest.status == "open",
+        ChildRequest.expires_at.isnot(None),
+        ChildRequest.expires_at <= now,
+    ).all()
+    for row in rows:
+        row.status = "expired"
+    return len(rows)
 
 
 @router.post("", response_model=ChildRequestDTO)
@@ -44,6 +66,13 @@ def create_child_request(
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
+    _expire_open(db)
+    open_count = db.query(ChildRequest).filter(
+        ChildRequest.device_id == device.device_id,
+        ChildRequest.status == "open",
+    ).count()
+    if open_count >= 5:
+        raise HTTPException(429, "This device already has five open requests")
     resolved = resolve_profile(db, device=device, payload_profile_id=req.profile_id)
     row = ChildRequest(
         request_id=str(ULID()),
@@ -53,6 +82,7 @@ def create_child_request(
         target=req.target,
         reason=req.reason,
         status="open",
+        expires_at=datetime.now(UTC) + timedelta(days=7),
     )
     db.add(row)
     log_action(
@@ -67,16 +97,58 @@ def create_child_request(
     return row
 
 
-@router.get("", response_model=list[ChildRequestDTO])
+@router.get("/mine", response_model=list[ChildRequestDTO])
+def list_my_child_requests(
+    db: Session = Depends(get_db_dep),
+    device: Device = Depends(current_device),
+):
+    _expire_open(db)
+    rows = (
+        db.query(ChildRequest)
+        .filter(ChildRequest.device_id == device.device_id)
+        .order_by(ChildRequest.created_at.desc(), ChildRequest.request_id.desc())
+        .limit(20)
+        .all()
+    )
+    db.commit()
+    return rows
+
+
+@router.get("", response_model=ChildRequestPage)
 def list_child_requests(
     status: str | None = None,
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):
-    q = db.query(ChildRequest).order_by(ChildRequest.created_at.desc())
+    _expire_open(db)
+    q = db.query(ChildRequest)
     if status:
         q = q.filter(ChildRequest.status == status)
-    return q.limit(200).all()
+    if cursor:
+        anchor = db.get(ChildRequest, cursor)
+        if anchor is None:
+            raise HTTPException(400, "Invalid child-request cursor")
+        q = q.filter(or_(
+            ChildRequest.created_at < anchor.created_at,
+            and_(
+                ChildRequest.created_at == anchor.created_at,
+                ChildRequest.request_id < anchor.request_id,
+            ),
+        ))
+    rows = q.order_by(
+        ChildRequest.created_at.desc(), ChildRequest.request_id.desc()
+    ).limit(limit + 1).all()
+    items = rows[:limit]
+    next_cursor = items[-1].request_id if len(rows) > limit else None
+    open_count = db.query(ChildRequest).filter(ChildRequest.status == "open").count()
+    db.commit()
+    return ChildRequestPage(
+        items=[ChildRequestDTO.model_validate(item) for item in items],
+        next_cursor=next_cursor,
+        open_count=open_count,
+    )
 
 
 class ChildRequestReview(BaseModel):

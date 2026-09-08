@@ -6,8 +6,7 @@ import json
 from types import SimpleNamespace
 
 from src.broker_protocol import image_to_b64, make_request
-from src.broker_service import BrokerCommandHandler, WindowsNamedPipeServer
-from src.parent_auth import write_credentials
+from src.broker_service import BrokerCommandHandler, CaptureProcessManager, WindowsNamedPipeServer
 from src.pairing_client import save_credentials
 
 
@@ -28,8 +27,6 @@ def _handler(tmp_path) -> BrokerCommandHandler:
         pause_path=tmp_path / "pause_state.json",
         credential_path=tmp_path / "secure" / "device.json",
         legacy_credential_path=tmp_path / "legacy" / "device.json",
-        parent_credential_path=tmp_path / "secure" / "parent.json",
-        legacy_parent_credential_path=tmp_path / "legacy" / "parent.json",
     )
 
 
@@ -78,63 +75,14 @@ def test_broker_queues_screenshot_without_profile_authority(tmp_path) -> None:
     assert "age_group" not in handler.queue.items[0]  # type: ignore[attr-defined]
 
 
-def test_broker_pause_resume_state_is_authoritative(tmp_path) -> None:
+def test_broker_has_no_password_bearing_actions(tmp_path) -> None:
     handler = _handler(tmp_path)
-    write_credentials("correct horse", "alpha beta gamma", handler.parent_credential_path)
-    pause = handler.handle_message(
-        make_request(
-            "pause",
-            {
-                "duration_seconds": 60,
-                "actor": "test",
-                "parent_password": "correct horse",
-            },
-        )
-    )
-    status = handler.handle_message(make_request("status"))
-    resume = handler.handle_message(
-        make_request("resume", {"actor": "test", "parent_password": "correct horse"})
-    )
-    resumed_status = handler.handle_message(make_request("status"))
-
-    assert pause["ok"]
-    assert status["payload"]["paused"] is True
-    assert resume["ok"]
-    assert resumed_status["payload"]["paused"] is False
-
-
-def test_broker_rejects_pause_without_parent_password(tmp_path) -> None:
-    handler = _handler(tmp_path)
-
-    missing = handler.handle_message(make_request("pause", {"duration_seconds": 60, "actor": "test"}))
-    wrong = handler.handle_message(
-        make_request(
-            "pause",
-            {
-                "duration_seconds": 60,
-                "actor": "test",
-                "parent_password": "wrong",
-            },
-        )
-    )
-
-    assert not missing["ok"]
-    assert "parent_password is required" in missing["error"]
-    assert not wrong["ok"]
-    assert "parent verification failed" in wrong["error"]
-
-
-def test_broker_verify_parent_has_no_state_side_effect(tmp_path) -> None:
-    handler = _handler(tmp_path)
-    write_credentials("correct horse", "alpha beta gamma", handler.parent_credential_path)
-
-    response = handler.handle_message(
-        make_request("verify_parent", {"actor": "test", "parent_password": "correct horse"})
-    )
-
-    assert response["ok"]
-    assert response["payload"]["verified"] is True
-    assert handler._load_pause().paused is False
+    for action in ("pause", "resume", "verify_parent"):
+        message = make_request("status")
+        message["action"] = action
+        response = handler.handle_message(message)
+        assert not response["ok"]
+        assert "unsupported action" in response["error"]
 
 
 def test_broker_rejects_replayed_request_id(tmp_path) -> None:
@@ -225,24 +173,115 @@ def test_named_pipe_identity_validation_uses_win32security_impersonation(monkeyp
 
     monkeypatch.setitem(__import__("sys").modules, "win32api", SimpleNamespace(GetCurrentThread=lambda: "thread"))
     monkeypatch.setitem(__import__("sys").modules, "win32con", SimpleNamespace(TOKEN_QUERY=1))
-    monkeypatch.setitem(__import__("sys").modules, "win32pipe", SimpleNamespace())
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "win32pipe",
+        SimpleNamespace(GetNamedPipeClientProcessId=lambda _pipe: 4242),
+    )
     monkeypatch.setitem(__import__("sys").modules, "win32security", FakeSecurity)
 
-    assert WindowsNamedPipeServer._validate_client_identity("pipe") is True
+    assert WindowsNamedPipeServer._client_pid("pipe") == 4242
     assert calls == ["impersonate", "open-token", "revert"]
 
 
-def test_named_pipe_server_reads_frame_before_impersonating_client() -> None:
-    source = inspect.getsource(WindowsNamedPipeServer.serve_forever)
+def test_named_pipe_server_identifies_client_before_dispatch() -> None:
+    source = inspect.getsource(WindowsNamedPipeServer._handle_pipe)
 
-    assert source.index("frame = self._read_frame(pipe)") < source.index("self._validate_client_identity(pipe)")
+    assert source.index("client_pid = self._client_pid(pipe)") < source.index(
+        "self.handler.handle_message(message)"
+    )
+    assert "self.capture_processes.is_authorized(client_pid)" in source
 
 
 def test_named_pipe_server_flushes_responses_before_disconnect() -> None:
-    source = inspect.getsource(WindowsNamedPipeServer.serve_forever)
+    source = inspect.getsource(WindowsNamedPipeServer._handle_pipe)
 
-    assert source.count("win32file.FlushFileBuffers(pipe)") >= 2
+    assert source.count("win32file.FlushFileBuffers(pipe)") >= 1
     assert source.index("win32file.WriteFile(pipe, encode_frame(response))") < source.index(
         "win32file.FlushFileBuffers(pipe)",
         source.index("win32file.WriteFile(pipe, encode_frame(response))"),
     )
+
+
+def test_capture_process_manager_only_authorizes_tracked_live_pid(monkeypatch, tmp_path) -> None:
+    manager = CaptureProcessManager(agent_exe=tmp_path / "GuardianNodeAgent.exe")
+    manager._pids_by_session[1] = 4242
+    monkeypatch.setattr(manager, "_pid_is_running", lambda pid: pid == 4242)
+
+    assert manager.is_authorized(4242) is True
+    assert manager.is_authorized(9999) is False
+
+
+def test_capture_launch_uses_pywin32_duplicate_token_argument_order(monkeypatch, tmp_path) -> None:
+    import sys
+
+    agent = tmp_path / "GuardianNodeAgent.exe"
+    agent.write_bytes(b"synthetic executable")
+    calls: dict[str, tuple] = {}
+
+    class Handle:
+        def Close(self) -> None:
+            pass
+
+    class FakeSecurity:
+        SecurityImpersonation = 2
+        TokenPrimary = 1
+
+        @staticmethod
+        def SECURITY_ATTRIBUTES():
+            return "security-attributes"
+
+        @staticmethod
+        def DuplicateTokenEx(existing, impersonation_level, desired_access, token_type, attributes):
+            calls["duplicate"] = (
+                existing,
+                impersonation_level,
+                desired_access,
+                token_type,
+                attributes,
+            )
+            return Handle()
+
+    class FakeTs:
+        @staticmethod
+        def WTSQueryUserToken(session_id):
+            calls["session"] = (session_id,)
+            return "session-token"
+
+    class FakeProfile:
+        @staticmethod
+        def CreateEnvironmentBlock(primary, inherit):
+            calls["environment"] = (primary, inherit)
+            return {"TEST": "1"}
+
+    class FakeProcess:
+        class STARTUPINFO:
+            pass
+
+        @staticmethod
+        def CreateProcessAsUser(*args):
+            calls["process"] = args
+            return Handle(), Handle(), 4242, 7
+
+    monkeypatch.setitem(sys.modules, "win32con", SimpleNamespace(
+        MAXIMUM_ALLOWED=0x02000000,
+        CREATE_UNICODE_ENVIRONMENT=0x00000400,
+        CREATE_NO_WINDOW=0x08000000,
+    ))
+    monkeypatch.setitem(sys.modules, "win32security", FakeSecurity)
+    monkeypatch.setitem(sys.modules, "win32ts", FakeTs)
+    monkeypatch.setitem(sys.modules, "win32profile", FakeProfile)
+    monkeypatch.setitem(sys.modules, "win32process", FakeProcess)
+
+    manager = CaptureProcessManager(agent_exe=agent)
+
+    assert manager._launch_in_session(1) == 4242
+    assert calls["duplicate"] == (
+        "session-token",
+        FakeSecurity.SecurityImpersonation,
+        0x02000000,
+        FakeSecurity.TokenPrimary,
+        "security-attributes",
+    )
+    assert calls["process"][1] == str(agent)
+    assert calls["process"][2] == f'"{agent}" --broker-capture'

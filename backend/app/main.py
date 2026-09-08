@@ -31,6 +31,7 @@ from app.api import (
 from app.api import (
     child_requests as child_requests_api,
 )
+from app.api import consent as consent_api
 from app.api import (
     dashboard as dashboard_api,
 )
@@ -69,6 +70,7 @@ from app.api import (
 from app.db.session import get_engine
 from app.services import mdns_advertiser
 from app.services.device_bootstrap_token import ensure_device_bootstrap_token
+from app.services.request_limits import RequestBodyLimitMiddleware
 from app.services.setup_token import ensure_setup_token
 from app.settings import settings
 from app.workers import (
@@ -112,6 +114,8 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if settings_mod.settings.tls_enabled:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
@@ -304,7 +308,7 @@ def create_app() -> FastAPI:
         SessionMiddleware,
         secret_key=_ensure_session_secret(),
         same_site="strict",
-        https_only=settings.https_only_cookies,
+        https_only=settings.https_only_cookies or settings.tls_enabled,
         max_age=settings.session_absolute_timeout_seconds,
     )
 
@@ -317,15 +321,21 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
+    # Added last so it is the outermost middleware and can reject a body before
+    # sessions, CSRF, authentication, multipart, or Pydantic consume it.
+    app.add_middleware(RequestBodyLimitMiddleware)
+
     app.include_router(health_api.router, prefix="/api")
     app.include_router(auth_api.router, prefix="/api")
     app.include_router(setup_api.router, prefix="/api")
+    app.include_router(consent_api.router, prefix="/api")
     app.include_router(devices_api.router, prefix="/api")
     app.include_router(profiles_api.router, prefix="/api")
     app.include_router(policies_api.router, prefix="/api")
     app.include_router(events_api.router, prefix="/api")
     app.include_router(risks_api.router, prefix="/api")
     app.include_router(alerts_api.router, prefix="/api")
+    app.include_router(alerts_api.actions_router, prefix="/api")
     app.include_router(guardian_review_api.router, prefix="/api")
     app.include_router(demo_api.router, prefix="/api")
     app.include_router(models_api.router, prefix="/api")
@@ -394,12 +404,35 @@ def cli() -> None:  # pragma: no cover
 
     import uvicorn
 
-    uvicorn.run(
-        "app.main:app",
-        host=settings.bind_host,
-        port=settings.bind_port,
-        log_level=settings.log_level.lower(),
-    )
+    if not settings.tls_enabled and not (settings.dev_mode and not settings.binds_beyond_loopback()):
+        raise SystemExit("HTTP is allowed only for loopback development; enable GuardianNode TLS")
+    if settings.tls_enabled:
+        from app.services.local_tls import ensure_server_certificate
+
+        certificate, private_key = ensure_server_certificate()
+        import threading
+
+        from app.services.local_tls import cleanup_runtime_key
+
+        cleanup_timer = threading.Timer(30.0, cleanup_runtime_key, args=(private_key,))
+        cleanup_timer.daemon = True
+        cleanup_timer.start()
+
+        uvicorn.run(
+            "app.main:app",
+            host=settings.bind_host,
+            port=settings.bind_port,
+            log_level=settings.log_level.lower(),
+            ssl_certfile=certificate,
+            ssl_keyfile=private_key,
+        )
+    else:
+        uvicorn.run(
+            "app.main:app",
+            host=settings.bind_host,
+            port=settings.bind_port,
+            log_level=settings.log_level.lower(),
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

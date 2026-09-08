@@ -1,6 +1,6 @@
 # Roadmap
 
-## v0.1.0-alpha.1 — current public alpha
+## v0.1.0-alpha.3 — current closed-beta candidate
 
 - ✅ Repo scaffold, license, docs
 - ✅ Shared schemas (JSON Schema + Pydantic)
@@ -10,9 +10,13 @@
 - ✅ Screenshot-based collection with server-side OCR (replaced the earlier MV3 browser extension, now removed)
 - ✅ Dashboard (React + Vite + Tailwind) — login, dashboard, devices, risk feed, alert detail, settings
 - ✅ Linux server installer: `install.sh` + systemd + Docker Compose
-- ✅ Windows server installer (Inno Setup; public alpha for technical parents)
-- ✅ Windows child-device/all-in-one installer (Inno Setup; public alpha for technical parents)
-- ⚠️ Authenticated server discovery/pinning for separated mode
+- ⚠️ Windows server installer (Inno Setup; source-tested, current build needs clean-machine requalification)
+- ⚠️ Windows child-device/all-in-one installer (Inno Setup; source-tested, unsigned, current build needs requalification)
+- ✅ Family-CA HTTPS, short-lived trust bundles, and CA pinning for separated mode
+- ✅ Broker-owned credentials/queue and authenticated per-session capture launch
+- ✅ Versioned parental consent, withdrawal/deletion, guided onboarding, child requests, and metadata-only daily digest
+- ✅ Parent-confirmed bounded Windows commands with audit/status reporting
+- ✅ Responsive alert-first dashboard with automated Chromium/axe journeys
 - ⚠️ Wine-based cross-build for Windows installers on Linux
 - ✅ GitHub release workflow with source archive and public alpha installer artifacts
 
@@ -26,10 +30,10 @@
 - [ ] SignPath.io OSS code-signing application
 - [ ] Submit to `winget-pkgs` and Chocolatey
 
-## v0.3 — Enforcement
+## v0.3 — Broader Enforcement
 
-- [ ] Soft pause/kill for monitored apps after critical alerts
-- [ ] Hosts-file domain block with parent approval flow
+- [x] Soft close of an exact process after explicit parent confirmation
+- [x] Hosts-file domain block with explicit parent confirmation and owned-state undo
 - [ ] Pi-hole integration
 - [ ] AdGuard Home integration
 - [ ] Time-of-day policy support
@@ -38,13 +42,14 @@
 ## v0.4 — Notifications
 
 - [ ] Polished SMTP email templates
-- [ ] Daily digest by severity
+- [x] Metadata-only daily digest by severity and family timezone
 - [ ] Optional webhook integration (Discord/Slack/Gotify/ntfy.sh — all parent-controlled endpoints)
 - [ ] Windows toast notifications on parent PC
 
 ## v0.5 — Mobile companion (read-only)
 
-- [ ] PWA dashboard that works well on phones over LAN
+- [x] Responsive HTTPS web dashboard for parent-managed phones on the private LAN/VPN
+- [ ] Installable offline-capable PWA shell
 - [ ] Optional push notifications via ntfy.sh self-hosted
 
 ## Platform roadmap
@@ -65,7 +70,7 @@ direct port of the Windows agent.
 
 - [ ] All MVP definition-of-done items complete (full install/pair/alert/review flow verified on clean machines)
 - [ ] EV code-signing certificate (sponsored or community-funded)
-- [ ] First-time-user onboarding wizard in dashboard
+- [x] First-time-user onboarding checklist in dashboard
 - [ ] Polished parent-facing documentation including printable quickstart card
 - [ ] Translations: Spanish, French, German, Brazilian Portuguese
 - [ ] Security audit (external, public report)

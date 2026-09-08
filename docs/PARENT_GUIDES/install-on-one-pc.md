@@ -1,8 +1,8 @@
 # Install GuardianNode on one PC
 
 This guide describes the all-in-one alpha test shape: everything runs on the
-same machine and the backend stays on loopback. GuardianNode 0.1.0-alpha.1 is a
-public alpha for technical parents and early evaluators, not a finished
+same machine and the backend stays on loopback. GuardianNode 0.1.0-alpha.3 is a
+closed-beta candidate for technical parents and evaluators, not a finished
 consumer product for ordinary non-technical families.
 
 ## Before you start
@@ -16,14 +16,14 @@ You'll need:
 
 ## Step 1 — Get the alpha installer
 
-Download `GuardianNodeChildSetup-0.1.0-alpha.1.exe` from the official GitHub
+Download `GuardianNodeChildSetup-0.1.0-alpha.3.exe` from the official GitHub
 release and verify the published SHA-256 checksum before running it. The alpha
 installer is unsigned, so Windows SmartScreen, Defender, or other antivirus
 software may warn before trust reputation exists.
 
 ## Step 2 — Run the installer
 
-Double-click `GuardianNodeChildSetup-0.1.0-alpha.1.exe`.
+Double-click `GuardianNodeChildSetup-0.1.0-alpha.3.exe`.
 
 **If Windows says "Windows protected your PC":** That's expected for unsigned
 alpha builds. See [When Windows says "Protected your PC"](when-windows-says-protected-your-pc.md)
@@ -79,11 +79,15 @@ The installer runs a synthetic test to make sure everything works. If any check 
 
 ## Step 9 — Open the dashboard and verify operation
 
-Click **Open Parent Dashboard**. Your browser opens to `http://127.0.0.1:8787`. Sign in with your parent password.
+Click **Open Parent Dashboard**. Your browser opens to
+`https://127.0.0.1:8787`. The installer trusts this family's local CA on the
+machine so the dashboard has an authenticated encrypted connection. Sign in
+with your parent password.
 
-The installer starts the monitoring agent and the tray icon for the current
-Windows user. It also registers all-user logon tasks so the agent and tray
-launch again whenever a Windows account signs in.
+The installer starts the endpoint broker and watchdog services and the visible
+tray icon for the current Windows user. The broker launches an authorized
+capture helper in each active desktop session; the tray is registered for
+future user logons.
 
 To confirm the alpha is working:
 
@@ -98,7 +102,9 @@ To confirm the alpha is working:
 
 When you (the parent) use this PC, you'll want to pause monitoring so your own activity isn't logged.
 
-Right-click the **GuardianNode tray icon** (looks like a small shield in the system tray near the clock) → **Pause monitoring** → enter your parent password → pick how long (15 min, 1 hour, 4 hours, until reboot).
+Right-click the **GuardianNode tray icon** (a small shield near the clock) and
+choose **Pause monitoring in parent dashboard**. Sign in there and pause the
+device. The child session never receives or stores the parent password.
 
 See [Pause monitoring when you use the PC](pause-monitoring-when-you-use-the-pc.md) for more.
 
@@ -106,11 +112,11 @@ See [Pause monitoring when you use the PC](pause-monitoring-when-you-use-the-pc.
 
 GuardianNode runs in the background. If it detects a risk (grooming, scams, self-harm signals, etc.), it appears in your dashboard with a clear explanation. **Critical alerts** also trigger an immediate notification.
 
-Open the dashboard at any time to review alerts: `http://127.0.0.1:8787`
-from a bookmark on the same PC. The alpha dashboard is loopback-only by
-default. Advanced operators may configure access through a trusted VPN or TLS
-reverse proxy using `docs/SECURE_LAN_SETUP.md`; there is no one-click LAN
-settings control in this release.
+Open the dashboard at any time to review alerts: `https://127.0.0.1:8787`
+from a bookmark on the same PC. The dashboard is loopback-only by default.
+Advanced operators can deliberately enable pinned-HTTPS private-LAN or VPN
+access using [Secure LAN setup](../SECURE_LAN_SETUP.md); there is no one-click
+LAN settings control in this release.
 
 ## Stop, disable, or uninstall
 

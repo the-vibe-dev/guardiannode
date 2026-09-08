@@ -18,7 +18,7 @@ function renderLayout() {
 describe("Layout responsive navigation", () => {
   it("renders every navigation destination", () => {
     renderLayout();
-    for (const label of ["Overview", "Risk feed", "Devices", "Profiles", "Models", "Settings", "Audit"]) {
+    for (const label of ["Home", "Alerts", "Children", "Devices", "Requests", "Privacy & consent", "Models", "Audit", "Review history", "Diagnostics & settings"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
   });
@@ -27,12 +27,12 @@ describe("Layout responsive navigation", () => {
     const { container } = renderLayout();
     const aside = container.querySelector("aside")!;
     expect(aside).toBeTruthy();
-    // Responsive: collapses to a horizontal bar on small screens, sidebar at md+.
+    // Responsive: off-canvas on phones and a persistent sidebar at md+.
     expect(aside.className).toContain("md:");
+    expect(aside.className).toContain("-translate-x-full");
     // Regression guard: no hard-coded fixed sidebar width without a breakpoint.
     expect(/(^|\s)w-(56|64)(\s|$)/.test(aside.className)).toBe(false);
-    const navEl = container.querySelector("nav")!;
-    expect(navEl.className).toContain("overflow-x-auto"); // scrollable nav on phones
+    expect(screen.getByRole("button", { name: "Open navigation" })).toBeTruthy();
   });
 
   it("renders children content", () => {

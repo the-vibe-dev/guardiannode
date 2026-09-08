@@ -1,34 +1,79 @@
-"""Device token format + verification.
+"""Device token format and constant-time keyed verification.
 
 Tokens issued at pairing look like::
 
     gn_dev_<device_id>_<random_secret>
 
-The device id is embedded so the backend can look the device up directly and
-verify exactly ONE Argon2 hash per request, instead of linearly verifying every
-paired device's hash (Argon2 is deliberately expensive — a linear scan made
-invalid-token requests cheap to weaponize).
+Device tokens are random machine credentials, not human passwords. They are
+therefore stored as HMAC-SHA256 digests under a separate server-only pepper,
+which keeps every request cheap and bounded while protecting a copied database.
 
-Already-paired devices hold legacy opaque tokens with no embedded id; those
-still fall back to the linear scan so an upgrade never un-pairs a child device.
-New pairings always get the structured format.
+GuardianNode's family-beta migration intentionally invalidates every legacy
+Argon2 token. Devices must be paired again after the upgrade.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import os
 import secrets
+import threading
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app import settings as settings_mod
 from app.db.models import Device
-from app.services.parent_auth import hash_password, verify_password
 
 TOKEN_PREFIX = "gn_dev_"
+TOKEN_DIGEST_PREFIX = "hmac-sha256:"
+_pepper_lock = threading.Lock()
+_pepper_cache: tuple[Path, bytes] | None = None
+
+
+def _write_new_pepper(path: Path, pepper: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(pepper)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def _pepper() -> bytes:
+    global _pepper_cache
+    path = settings_mod.settings.device_token_pepper_path
+    cached = _pepper_cache
+    if cached is not None and cached[0] == path:
+        return cached[1]
+    with _pepper_lock:
+        cached = _pepper_cache
+        if cached is not None and cached[0] == path:
+            return cached[1]
+        _write_new_pepper(path, secrets.token_bytes(32))
+        value = path.read_bytes()
+        if len(value) != 32:
+            raise RuntimeError("device-token pepper is corrupt")
+        _pepper_cache = (path, value)
+        return value
+
+
+def _digest(secret: str) -> str:
+    digest = hmac.new(_pepper(), secret.encode("utf-8"), hashlib.sha256).hexdigest()
+    return TOKEN_DIGEST_PREFIX + digest
 
 
 def issue_token(device_id: str) -> tuple[str, str]:
-    """Create a new device token. Returns (full_token, secret_hash_for_storage)."""
+    """Create a new device token and its keyed digest for storage."""
     secret = secrets.token_urlsafe(32)
-    return f"{TOKEN_PREFIX}{device_id}_{secret}", hash_password(secret)
+    return f"{TOKEN_PREFIX}{device_id}_{secret}", _digest(secret)
 
 
 def parse_token(token: str) -> tuple[str, str] | None:
@@ -44,33 +89,24 @@ def parse_token(token: str) -> tuple[str, str] | None:
 
 
 def authenticate(db: Session, token: str) -> Device | None:
-    """Resolve a bearer token to a paired device, or None.
-
-    Structured tokens cost one DB get + one Argon2 verify. Legacy tokens fall
-    back to scanning paired devices (family-scale: a handful of rows).
-    """
+    """Resolve a current-format bearer token to a paired device, or ``None``."""
     parsed = parse_token(token)
-    if parsed is not None:
-        device_id, secret = parsed
-        device = db.get(Device, device_id)
-        if (
-            device is not None
-            and device.paired
-            and device.token_hash
-            and (
-                verify_password(secret, device.token_hash)
-                # Alpha upgrade safety: an early structured-token verifier
-                # could leave rows hashed with the full bearer token. Accept
-                # both forms so already-paired children do not go dark.
-                or verify_password(token, device.token_hash)
-            )
-        ):
-            return device
+    if parsed is None:
         return None
-
-    # Legacy opaque token: linear scan (kept so existing pairings survive).
-    devices = db.query(Device).filter(Device.token_hash.isnot(None), Device.paired.is_(True)).all()
-    for device in devices:
-        if device.token_hash and verify_password(token, device.token_hash):
-            return device
+    device_id, secret = parsed
+    device = db.get(Device, device_id)
+    if (
+        device is not None
+        and device.paired
+        and device.token_hash
+        and device.token_hash.startswith(TOKEN_DIGEST_PREFIX)
+        and hmac.compare_digest(_digest(secret), device.token_hash)
+    ):
+        return device
     return None
+
+
+def _reset_cache() -> None:
+    """Reset the test-only in-process pepper cache."""
+    global _pepper_cache
+    _pepper_cache = None

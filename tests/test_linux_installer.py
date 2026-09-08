@@ -131,6 +131,26 @@ def test_linux_installer_import_smoke_runs_from_staged_backend(tmp_path: Path) -
     assert result.returncode == 0, result.stderr + result.stdout
 
 
+def test_linux_installer_rebinds_moved_editable_install_before_service_start() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert "set -euo pipefail" in source
+    assert "set -Eeuo pipefail" not in source
+    assert 'cd "$GN_HOME/src/backend"' in source
+    assert '"$GN_HOME/venv/bin/python" -m pip install \\' in source
+    assert '--quiet --no-deps --force-reinstall -e "$GN_HOME/src/backend"' in source
+    assert '"$GN_HOME/venv/bin/guardiannode-backend" --help' in source
+    assert "ScriptDirectory.from_config(alembic_config()).get_current_head()" in source
+    transaction = source[source.index("complete_activated_release()") :]
+    finalization = transaction.index("  finalize_backend_install\n")
+    service_write = transaction.index("  write_systemd_unit\n")
+    assert finalization < service_write
+    activation = source.index("  activate_release\n", source.index("main()"))
+    transaction_call = source.index("  run_release_transaction\n", activation)
+    assert activation < transaction_call
+    assert "trap 'rollback_release' ERR" not in source
+
+
 def test_linux_installer_setup_token_chowns_keys_dir(tmp_path: Path) -> None:
     calls = tmp_path / "chown.calls"
     result = _run_bash(
@@ -150,18 +170,64 @@ def test_linux_installer_setup_token_chowns_keys_dir(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr + result.stdout
 
 
+def test_linux_installer_defaults_loopback_advertised_url(tmp_path: Path) -> None:
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        validate_install_config
+        test "$GN_ADVERTISED_SERVER_URL" = "https://127.0.0.1:8787"
+        test "$GN_HEALTH_TIMEOUT_SECONDS" = "300"
+        test "$GN_VISION_TIMEOUT_SECONDS" = "360"
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_lan_mode_requires_child_reachable_url(tmp_path: Path) -> None:
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        GN_BIND_HOST="0.0.0.0"
+        GN_ADVERTISED_SERVER_URL=""
+        validate_install_config
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert "LAN/VPN mode requires GN_ADVERTISED_SERVER_URL" in result.stderr
+
+
 def test_linux_installer_rollback_stops_service_before_moving_paths(tmp_path: Path) -> None:
     function_dump = tmp_path / "rollback_release.fn"
     result = _run_bash(
         f"""
         source {INSTALLER}
         declare -f rollback_release > "{function_dump}"
-        grep -F 'systemctl stop guardiannode-backend.service' "{function_dump}"
+        grep -F 'systemctl stop "$GN_SERVICE_NAME.service"' "{function_dump}"
         """,
         tmp_path,
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_linux_installer_failure_invokes_transaction_rollback_once(tmp_path: Path) -> None:
+    calls = tmp_path / "rollback.calls"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        rollback_release() {{ printf 'rollback\n' >> "{calls}"; }}
+        complete_activated_release() {{ return 7; }}
+        run_release_transaction
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert calls.read_text(encoding="utf-8").splitlines() == ["rollback"]
 
 
 def test_linux_installer_probe_failure_defaults_conservatively(tmp_path: Path) -> None:
@@ -232,6 +298,7 @@ def test_linux_installer_persists_allowed_hosts_for_lan_mode(tmp_path: Path) -> 
         systemctl() {{ :; }}
         GN_BIND_HOST="0.0.0.0"
         GN_ALLOWED_HOSTS="127.0.0.1,localhost,192.168.1.42,guardian-server"
+        GN_ADVERTISED_SERVER_URL="https://192.168.1.42:8787"
         GN_TIER="text_only"
         GN_TEXT_MODEL=""
         GN_VISION_MODEL=""
@@ -239,6 +306,8 @@ def test_linux_installer_persists_allowed_hosts_for_lan_mode(tmp_path: Path) -> 
         write_systemd_unit
         grep -F 'Environment="GUARDIANNODE_BIND_HOST=0.0.0.0"' "{unit_path}"
         grep -F 'Environment="GUARDIANNODE_ALLOWED_HOSTS=127.0.0.1,localhost,192.168.1.42,guardian-server"' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_ADVERTISED_SERVER_URL=https://192.168.1.42:8787"' "{unit_path}"
+        grep -F 'Environment="GUARDIANNODE_VISION_TIMEOUT_SECONDS=360"' "{unit_path}"
         """,
         tmp_path,
     )

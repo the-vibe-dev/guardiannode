@@ -17,6 +17,7 @@ $lowPrivilegeSids = @(
 $requiredProtectedPaths = @(
     "$DataRoot\Secure",
     "$DataRoot\Secure\device.json",
+    "$DataRoot\Secure\family-ca.pem",
     "$DataRoot\AgentSecure",
     "$DataRoot\AgentSecure\queue.sqlite",
     "$DataRoot\AgentSecure\queue.key",
@@ -33,6 +34,7 @@ $optionalProtectedPaths = @(
     "$DataRoot\Secure\parent.json",
     "$DataRoot\Secure\pause_state.json",
     "$DataRoot\Secure\maintenance.flag",
+    "$DataRoot\pending_pairing.json",
     "$DataRoot\keys\master.key"
 )
 
@@ -45,7 +47,6 @@ $services = @(
 )
 
 $tasks = @(
-    "GuardianNodeAgent",
     "GuardianNodeTray"
 )
 

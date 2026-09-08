@@ -38,7 +38,7 @@ make its deployment mode supported.
 | Native all-in-one Windows | Closed-beta candidate | Current Windows golden install/reboot/upgrade/uninstall gate. |
 | Docker Compose | Closed-beta candidate | Keep the required clean OCR-to-alert CI gate green; qualify optional languages and vision modes separately. |
 | Source evaluation on loopback | Technical evaluation | Locked install plus backend, agent, dashboard, and migration suites. |
-| Separated private network | Restricted | Plan 2 secure-transport and network qualification. |
+| Separated private network | Closed-beta candidate | Family-CA HTTPS and trust-bundle tests plus current Windows/network qualification. |
 | Public internet exposure | Unsupported | No promotion path in this plan. |
 
 ## Fail-closed rules
@@ -50,6 +50,8 @@ make its deployment mode supported.
 - Accepting a screenshot is not a passing canary. The expected OCR text,
   classification, and alert must all be observed.
 - A failed migration or qualification run cannot publish release artifacts.
+- Source tests do not substitute for Windows endpoint qualification, a field
+  pilot, legal/privacy review, or an independent security retest.
 
 Release evidence belongs under `docs/release-validation/`. Raw evidence and
 credentials stay outside the repository.

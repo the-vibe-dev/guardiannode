@@ -21,7 +21,7 @@ export default function RiskFeed() {
     const params: Record<string, string> = {};
     if (severity) params.severity = severity;
     if (status) params.status = status;
-    api.alerts(params).then(setAlerts);
+    api.alerts(params).then((page) => setAlerts(page.items));
   }, [severity, status]);
 
   const deviceName = useMemo(() => {

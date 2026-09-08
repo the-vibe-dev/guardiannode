@@ -2,14 +2,46 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from src import main as agent_main
 from src import pairing_client
 from src.backend_client import BackendClient
 from src.config import AgentConfig
+
+
+def _pairing_bundle(server_url: str = "https://srv:8787") -> dict:
+    key = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.now(UTC)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test Family CA")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    pem = cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+    digest = hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
+    return {
+        "format": "guardiannode-pairing-bundle-v1",
+        "expires_at": (now + timedelta(minutes=10)).isoformat(),
+        "server_url": server_url,
+        "ca_pem": pem,
+        "ca_sha256": digest,
+    }
 
 
 def test_bootstrap_noop_without_pending_file(tmp_path):
@@ -54,7 +86,11 @@ def test_bootstrap_removes_stale_pending_when_already_paired(tmp_path):
 
 def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
     pending = tmp_path / "pending_pairing.json"
-    pending.write_text(json.dumps({"backend_url": "http://srv:8787", "code": "123456"}))
+    pending.write_text(json.dumps({
+        "backend_url": "https://srv:8787",
+        "code": "123456",
+        "bundle": _pairing_bundle(),
+    }))
     device = tmp_path / "device.json"
 
     def fake_pair(
@@ -63,8 +99,10 @@ def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
         hostname,
         platform="windows",
         agent_version="0.1.0-alpha.1",
+        **kwargs,
     ):
-        assert backend_url == "http://srv:8787"
+        assert backend_url == "https://srv:8787"
+        assert kwargs["ca_path"].is_file()
         assert code == "123456"
         assert hostname == "kid-pc"
         return "dev42", "token42"
@@ -76,8 +114,25 @@ def test_bootstrap_pairs_and_saves_credentials(tmp_path, monkeypatch):
     assert result["device_id"] == "dev42"
     saved = json.loads(device.read_text())
     assert saved["device_token"] == "token42"
-    assert saved["backend_url"] == "http://srv:8787"
+    assert saved["backend_url"] == "https://srv:8787"
+    assert len(saved["ca_sha256"]) == 64
+    assert (tmp_path / "family-ca.pem").is_file()
     assert not pending.exists(), "pending file must be removed after success"
+
+
+def test_manual_pairing_bundle_enrolls_exact_url_and_ca(tmp_path):
+    bundle = tmp_path / "family.gnpair"
+    bundle_payload = _pairing_bundle()
+    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+
+    server_url, ca_path, fingerprint = pairing_client.enroll_pairing_bundle(
+        bundle, device_path=tmp_path / "device.json"
+    )
+
+    assert server_url == "https://srv:8787"
+    assert ca_path == tmp_path / "family-ca.pem"
+    assert ca_path.read_text("ascii").startswith("-----BEGIN CERTIFICATE-----")
+    assert fingerprint == bundle_payload["ca_sha256"]
 
 
 def test_bootstrap_reads_device_token_for_local_bootstrap(tmp_path, monkeypatch):
@@ -94,6 +149,7 @@ def test_bootstrap_reads_device_token_for_local_bootstrap(tmp_path, monkeypatch)
         hostname,
         platform="windows",
         agent_version="0.1.0-alpha.1",
+        **kwargs,
     ):
         assert backend_url == "http://127.0.0.1:8787"
         assert device_bootstrap_token == "device-secret"
@@ -122,6 +178,7 @@ def test_bootstrap_can_read_explicit_bootstrap_token_path_for_broker_storage(tmp
         hostname,
         platform="windows",
         agent_version="0.1.0-alpha.1",
+        **kwargs,
     ):
         assert backend_url == "http://127.0.0.1:8787"
         assert device_bootstrap_token == "broker-bootstrap-secret"
@@ -143,10 +200,14 @@ def test_bootstrap_can_read_explicit_bootstrap_token_path_for_broker_storage(tmp
 
 def test_bootstrap_removes_pending_on_rejected_code(tmp_path, monkeypatch):
     pending = tmp_path / "pending_pairing.json"
-    pending.write_text(json.dumps({"backend_url": "http://srv:8787", "code": "999999"}))
+    pending.write_text(json.dumps({
+        "backend_url": "https://srv:8787",
+        "code": "999999",
+        "bundle": _pairing_bundle(),
+    }))
 
     def fake_pair(*args, **kwargs):
-        req = httpx.Request("POST", "http://srv:8787/api/devices/pair/complete")
+        req = httpx.Request("POST", "https://srv:8787/api/devices/pair/complete")
         resp = httpx.Response(400, request=req)
         raise httpx.HTTPStatusError("rejected", request=req, response=resp)
 
@@ -181,7 +242,11 @@ def test_bootstrap_keeps_pending_on_local_bootstrap_auth_failure(tmp_path, monke
 
 def test_bootstrap_keeps_pending_on_transient_failure(tmp_path, monkeypatch):
     pending = tmp_path / "pending_pairing.json"
-    pending.write_text(json.dumps({"backend_url": "http://srv:8787", "code": "123456"}))
+    pending.write_text(json.dumps({
+        "backend_url": "https://srv:8787",
+        "code": "123456",
+        "bundle": _pairing_bundle(),
+    }))
 
     def fake_pair(*args, **kwargs):
         raise httpx.ConnectError("server still booting")
@@ -216,6 +281,55 @@ def test_bootstrap_refuses_mdns_discovery_without_explicit_url(tmp_path, monkeyp
     )
     assert result is None
     assert pending.exists(), "pending pairing should remain for explicit retry"
+
+
+def test_bootstrap_rejects_ca_fingerprint_mismatch(tmp_path, monkeypatch):
+    bundle = _pairing_bundle()
+    bundle["ca_sha256"] = "00" * 32
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({
+        "backend_url": "https://srv:8787", "code": "123456", "bundle": bundle,
+    }))
+    monkeypatch.setattr(
+        pairing_client,
+        "pair_with_server",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not connect")),
+    )
+
+    assert pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.1", pending_path=pending, device_path=tmp_path / "device.json",
+    ) is None
+    assert pending.exists()
+    assert not (tmp_path / "family-ca.pem").exists()
+
+
+def test_bootstrap_rejects_expired_pairing_bundle(tmp_path, monkeypatch):
+    bundle = _pairing_bundle()
+    bundle["expires_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({
+        "backend_url": "https://srv:8787", "code": "123456", "bundle": bundle,
+    }))
+    monkeypatch.setattr(
+        pairing_client,
+        "pair_with_server",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not connect")),
+    )
+
+    assert pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.1", pending_path=pending, device_path=tmp_path / "device.json",
+    ) is None
+
+
+def test_pairing_rejects_non_loopback_http() -> None:
+    with pytest.raises(ValueError, match="requires HTTPS"):
+        pairing_client.pair_with_server("http://192.0.2.10:8787", "123456", "kid-pc")
+
+
+def test_backend_client_requires_enrolled_ca_for_https() -> None:
+    client = BackendClient("https://srv:8787", "token")
+    with pytest.raises(RuntimeError, match="family CA"):
+        client._verify()
 
 
 @pytest.mark.asyncio

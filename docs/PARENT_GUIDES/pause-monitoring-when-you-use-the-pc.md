@@ -6,38 +6,39 @@ When you (the parent) use the kid's PC — to install software, check something 
 
 1. Look at the Windows taskbar near the clock. Find the **GuardianNode shield icon** (it may be in the hidden overflow area — click the small `^` arrow).
 2. **Right-click** the shield icon.
-3. Click **Pause monitoring**.
-4. Enter your **parent password**.
-5. Pick how long:
-   - **15 minutes** — for a quick check
-   - **1 hour** — for normal parent use
-   - **4 hours** — for a longer session
-   - **Until reboot** — pauses until the PC restarts
-6. Click **OK**.
+3. Click **Pause monitoring in parent dashboard**.
+4. Sign in to the HTTPS parent dashboard if needed.
+5. Open **Devices**, find this PC, and click **Pause 1h**.
 
-The shield icon turns **yellow** while paused. Hovering over it shows the countdown timer.
+The next broker status refresh shows the pause on the child PC. The tray does
+not accept or retain a parent password.
 
 ## Resuming early
 
-Right-click the yellow shield → **Resume monitoring** → enter parent password.
+Open the signed-in parent dashboard, go to **Devices**, and click **Resume**.
 
 ## Resuming automatically
 
-When the timer runs out, monitoring resumes on its own and the icon goes back to green.
+When the one-hour timer runs out, monitoring resumes on its own.
 
 ## What happens during a pause
 
 - No screenshots are captured or sent from the agent.
-- Local tray pauses are enforced on the child PC. In this alpha they are not
-  synced to the dashboard audit log.
+- The backend records the parent-authorized pause and the broker enforces it on
+  the child PC.
 
 ## What the kid sees
 
-The kid sees the same yellow icon you do. We deliberately don't hide pauses from them — GuardianNode is not stealth software. Knowing that you paused for an hour while doing something they couldn't see is fine; them being able to *trigger* a pause is not.
+The child keeps a visible GuardianNode icon. We deliberately do not hide
+monitoring status—GuardianNode is not stealth software. A child can open the
+dashboard URL from the tray, but cannot authorize a pause without the parent
+session.
 
 ## "I forgot my password — can I pause?"
 
-No. The local tray pause requires the parent password. The 12-word recovery code resets dashboard access only; it does not authorize tray pause or exit actions. See [If you forget your password](if-you-forget-your-password.md).
+Use the recovery phrase to reset dashboard access, then pause from **Devices**.
+The recovery phrase never authorizes a child-side action. See
+[If you forget your password](if-you-forget-your-password.md).
 
 ## Pausing from the dashboard (remote pause)
 
@@ -47,7 +48,7 @@ If you're using a separated setup (kid PC + parent server) and you're on your pa
 2. Click **Devices**.
 3. Find the device → click **Pause** → pick duration.
 
-This is convenient if you're physically away from the kid's PC.
+This is the only supported pause authority in the current broker design.
 
 ## Pause vs. uninstall
 

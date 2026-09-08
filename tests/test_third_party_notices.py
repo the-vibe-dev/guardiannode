@@ -25,5 +25,5 @@ def test_stale_direct_dependency_claims_are_absent() -> None:
     text = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8").lower()
 
     assert "python-jose" not in text
-    assert "tanstack" not in text
+    assert "@tanstack/react-query" in text
     assert "zod" not in text

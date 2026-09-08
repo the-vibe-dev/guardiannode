@@ -25,7 +25,7 @@ require the explicit private/internal opt-in in Settings.
 |---|---|
 | Critical | Immediate via all enabled channels; optional enforcement |
 | High | Immediate via all enabled channels |
-| Medium | Dashboard only until digest delivery is implemented |
+| Medium | Dashboard; included in the next enabled daily digest |
 | Low | Dashboard only |
 
 ## SMTP configuration
@@ -43,10 +43,13 @@ Dashboard **Settings → Notifications**:
 
 ## Daily digest
 
-The dashboard stores digest preferences, but scheduled digest delivery is not
-implemented in this beta. Medium findings remain visible in the dashboard and
-are not represented as sent email/webhook notifications. The roadmap item must
-remain open until delivery scheduling, deduplication, and audit tests exist.
+The notification worker sends at most one digest per family-local calendar day
+after the configured local time. Scheduling uses the configured IANA timezone
+and handles daylight-saving transitions. The digest is metadata-only: counts,
+severity, category labels, profile identifier, alert identifier, and timestamps.
+It excludes screenshots, extracted text, summaries, URLs, window titles, and app
+names. Each run is durable and idempotent and records its result for audit and
+diagnostics.
 
 ## Audit
 

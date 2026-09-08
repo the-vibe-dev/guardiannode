@@ -11,9 +11,10 @@ backend can bind to `127.0.0.1`.
 
 ## Trusted Home LAN Assumptions
 
-Separated mode sends child-device events to the parent-owned backend over the
-local network. Unless you add TLS or a VPN, this traffic is local-network HTTP.
-Use separated mode only on a trusted LAN during alpha testing.
+Separated mode sends child-device events to the parent-owned backend over HTTPS
+using GuardianNode's local family CA. Use it only on a trusted LAN or VPN during
+alpha testing; TLS authenticates and encrypts the connection but does not turn
+the backend into a public-internet service.
 
 Fresh native installs bind to `127.0.0.1` until first-run setup is complete. The
 alpha does not yet include dashboard network controls; enabling LAN access is a
@@ -30,12 +31,19 @@ GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
 Replace `192.168.1.42` and `guardian-server` with the actual LAN address and
 hostname that child agents will use. The backend rejects unlisted Host headers.
 
-Plain HTTP lab mode does not encrypt dashboard credentials, cookies, device
-tokens, screenshots, or metadata in transit. For any deployment beyond a
-temporary trusted lab, put the backend behind HTTPS or a trusted VPN and set:
+The server installer creates a private CA and certificate containing the
+configured IP/host names. In the dashboard, **Devices → Add device** exports a
+short-lived `.gnpair` file. Transfer that file privately, compare the displayed
+CA check words, and select it in the child installer. The agent stores the CA in
+its protected directory and refuses the wrong issuer, fingerprint, URL, or an
+expired bundle.
+
+Plain HTTP is rejected beyond loopback. The loopback-only development exception
+must use development mode and must never carry real family data:
 
 ```text
-GUARDIANNODE_HTTPS_ONLY_COOKIES=true
+GUARDIANNODE_DEV_MODE=true
+GUARDIANNODE_TLS_ENABLED=false
 ```
 
 ## Remote Access
@@ -48,13 +56,13 @@ Recommended options:
 
 Avoid public port-forwarding to the backend.
 
-## Reverse Proxy TLS
+## Reverse Proxies
 
-Advanced users can place GuardianNode behind a trusted reverse proxy that
-terminates TLS and restricts access to known devices or VPN clients. Keep the
-backend itself firewalled from the public internet.
+Advanced users may place GuardianNode behind a trusted reverse proxy, but the
+child agent must be enrolled with that proxy's exact trusted CA and URL. Keep
+the backend itself firewalled from the public internet.
 
-## Future Work
+## Remaining Transport Work
 
-Built-in TLS, mTLS, and device certificates are planned. Until those are built
-and tested, treat the backend as a local/private service.
+Mutual TLS and per-device client certificates remain future work. Treat the
+backend as a local/private service even though server-authenticated TLS is built in.
