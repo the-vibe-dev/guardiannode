@@ -7,6 +7,7 @@ import hmac
 import logging
 import os
 import socket
+import ssl
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from src.config import default_device_path
+from src.family_tls import family_ca_ssl_context
 
 log = logging.getLogger(__name__)
 
@@ -205,7 +207,7 @@ def _transport_verify(
     ca_path: Path | str | None,
     *,
     allow_loopback_http: bool,
-) -> bool | str:
+) -> bool | ssl.SSLContext:
     parsed = urlsplit(backend_url)
     if parsed.scheme == "https":
         if not ca_path:
@@ -213,7 +215,7 @@ def _transport_verify(
         path = Path(ca_path)
         if not path.is_file():
             raise ValueError("the enrolled GuardianNode family CA is missing")
-        return str(path)
+        return family_ca_ssl_context(path)
     if parsed.scheme == "http" and allow_loopback_http and parsed.hostname in {"127.0.0.1", "::1", "localhost"}:
         return True
     raise ValueError("pairing requires HTTPS; HTTP is allowed only for loopback bootstrap")

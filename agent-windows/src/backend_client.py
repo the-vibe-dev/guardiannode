@@ -1,9 +1,12 @@
 """HTTP client for the GuardianNode backend."""
 from __future__ import annotations
 
+import ssl
 from pathlib import Path
 
 import httpx
+
+from src.family_tls import family_ca_ssl_context
 
 
 class BackendClient:
@@ -20,11 +23,11 @@ class BackendClient:
         self.timeout = timeout
         self.ca_path = str(ca_path) if ca_path else None
 
-    def _verify(self) -> bool | str:
+    def _verify(self) -> bool | ssl.SSLContext:
         if self.base_url.lower().startswith("https://"):
             if not self.ca_path:
                 raise RuntimeError("HTTPS backend requires the enrolled GuardianNode family CA")
-            return self.ca_path
+            return family_ca_ssl_context(self.ca_path)
         return True
 
     def _headers(self) -> dict[str, str]:
