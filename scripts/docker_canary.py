@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -16,17 +17,20 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILE = ROOT / "installer" / "server-linux" / "docker-compose.yml"
 CANARY_COMPOSE_FILE = ROOT / "installer" / "server-linux" / "docker-compose.canary.yml"
 PROJECT = os.environ.get("GUARDIANNODE_CANARY_PROJECT", "guardiannode-canary")
-BASE_URL = os.environ.get("GUARDIANNODE_CANARY_URL", "http://127.0.0.1:18787")
+BASE_URL = os.environ.get("GUARDIANNODE_CANARY_URL", "https://127.0.0.1:18787")
 PHRASE = "GUARDIAN ORCHID SEVEN CANARY"
 
 
-def compose(*args: str, capture: bool = False) -> str:
-    command = [
+def compose_command(*args: str) -> list[str]:
+    return [
         "docker", "compose", "-p", PROJECT,
         "-f", str(COMPOSE_FILE), "-f", str(CANARY_COMPOSE_FILE), *args,
     ]
+
+
+def compose(*args: str, capture: bool = False) -> str:
     result = subprocess.run(
-        command,
+        compose_command(*args),
         cwd=ROOT,
         check=True,
         text=True,
@@ -40,6 +44,27 @@ def container_token(expression: str) -> str:
         "exec", "-T", "backend", "env", "PYTHONPATH=/app/backend", "python", "-c", expression,
         capture=True,
     ).splitlines()[-1]
+
+
+def wait_for_family_ca(destination: Path, timeout: int = 60) -> None:
+    """Copy the canary stack's generated CA without weakening TLS checks."""
+    deadline = time.monotonic() + timeout
+    last = "certificate not created"
+    command = compose_command("exec", "-T", "backend", "cat", "/data/tls/family-ca.pem")
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode == 0 and result.stdout.startswith(b"-----BEGIN CERTIFICATE-----"):
+            destination.write_bytes(result.stdout)
+            return
+        last = result.stderr.decode("utf-8", errors="replace").strip() or "invalid certificate"
+        time.sleep(1)
+    raise RuntimeError(f"backend family CA did not become available: {last}")
 
 
 def canary_png() -> bytes:
@@ -84,55 +109,63 @@ def run_canary() -> None:
     compose("down", "-v", "--remove-orphans")
     compose("up", "--build", "-d")
 
-    with httpx.Client(base_url=BASE_URL, timeout=30.0) as client:
-        wait_ready(client)
-        setup_token = container_token(
-            "from app.services.setup_token import ensure_setup_token; print(ensure_setup_token())"
-        )
-        expect(client.post("/api/auth/setup", json={
-            "display_name": "Canary Parent",
-            "password": "canary-password-not-production",
-            "recovery_code": "canary recovery code",
-            "setup_token": setup_token,
-        }))
-        csrf = expect(client.get("/api/auth/csrf"))["csrf_token"]
-        browser_headers = {"x-csrf-token": csrf}
-        profile = expect(client.post("/api/profiles", headers=browser_headers, json={
-            "display_name": "Canary Child",
-            "age_group": "10_13",
-            "custom_watch_phrases": [PHRASE],
-        }))
-        pair = expect(client.post("/api/devices/pair/start", headers=browser_headers, json={}))
-        device = expect(client.post("/api/devices/pair/complete", json={
-            "code": pair["code"], "hostname": "canary-device", "platform": "linux-canary",
-        }))
-        expect(client.patch(
-            f"/api/devices/{device['device_id']}/profile",
-            headers=browser_headers,
-            json={"profile_id": profile["profile_id"]},
-        ))
-        upload = expect(client.post(
-            "/api/events/screenshot",
-            headers={"authorization": f"Bearer {device['device_token']}"},
-            files={"image": ("canary.png", canary_png(), "image/png")},
-            data={"capture_scope": "visible_desktop", "idempotency_key": "docker-canary-v1"},
-        ))
-        if not upload.get("queued"):
-            raise RuntimeError(f"screenshot was accepted without queueing: {upload}")
+    with tempfile.TemporaryDirectory(prefix="guardiannode-canary-") as temporary:
+        ca_path = Path(temporary) / "family-ca.pem"
+        wait_for_family_ca(ca_path)
+        with httpx.Client(
+            base_url=BASE_URL,
+            timeout=30.0,
+            verify=str(ca_path),
+            trust_env=False,
+        ) as client:
+            wait_ready(client)
+            setup_token = container_token(
+                "from app.services.setup_token import ensure_setup_token; print(ensure_setup_token())"
+            )
+            expect(client.post("/api/auth/setup", json={
+                "display_name": "Canary Parent",
+                "password": "canary-password-not-production",
+                "recovery_code": "canary recovery code",
+                "setup_token": setup_token,
+            }))
+            csrf = expect(client.get("/api/auth/csrf"))["csrf_token"]
+            browser_headers = {"x-csrf-token": csrf}
+            profile = expect(client.post("/api/profiles", headers=browser_headers, json={
+                "display_name": "Canary Child",
+                "age_group": "10_13",
+                "custom_watch_phrases": [PHRASE],
+            }))
+            pair = expect(client.post("/api/devices/pair/start", headers=browser_headers, json={}))
+            device = expect(client.post("/api/devices/pair/complete", json={
+                "code": pair["code"], "hostname": "canary-device", "platform": "linux-canary",
+            }))
+            expect(client.patch(
+                f"/api/devices/{device['device_id']}/profile",
+                headers=browser_headers,
+                json={"profile_id": profile["profile_id"]},
+            ))
+            upload = expect(client.post(
+                "/api/events/screenshot",
+                headers={"authorization": f"Bearer {device['device_token']}"},
+                files={"image": ("canary.png", canary_png(), "image/png")},
+                data={"capture_scope": "visible_desktop", "idempotency_key": "docker-canary-v1"},
+            ))
+            if not upload.get("queued"):
+                raise RuntimeError(f"screenshot was accepted without queueing: {upload}")
 
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            alerts = expect(client.get("/api/alerts"))
-            if alerts:
-                detail = expect(client.get(f"/api/alerts/{alerts[0]['alert_id']}"))
-                if PHRASE not in (detail.get("redacted_text") or ""):
-                    raise RuntimeError("alert exists but OCR did not extract the canary phrase")
-                if "custom_watch" not in detail["risk"]["categories"]:
-                    raise RuntimeError("alert exists but expected custom_watch classification is absent")
-                print(f"Docker canary passed: alert={alerts[0]['alert_id']} phrase={PHRASE}")
-                return
-            time.sleep(2)
-        raise RuntimeError("screenshot was accepted but no alert was created")
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                alerts = expect(client.get("/api/alerts"))
+                if alerts:
+                    detail = expect(client.get(f"/api/alerts/{alerts[0]['alert_id']}"))
+                    if PHRASE not in (detail.get("redacted_text") or ""):
+                        raise RuntimeError("alert exists but OCR did not extract the canary phrase")
+                    if "custom_watch" not in detail["risk"]["categories"]:
+                        raise RuntimeError("alert exists but expected custom_watch classification is absent")
+                    print(f"Docker canary passed: alert={alerts[0]['alert_id']} phrase={PHRASE}")
+                    return
+                time.sleep(2)
+            raise RuntimeError("screenshot was accepted but no alert was created")
 
 
 def main() -> int:

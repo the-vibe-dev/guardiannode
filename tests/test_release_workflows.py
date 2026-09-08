@@ -73,3 +73,6 @@ def test_rules_only_canary_is_an_explicit_ci_override() -> None:
     assert 'profiles: ["canary-llm-disabled"]' in override
     assert 'environment["GUARDIANNODE_CLASSIFIER_MODE"] = "rules_only"' in canary
     assert "docker-compose.canary.yml" in canary
+    assert '"https://127.0.0.1:18787"' in canary
+    assert "wait_for_family_ca(ca_path)" in canary
+    assert "verify=str(ca_path)" in canary
