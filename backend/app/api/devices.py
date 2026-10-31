@@ -12,7 +12,7 @@ from ulid import ULID
 
 from app import settings as settings_mod
 from app.api.deps import current_device, current_user, get_db_dep, require_recent_auth
-from app.db.models import Device, DeviceCommand, PairingCode, User
+from app.db.models import ConsentRecord, Device, DeviceCommand, PairingCode, User
 from app.db.session import begin_immediate_if_sqlite
 from app.services import consent, device_tokens, rate_limit
 from app.services import pairing as pairing_svc
@@ -346,6 +346,18 @@ def capture_config(
     cfg["capture_allowed"] = processing.screenshots
     cfg["apps_and_urls_allowed"] = processing.apps_and_urls
     cfg["policy_generation"] = processing.generation
+    if device.status == "consent_stop_requested":
+        # A later re-grant does not silently resume a device that has not yet
+        # acknowledged the withdrawal. It must stop and then re-pair.
+        withdrawn = (
+            db.query(ConsentRecord)
+            .filter(ConsentRecord.status == "withdrawn")
+            .order_by(ConsentRecord.created_at.desc())
+            .first()
+        )
+        cfg["paused"] = True
+        cfg["capture_allowed"] = False
+        cfg["policy_generation"] = withdrawn.consent_id if withdrawn else processing.generation
     db.commit()  # persist any expired-pause cleanup done by is_device_paused
     return cfg
 
@@ -367,9 +379,14 @@ def heartbeat(
     paused_until = effective_paused_until(device)  # clears expired pauses
     device.last_seen = datetime.now(UTC)
     if device.status == "consent_stop_requested":
-        latest = consent.latest(db)
+        latest = (
+            db.query(ConsentRecord)
+            .filter(ConsentRecord.status == "withdrawn")
+            .order_by(ConsentRecord.created_at.desc())
+            .first()
+        )
         if (
-            latest is not None and latest.status == "withdrawn"
+            latest is not None
             and req.applied_policy_generation == latest.consent_id
         ):
             device.paired = False

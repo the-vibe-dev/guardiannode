@@ -10,7 +10,7 @@ from fastapi import HTTPException, Request
 from app import settings as settings_mod
 from app.api.consent import ConsentWithdrawalRequest, withdraw_consent
 from app.api.deps import current_device
-from app.api.devices import HeartbeatRequest, heartbeat
+from app.api.devices import HeartbeatRequest, capture_config, heartbeat
 from app.db.models import Alert, ConsentRecord, Device, Event, RiskResult, User
 from app.guardian_review_models import GuardianReviewContext
 from app.services import consent, device_tokens, encryption, guardian_review
@@ -51,7 +51,10 @@ def _consent(db, user, *, consent_id="generation-1", status="granted", **changes
     db.add(ConsentRecord(
         consent_id=consent_id, user_id=user.id, notice_version=consent.NOTICE_VERSION,
         status=status, choices=choices,
-        created_at=datetime.now(UTC) + (timedelta(seconds=1) if status == "withdrawn" else timedelta()),
+        created_at=datetime.now(UTC) + (
+            timedelta(seconds=2) if consent_id == "later-grant"
+            else timedelta(seconds=1) if status == "withdrawn" else timedelta()
+        ),
     ))
     db.commit()
 
@@ -156,6 +159,11 @@ def test_withdrawal_token_is_control_only_until_broker_ack(db_session):
 
     heartbeat(HeartbeatRequest(applied_policy_generation="stale-generation"), db_session, device)
     assert device.status == "consent_stop_requested"
+    _consent(db_session, user, consent_id="later-grant")
+    config = capture_config(db_session, device)
+    assert config["paused"] is True
+    assert config["capture_allowed"] is False
+    assert config["policy_generation"] == generation
     heartbeat(HeartbeatRequest(applied_policy_generation=generation), db_session, device)
     assert device.status == "consent_stop_applied"
     assert device.token_hash is None
