@@ -196,3 +196,25 @@ def test_valid_device_heartbeat_has_per_device_burst_budget(monkeypatch, tmp_pat
     )
     assert limited.status_code == 429
     assert "Retry-After" in limited.headers
+
+
+def test_valid_token_during_ip_block_still_obeys_device_budget(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from app.services.device_bootstrap_token import ensure_device_bootstrap_token
+
+    paired = client.post(
+        "/api/devices/bootstrap-local",
+        json={"hostname": "kid-pc", "device_bootstrap_token": ensure_device_bootstrap_token()},
+    )
+    token = paired.json()["device_token"]
+    path = "/api/devices/heartbeat"
+    payload = {"queued_frames": 0}
+    for _ in range(device_budget.BUDGETS["heartbeat"].request_burst):
+        assert client.post(path, json=payload, headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+    for _ in range(rate_limit.MAX_FAILURES):
+        assert client.post(path, json=payload, headers={"Authorization": "Bearer gn_dev_bogus_bogus"}).status_code == 401
+
+    recovered = client.post(path, json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert recovered.status_code == 429
+    assert recovered.json()["detail"] == "Device request budget exceeded."
