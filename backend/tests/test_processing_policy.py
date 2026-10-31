@@ -241,17 +241,17 @@ def test_fast_restart_recovers_recent_running_review_in_worker_loop(db_session, 
     monkeypatch.setattr(guardian_review, "_now", lambda: now[0])
     sleeps = []
 
-    class EndProbe(Exception):
+    class EndProbeError(Exception):
         pass
 
     async def advance_clock(_seconds):
         now[0] += timedelta(seconds=180)
         sleeps.append(1)
         if len(sleeps) >= 2:
-            raise EndProbe()
+            raise EndProbeError()
 
     monkeypatch.setattr(guardian_review_worker.asyncio, "sleep", advance_clock)
-    with pytest.raises(EndProbe):
+    with pytest.raises(EndProbeError):
         asyncio.run(guardian_review_worker.loop())
     db_session.expire_all()
     assert db_session.get(GuardianReview, "restart-review").status != "running"
