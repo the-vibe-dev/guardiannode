@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from app import settings as settings_mod
 from app.db.models import (
@@ -178,6 +179,22 @@ def test_tombstoned_alert_and_risk_are_hidden_from_read_apis(db_session, tmp_pat
     with pytest.raises(HTTPException) as exc:
         get_alert("a-hidden", db=s, user=user)
     assert exc.value.status_code == 404
+
+
+def test_database_failure_prevents_unlink(db_session, tmp_path):
+    s = db_session
+    event_id, _, _, path = _mk_chain(
+        s, tmp_path, suffix="sql-failure", severity="high", age_days=0,
+    )
+    s.add(Event(
+        event_id="invalid-extra", device_id="missing-device", source_type="image",
+        timestamp=datetime.now(UTC),
+    ))
+    with pytest.raises(IntegrityError):
+        purge.delete_events(s, [event_id])
+    s.rollback()
+    assert path.exists()
+    assert s.get(Event, event_id).deletion_state == "active"
 
 
 def test_wipe_old_events_leaves_no_orphans(db_session, tmp_path):
