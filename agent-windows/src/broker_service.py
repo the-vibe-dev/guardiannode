@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
+
 from src import __version__
 from src.broker_protocol import (
     PIPE_NAME,
@@ -178,6 +180,8 @@ class BrokerCommandHandler:
         if request.action == "capture_config":
             with self._capture_config_lock:
                 return dict(self._capture_config)
+        if request.action in {"child_request_create", "child_request_list"}:
+            return self._child_request(request.action, request.payload)
         if request.action == "submit_screenshot":
             if self._load_pause().paused or self._server_paused():
                 raise ProtocolError("capture is paused by parent policy")
@@ -185,6 +189,47 @@ class BrokerCommandHandler:
             self.queue.put_nowait(payload)
             return {"status": "queued", "queue_depth": self.queue.qsize()}
         raise ProtocolError("unsupported action")
+
+    def _child_request(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Use broker-owned credentials; return only child-request DTO fields."""
+        from src.backend_client import BackendClient
+
+        creds = self._load_credentials()
+        token = str(creds.get("device_token") or "")
+        if not token:
+            raise ProtocolError("device is not paired")
+        client = BackendClient(
+            str(creds.get("backend_url") or ""), token, ca_path=creds.get("ca_path")
+        )
+        try:
+            with httpx.Client(timeout=5.0, verify=client._verify()) as transport:
+                if action == "child_request_create":
+                    response = transport.post(
+                        f"{client.base_url}/api/child-requests",
+                        json=payload,
+                        headers=client._headers(),
+                    )
+                else:
+                    response = transport.get(
+                        f"{client.base_url}/api/child-requests/mine",
+                        headers=client._headers(),
+                    )
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("child request backend call failed: %s", type(exc).__name__)
+            raise ProtocolError("child request could not reach the parent server") from exc
+        fields = {
+            "request_id", "device_id", "profile_id", "request_type", "target", "reason",
+            "status", "response_note", "created_at", "reviewed_at", "expires_at",
+        }
+        if action == "child_request_create":
+            if not isinstance(body, dict):
+                raise ProtocolError("invalid child request response")
+            return {key: body[key] for key in fields if key in body}
+        if not isinstance(body, list) or len(body) > 20 or not all(isinstance(item, dict) for item in body):
+            raise ProtocolError("invalid child request list")
+        return {"items": [{key: item[key] for key in fields if key in item} for item in body]}
 
     def set_capture_config(self, payload: dict[str, Any]) -> None:
         """Cache only bounded, non-secret capture controls for session agents."""
@@ -593,6 +638,8 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
             for command in await client.get_commands():
                 command_id = str(command.get("command_id") or "")
                 try:
+                    if command.get("command_type") in {"pause_app", "block_domain"} and not cfg.enforcement_enabled:
+                        raise ValueError("device enforcement is disabled pending Windows qualification")
                     result = enforcer.execute(command)
                     await client.report_command(command_id, "succeeded", result)
                 except ValueError as exc:

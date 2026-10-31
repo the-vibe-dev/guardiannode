@@ -77,6 +77,9 @@ class AgentConfig:
     durable_queue_max_bytes: int = 256 * 1024 * 1024
     durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
     broker_enabled: bool = True
+    # Parent-confirmed process/domain enforcement needs Windows crash/undo
+    # qualification before it may be enabled for a family installation.
+    enforcement_enabled: bool = False
 
     def __post_init__(self) -> None:
         # PyYAML treats unquoted values like 10_13 as numeric 1013. Normalize
