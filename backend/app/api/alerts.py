@@ -11,6 +11,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
+from app import settings as settings_mod
 from app.api.deps import current_user, get_db_dep, require_recent_auth
 from app.db.models import Alert, DeviceCommand, Event, RiskResult, User
 from app.services import encryption, purge
@@ -403,6 +404,8 @@ def create_confirmed_action(
         raise HTTPException(404, "Alert not found")
     if not alert.device_id:
         raise HTTPException(409, "This alert is not linked to a child device")
+    if req.action in {"pause_app", "block_domain"} and not settings_mod.settings.device_enforcement_enabled:
+        raise HTTPException(409, "Device enforcement is not enabled on this installation")
     payload, preview = _action_payload(req)
     if req.confirmed_preview != preview:
         raise HTTPException(409, {"code": "confirmation_required", "preview": preview})

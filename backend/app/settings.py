@@ -117,6 +117,9 @@ class Settings(BaseSettings):
     pending_frame_max_age_seconds: int = 600
     pending_replay_max_frames: int = 50
     guardian_review_enabled: bool = False
+    # App suspension and hosts-file edits need Windows crash/reboot/undo
+    # qualification before they are offered to ordinary families.
+    device_enforcement_enabled: bool = False
     guardian_review_provider: str = "mock"
     guardian_review_model: str = "gpt-5.6"
     guardian_review_codex_model: str = "gpt-5.6-sol"
