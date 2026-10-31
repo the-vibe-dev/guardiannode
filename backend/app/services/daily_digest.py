@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app.db.models import Alert, DigestRun, Event, RiskResult, Setting
-from app.services import notifications
+from app.services import consent, notifications
 
 
 def family_timezone(session: Session) -> str:
@@ -100,6 +100,8 @@ def _body(summary: dict) -> str:
 
 
 def run_due(session: Session, *, now: datetime | None = None) -> DigestRun | None:
+    if not consent.effective_policy(session).notifications:
+        return None
     config = _notification_config(session)
     if not config.get("enabled") or not config.get("daily_digest_enabled", True):
         return None

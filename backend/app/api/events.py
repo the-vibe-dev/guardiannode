@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_device, current_user, get_db_dep
 from app.db.models import Device, Event, ScreenshotUploadReceipt, User
-from app.services import encryption, event_ingest, screenshot_async
+from app.services import consent, encryption, event_ingest, screenshot_async
 from app.services.device_state import is_device_paused
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
 from app.services.input_bounds import InputBoundsError, sanitize_metadata
@@ -104,7 +104,8 @@ async def ingest(
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
-    if is_device_paused(device):
+    policy = consent.effective_policy(db)
+    if is_device_paused(device) or not policy.active:
         # Quietly accept but don't store — pause behavior is honored server-side too
         return IngestResponse(
             event_id=req.event_id or "",
@@ -114,10 +115,13 @@ async def ingest(
             score=0,
             categories=[],
         )
+    payload = req.model_dump()
+    if not policy.apps_and_urls:
+        payload.update(app_name=None, window_title=None, url=None)
     try:
         result = await event_ingest.ingest_event(
             db,
-            payload=req.model_dump(),
+            payload=payload,
             device_id=device.device_id,
             source_ip=request.client.host if request.client else None,
         )
@@ -167,7 +171,7 @@ def list_events(
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):
-    q = db.query(Event).order_by(Event.timestamp.desc())
+    q = db.query(Event).filter(Event.deletion_state == "active").order_by(Event.timestamp.desc())
     if device_id:
         q = q.filter(Event.device_id == device_id)
     if profile_id:
@@ -183,7 +187,7 @@ def get_event_text(
     user: User = Depends(current_user),
 ):
     e = db.get(Event, event_id)
-    if e is None:
+    if e is None or e.deletion_state != "active":
         raise HTTPException(404, "Not found")
     if not e.redacted_text_enc:
         return {"text": ""}
@@ -262,7 +266,8 @@ async def ingest_screenshot(
     if existing_receipt is not None:
         return _receipt_response(existing_receipt)
 
-    if is_device_paused(device):
+    policy = consent.effective_policy(db)
+    if is_device_paused(device) or not policy.screenshots:
         # Honor pause server-side: drop quietly, don't store.
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
 
@@ -292,9 +297,9 @@ async def ingest_screenshot(
         image_bytes,
         {
             "device_id": device.device_id,
-            "app_name": app_name,
-            "window_title": window_title,
-            "url": url,
+            "app_name": app_name if policy.apps_and_urls else None,
+            "window_title": window_title if policy.apps_and_urls else None,
+            "url": url if policy.apps_and_urls else None,
             "profile_id": profile_id,
             "age_group": age_group,
             "capture_scope": capture_scope,
@@ -305,6 +310,7 @@ async def ingest_screenshot(
             "idempotency_key": idempotency_key,
             "mime_type": mime_type,
             "source_ip": request.client.host if request.client else None,
+            "policy_generation": policy.generation,
         },
     )
     if not screenshot_async.enqueue_nowait(token):
@@ -349,18 +355,18 @@ def get_event_screenshot(
 
     from app.db.models import EvidenceBlob
     e = db.get(Event, event_id)
-    if e is None or not e.screenshot_blob_id:
+    if e is None or e.deletion_state != "active" or not e.screenshot_blob_id:
         raise HTTPException(404, "No screenshot")
     blob = db.get(EvidenceBlob, e.screenshot_blob_id)
-    if blob is None:
+    if blob is None or blob.deletion_state != "active":
         raise HTTPException(404, "Blob missing")
     try:
         path = resolve_stored_evidence_path(blob.encrypted_path)
         pt = encryption.decrypt_blob_from_disk(path, aad=blob.blob_id.encode("ascii"))
-    except (FileNotFoundError, UnsafeEvidencePathError) as e:
-        raise HTTPException(404, "Blob missing") from e
-    except Exception as e:
-        raise HTTPException(500, "Decryption failed") from e
+    except (FileNotFoundError, UnsafeEvidencePathError) as exc:
+        raise HTTPException(404, "Blob missing") from exc
+    except Exception as exc:
+        raise HTTPException(500, "Decryption failed") from exc
     from app.services.audit import log_action
     log_action(db, actor=str(user.id), action="evidence.view", target=event_id)
     db.commit()

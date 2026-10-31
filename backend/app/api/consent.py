@@ -9,7 +9,16 @@ from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app.api.deps import current_user, get_db_dep, require_recent_auth
-from app.db.models import ChildProfile, ConsentRecord, Device, Event, Setting, User
+from app.db.models import (
+    ChildProfile,
+    ConsentRecord,
+    Device,
+    Event,
+    GuardianReview,
+    NotificationJob,
+    Setting,
+    User,
+)
 from app.services import consent, purge
 from app.services.audit import log_action
 
@@ -113,6 +122,14 @@ def withdraw_consent(
         supersedes_id=previous.consent_id if previous else None,
     )
     db.add(row)
+    db.query(GuardianReview).filter(GuardianReview.status.in_(["queued", "running"])).update(
+        {"status": "cancelled", "error_code": "consent_withdrawn", "completed_at": datetime.now(UTC)},
+        synchronize_session=False,
+    )
+    db.query(NotificationJob).filter(NotificationJob.status.in_(["queued", "retry"])).update(
+        {"status": "dead", "last_error": "consent withdrawn", "next_attempt_at": None},
+        synchronize_session=False,
+    )
     for device in db.query(Device).all():
         device.paired = False
         device.token_hash = None

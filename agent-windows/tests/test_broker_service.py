@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from src.broker_protocol import image_to_b64, make_request
@@ -68,6 +69,26 @@ def test_broker_returns_only_bounded_capture_config(tmp_path) -> None:
         "full_screen_capture_enabled": True,
     }
     assert "must-not-cross-the-pipe" not in json.dumps(response)
+
+
+def test_parent_pause_reaches_capture_and_blocks_submit(tmp_path) -> None:
+    handler = _handler(tmp_path)
+    handler.set_capture_config({
+        "level": "balanced", "cadence_seconds": 5, "paused": True,
+        "paused_until": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+        "capture_allowed": False,
+        "policy_generation": "generation-2", "device_token": "must-not-cross-the-pipe",
+    })
+    config = handler.handle_message(make_request("capture_config"))["payload"]
+    assert config["paused"] is True
+    assert config["capture_allowed"] is False
+    assert config["policy_generation"] == "generation-2"
+    assert "device_token" not in config
+    assert handler.handle_message(make_request("status"))["payload"]["paused"] is True
+    restarted = _handler(tmp_path)
+    assert restarted.handle_message(make_request("status"))["payload"]["paused"] is True
+    restarted.set_capture_config({"paused": False, "capture_allowed": True})
+    assert restarted.handle_message(make_request("status"))["payload"]["paused"] is False
 
 
 def test_broker_migrates_legacy_credentials_to_secure_path(tmp_path) -> None:

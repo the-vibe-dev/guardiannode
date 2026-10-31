@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -114,7 +115,31 @@ class BrokerCommandHandler:
         self.replay_cache = replay_cache or RequestReplayCache()
         self._capture_config_lock = threading.Lock()
         self._capture_config: dict[str, Any] = {}
-        self.set_capture_config(capture_config or {})
+        self.capture_config_path = self.pause_path.with_name("capture_config.json")
+        try:
+            cached = json.loads(self.capture_config_path.read_text(encoding="utf-8"))
+            if isinstance(cached, dict):
+                self.set_capture_config(cached)
+        except (OSError, ValueError):
+            pass
+        if capture_config:
+            self.set_capture_config(capture_config)
+
+    def _server_paused(self) -> bool:
+        with self._capture_config_lock:
+            cfg = dict(self._capture_config)
+        if cfg.get("paused") is not True:
+            return False
+        until = cfg.get("paused_until")
+        if not until:
+            return True
+        try:
+            expiry = datetime.fromisoformat(until)
+            if expiry.tzinfo is None:
+                return True
+            return expiry.astimezone(UTC) > datetime.now(UTC)
+        except ValueError:
+            return True
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -146,13 +171,15 @@ class BrokerCommandHandler:
                 "device_id": creds.get("device_id") or "",
                 "backend_url": creds.get("backend_url") or "",
                 "queue_depth": self.queue.qsize(),
-                "paused": pause.paused,
+                "paused": pause.paused or self._server_paused(),
                 "paused_until": pause.paused_until,
             }
         if request.action == "capture_config":
             with self._capture_config_lock:
                 return dict(self._capture_config)
         if request.action == "submit_screenshot":
+            if self._load_pause().paused or self._server_paused():
+                raise ProtocolError("capture is paused by parent policy")
             payload = self._screenshot_payload(request.payload)
             self.queue.put_nowait(payload)
             return {"status": "queued", "queue_depth": self.queue.qsize()}
@@ -177,8 +204,32 @@ class BrokerCommandHandler:
         full_screen = payload.get("full_screen_capture_enabled")
         if isinstance(full_screen, bool):
             clean["full_screen_capture_enabled"] = full_screen
+        paused = payload.get("paused")
+        if isinstance(paused, bool):
+            clean["paused"] = paused
+        capture_allowed = payload.get("capture_allowed")
+        if isinstance(capture_allowed, bool):
+            clean["capture_allowed"] = capture_allowed
+            if not capture_allowed:
+                clean["paused"] = True
+        context_allowed = payload.get("apps_and_urls_allowed")
+        if isinstance(context_allowed, bool):
+            clean["apps_and_urls_allowed"] = context_allowed
+        paused_until = payload.get("paused_until")
+        if isinstance(paused_until, str) and len(paused_until) <= 40:
+            clean["paused_until"] = paused_until
+        generation = payload.get("policy_generation")
+        if isinstance(generation, str) and len(generation) <= 64:
+            clean["policy_generation"] = generation
         with self._capture_config_lock:
             self._capture_config = clean
+        try:
+            self.capture_config_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.capture_config_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(clean), encoding="utf-8")
+            os.replace(temporary, self.capture_config_path)
+        except OSError as exc:
+            log.warning("capture policy could not be persisted: %s", type(exc).__name__)
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
         creds = load_credentials(self.credential_path)

@@ -140,6 +140,9 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 )
 
             if send:
+                if _is_locally_paused():
+                    await asyncio.sleep(cfg.ocr_cadence_seconds)
+                    continue
                 last_phash = shot.phash
                 last_full_phash = shot.full_phash
                 last_sent_at = time.time()

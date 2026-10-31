@@ -249,6 +249,17 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
     client = _client(monkeypatch, tmp_path)
     from app.db.session import get_sessionmaker
 
+    notice_version = client.get("/api/consent").json()["notice_version"]
+    consent_response = client.post(
+        "/api/consent",
+        json={"notice_version": notice_version, "choices": {
+            "screenshots": True, "apps_and_urls": True, "retention": True,
+            "notifications": True, "external_ai": False,
+            "child_notice_acknowledged": True,
+        }},
+    )
+    assert consent_response.status_code == 200
+
     db = get_sessionmaker()()
     try:
         db.add(Device(device_id="action-dev", hostname="kid-pc", paired=True))

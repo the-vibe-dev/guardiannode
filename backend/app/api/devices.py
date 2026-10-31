@@ -335,13 +335,17 @@ def capture_config(
     child's policy. The agent polls this so a parent can tighten or loosen
     monitoring from the dashboard without touching the kid's PC."""
     from app.db.models import ChildProfile
-    from app.services import profile_policy
+    from app.services import consent, profile_policy
     prof = db.get(ChildProfile, device.profile_id) if device.profile_id else None
     policy = (prof.alert_policy or {}) if prof is not None else {}
     age = prof.age_group if prof is not None else "10_13"
     cfg = profile_policy.capture_settings(policy, age)
-    cfg["paused"] = is_device_paused(device)
+    processing = consent.effective_policy(db)
+    cfg["paused"] = is_device_paused(device) or not processing.screenshots
     cfg["paused_until"] = device.paused_until.isoformat() if device.paused_until else None
+    cfg["capture_allowed"] = processing.screenshots
+    cfg["apps_and_urls_allowed"] = processing.apps_and_urls
+    cfg["policy_generation"] = processing.generation
     db.commit()  # persist any expired-pause cleanup done by is_device_paused
     return cfg
 
