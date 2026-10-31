@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from app.db.models import ConsentRecord, Device, Event, ScreenshotUploadReceipt, User
-from app.services import consent, pipeline_metrics, rate_limit
+from app.services import consent, device_tokens, pipeline_metrics, rate_limit
 from app.services.device_state import effective_paused_until, is_device_paused
 
 _JPEG_1X1 = base64.b64decode(
@@ -230,6 +230,51 @@ def test_screenshot_upload_rejects_stale_consent_generation(monkeypatch, tmp_pat
     )
     assert accepted.status_code == 200
     assert accepted.json()["queued"] is True
+
+
+def test_queued_frame_cannot_replay_after_withdrawal_and_repair(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    device_id, _old_token = _pair(client)
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        parent = User(display_name="Synthetic Parent", password_hash="synthetic", recovery_hash="synthetic")
+        db.add(parent)
+        db.flush()
+        choices = {"screenshots": True, "retention": True,
+                   "child_notice_acknowledged": True}
+        start = datetime.now(UTC)
+        for offset, generation, status in (
+            (0, "before-withdrawal", "granted"),
+            (1, "withdrawal", "withdrawn"),
+            (2, "after-repair", "granted"),
+        ):
+            db.add(ConsentRecord(
+                consent_id=generation, user_id=parent.id,
+                notice_version=consent.NOTICE_VERSION, status=status,
+                choices=choices if status == "granted" else {"evidence_disposition": "delete"},
+                created_at=start + timedelta(seconds=offset),
+            ))
+        token, digest = device_tokens.issue_token(device_id)
+        device = db.get(Device, device_id)
+        device.paired = True
+        device.token_hash = digest
+        db.commit()
+    finally:
+        db.close()
+
+    # A durable local frame captured under the old generation is attempted
+    # with a newly paired token after consent was granted again.
+    replay = client.post(
+        "/api/events/screenshot",
+        files={"image": ("old-frame.jpg", _JPEG_1X1, "image/jpeg")},
+        data={"policy_generation": "before-withdrawal"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert replay.status_code == 409
+    assert _pending_count() == 0
+    assert _event_count() == 0
 
 
 def test_screenshot_idempotency_key_deduplicates_retries(monkeypatch, tmp_path):
