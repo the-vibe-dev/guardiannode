@@ -4,8 +4,8 @@ GuardianNode bundles or directly depends on the following third-party
 components. Each component retains its original license.
 
 <!-- third-party-notices:acknowledged
-backend: fastapi, uvicorn, pydantic, pydantic-settings, sqlalchemy, alembic, cryptography, argon2-cffi, httpx, python-multipart, pyyaml, zeroconf, qrcode, pillow, pytesseract, python-ulid, itsdangerous, jinja2
-agent: httpx, pyyaml, psutil, mss, pillow, pydantic, argon2-cffi, cryptography, python-ulid, zeroconf, pywin32, pystray, opencv-python, pytesseract
+backend: fastapi, uvicorn, pydantic, pydantic-settings, sqlalchemy, alembic, cryptography, argon2-cffi, httpx, python-multipart, pyyaml, zeroconf, qrcode, pillow, certifi, pytesseract, python-ulid, itsdangerous, jinja2
+agent: httpx, pyyaml, psutil, mss, pillow, certifi, pydantic, argon2-cffi, cryptography, python-ulid, zeroconf, pywin32, pystray, opencv-python, pytesseract
 dashboard: @fontsource/inter, @fontsource/sora, @tailwindcss/postcss, @tanstack/react-query, lucide-react, react, react-dom, react-router-dom
 other: inno setup, winsw, pyinstaller, ollama
 -->
@@ -28,6 +28,7 @@ other: inno setup, winsw, pyinstaller, ollama
 | zeroconf | LGPL-2.1 | https://github.com/python-zeroconf/python-zeroconf |
 | qrcode | BSD-3-Clause | https://github.com/lincolnloop/python-qrcode |
 | Pillow | HPND | https://python-pillow.org/ |
+| certifi | MPL-2.0 | https://github.com/certifi/python-certifi |
 | pytesseract | Apache-2.0 | https://github.com/madmaze/pytesseract |
 | python-ulid | MIT | https://github.com/mdomke/python-ulid |
 | itsdangerous | BSD-3-Clause | https://github.com/pallets/itsdangerous |
@@ -46,6 +47,7 @@ deployment if their compliance requirements demand it.
 | psutil | BSD-3-Clause | https://github.com/giampaolo/psutil |
 | mss | MIT | https://github.com/BoboTiG/python-mss |
 | Pillow | HPND | https://python-pillow.org/ |
+| certifi | MPL-2.0 | https://github.com/certifi/python-certifi |
 | Pydantic | MIT | https://github.com/pydantic/pydantic |
 | argon2-cffi | MIT | https://github.com/hynek/argon2-cffi |
 | cryptography | Apache-2.0 / BSD-3-Clause | https://github.com/pyca/cryptography |
