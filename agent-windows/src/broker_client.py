@@ -64,11 +64,12 @@ class BrokerClient:
     def _verify_broker_owner(handle) -> None:  # noqa: ANN001
         import win32security  # type: ignore
 
-        owner, _group, _dacl, _sacl, _descriptor = win32security.GetSecurityInfo(
+        descriptor = win32security.GetSecurityInfo(
             handle,
             win32security.SE_KERNEL_OBJECT,
             win32security.OWNER_SECURITY_INFORMATION,
         )
+        owner = descriptor.GetSecurityDescriptorOwner()
         if win32security.ConvertSidToStringSid(owner) != "S-1-5-18":
             raise BrokerUnavailable("local broker pipe is not owned by SYSTEM")
 

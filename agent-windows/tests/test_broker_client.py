@@ -60,7 +60,7 @@ def test_broker_client_rejects_pipe_not_owned_by_system(monkeypatch):
     fake_security = SimpleNamespace(
         SE_KERNEL_OBJECT=1,
         OWNER_SECURITY_INFORMATION=2,
-        GetSecurityInfo=lambda *_args: ("fake-user", None, None, None, None),
+        GetSecurityInfo=lambda *_args: SimpleNamespace(GetSecurityDescriptorOwner=lambda: "fake-user"),
         ConvertSidToStringSid=lambda owner: owner,
     )
     monkeypatch.setitem(sys.modules, "win32security", fake_security)

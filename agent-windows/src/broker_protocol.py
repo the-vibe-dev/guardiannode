@@ -12,8 +12,12 @@ PROTOCOL_VERSION = 1
 PIPE_NAME = r"\\.\pipe\GuardianNodeEndpointService"
 # Interactive users may exchange data, but may not create a competing pipe
 # instance (FILE_CREATE_PIPE_INSTANCE is bit 0x4, included in GENERIC_WRITE).
-# 0x00120003 adds READ_CONTROL so clients can verify the pipe owner is SYSTEM.
-PIPE_SECURITY_SDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00120003;;;IU)"
+# 0x0012019B includes READ_CONTROL and the pipe metadata rights Windows checks
+# when a medium-integrity client opens a pipe. It excludes bit 0x4, so clients
+# still cannot create another pipe instance.
+# SYSTEM's default token owner may be Administrators. Set the pipe owner
+# explicitly so interactive clients can verify they are talking to our broker.
+PIPE_SECURITY_SDDL = "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x0012019B;;;IU)"
 MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 MAX_SCREENSHOT_BYTES = 1024 * 1024
 MAX_STRING_BYTES = 4096
