@@ -173,6 +173,10 @@ def current_device(request: Request, db: Session = Depends(get_db_dep)) -> Devic
         device = device_tokens.authenticate(db, token)
     if device is not None:
         rate_limit.reset("device_auth", client_ip)
+        if device.status == "consent_stop_requested" and request.url.path not in {
+            "/api/devices/capture-config", "/api/devices/heartbeat",
+        }:
+            raise HTTPException(status_code=403, detail="Consent withdrawn; control polling only")
         operation = device_budget.operation_for_path(request.url.path, request.method)
         if operation is not None:
             try:

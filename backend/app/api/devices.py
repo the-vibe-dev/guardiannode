@@ -353,6 +353,7 @@ def capture_config(
 class HeartbeatRequest(BaseModel):
     queued_frames: int = Field(default=0, ge=0, le=10000)
     agent_version: str | None = None
+    applied_policy_generation: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/heartbeat")
@@ -365,7 +366,16 @@ def heartbeat(
     from app.services import pipeline_metrics
     paused_until = effective_paused_until(device)  # clears expired pauses
     device.last_seen = datetime.now(UTC)
-    if device.status not in ("paused", "disabled"):
+    if device.status == "consent_stop_requested":
+        latest = consent.latest(db)
+        if (
+            latest is not None and latest.status == "withdrawn"
+            and req.applied_policy_generation == latest.consent_id
+        ):
+            device.paired = False
+            device.token_hash = None
+            device.status = "consent_stop_applied"
+    elif device.status not in ("paused", "disabled"):
         device.status = "online"
     if req.agent_version:
         device.agent_version = req.agent_version

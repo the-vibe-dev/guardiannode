@@ -5,11 +5,15 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import HTTPException, Request
 
 from app import settings as settings_mod
+from app.api.consent import ConsentWithdrawalRequest, withdraw_consent
+from app.api.deps import current_device
+from app.api.devices import HeartbeatRequest, heartbeat
 from app.db.models import Alert, ConsentRecord, Device, Event, RiskResult, User
 from app.guardian_review_models import GuardianReviewContext
-from app.services import consent, encryption, guardian_review
+from app.services import consent, device_tokens, encryption, guardian_review
 from app.services.guardian_review_providers import ProviderError
 
 
@@ -119,3 +123,53 @@ def test_stale_running_review_with_dispatched_attempt_is_not_retried(db_session)
     db_session.commit()
     assert guardian_review.recover_stale_jobs(db_session) == 1
     assert db_session.get(GuardianReview, "r").error_code == "outcome_uncertain"
+
+
+def _request(path: str, token: str = "") -> Request:
+    return Request({
+        "type": "http", "method": "POST", "path": path,
+        "headers": [(b"authorization", f"Bearer {token}".encode())] if token else [],
+        "client": ("127.0.0.1", 1234), "scheme": "http", "server": ("testserver", 80),
+    })
+
+
+def test_withdrawal_token_is_control_only_until_broker_ack(db_session):
+    user = _incident(db_session)
+    _consent(db_session, user)
+    token, digest = device_tokens.issue_token("synthetic-device")
+    device = db_session.get(Device, "synthetic-device")
+    device.token_hash = digest
+    db_session.commit()
+
+    result = withdraw_consent(
+        ConsentWithdrawalRequest(evidence_disposition="retain"),
+        _request("/api/consent/withdraw"), db_session, user, None,
+    )
+    generation = result["record"]["consent_id"]
+    assert device.status == "consent_stop_requested"
+    assert device.paired is True
+    with pytest.raises(HTTPException) as denied:
+        current_device(_request("/api/events/screenshot", token), db_session)
+    assert denied.value.status_code == 403
+    control_device = current_device(_request("/api/devices/capture-config", token), db_session)
+    assert control_device.device_id == device.device_id
+
+    heartbeat(HeartbeatRequest(applied_policy_generation="stale-generation"), db_session, device)
+    assert device.status == "consent_stop_requested"
+    heartbeat(HeartbeatRequest(applied_policy_generation=generation), db_session, device)
+    assert device.status == "consent_stop_applied"
+    assert device.token_hash is None
+    with pytest.raises(HTTPException) as stale:
+        current_device(_request("/api/devices/capture-config", token), db_session)
+    assert stale.value.status_code == 401
+
+
+def test_withdrawal_marks_unpaired_device_offline(db_session):
+    user = _incident(db_session)
+    _consent(db_session, user)
+    result = withdraw_consent(
+        ConsentWithdrawalRequest(evidence_disposition="retain"),
+        _request("/api/consent/withdraw"), db_session, user, None,
+    )
+    assert result["active"] is False
+    assert db_session.get(Device, "synthetic-device").status == "consent_stop_offline"

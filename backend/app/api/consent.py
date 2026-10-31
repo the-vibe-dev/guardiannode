@@ -131,9 +131,14 @@ def withdraw_consent(
         synchronize_session=False,
     )
     for device in db.query(Device).all():
-        device.paired = False
-        device.token_hash = None
-        device.status = "consent_withdrawn"
+        # Keep the existing token for control polling until the broker confirms
+        # it applied this generation. Other device endpoints reject it.
+        if device.paired and device.token_hash:
+            device.status = "consent_stop_requested"
+        else:
+            device.paired = False
+            device.token_hash = None
+            device.status = "consent_stop_offline"
     deletion = None
     if req.evidence_disposition == "delete":
         deletion = purge.delete_events(db, [item[0] for item in db.query(Event.event_id).all()])
