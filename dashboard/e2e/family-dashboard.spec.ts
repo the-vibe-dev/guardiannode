@@ -243,9 +243,13 @@ test("protected pause uses masked step-up and resumes only after confirmation", 
   expect(pauseCalls).toBe(1);
 
   await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await dialog.getByLabel("Parent password").fill("incorrect");
+  await dialog.getByRole("button", { name: "Continue" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Invalid password");
+  expect(pauseCalls).toBe(2);
   await dialog.getByLabel("Parent password").fill("synthetic-browser-password");
   await dialog.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByText("Monitoring pause recorded.")).toBeVisible();
   expect(pauseCalls).toBe(3);
-  expect(errors.filter((message) => !message.includes("status of 403 (Forbidden)"))).toEqual([]);
+  expect(errors.filter((message) => !/status of (401|403) \(/.test(message))).toEqual([]);
 });
