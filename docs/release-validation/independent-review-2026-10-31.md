@@ -11,8 +11,9 @@ that commit. Existing untracked operator files were preserved.
 **Engineering alpha with synthetic data only. Ordinary-family beta is blocked.**
 The attached twelve regression scenarios now pass in a disposable environment,
 but they cover only a subset of the 18 findings. Windows host behavior, durable
-deletion under crash, multi-monitor coverage, and real backend/browser/provider
-integration remain unqualified. No new installer has been published or deployed.
+deletion under crash, multi-monitor coverage, full backend/browser journeys,
+and live provider integration remain unqualified. No new installer has been
+published or deployed.
 
 ## Finding ledger
 
@@ -63,6 +64,10 @@ integration remain unqualified. No new installer has been published or deployed.
 - Windows5 SSH was reachable for read-only inspection on 2026-10-31; the
   renderserve backend host was unreachable from this workspace. No installer
   upgrade or live family-data test was performed.
+- The handoff's Python 3.13 diagnostic run reported an intermittent agent
+  resource warning when the full suite ran together. The frozen Python 3.12
+  agent suite passed here, but the warning's root cause has not been isolated
+  across the original environment and remains a release investigation item.
 - A separate real-backend browser smoke used a fresh temporary SQLite database
   and followed setup to the dashboard. It exposed a false green status with
   zero devices and zero captures. After correction, sign-in displayed
@@ -72,6 +77,9 @@ integration remain unqualified. No new installer has been published or deployed.
 - The synthetic browser data directory is private mode `0700` under `/tmp`.
   A cleanup command was rejected by automatic command review, so it was left
   untouched; no family data or live credential was used.
+- GitHub CI run `41210168405` on code commit `fb3959f` passed all seven jobs:
+  backend, agent, Windows bundle, dashboard, Docker canary, release scripts,
+  and actionlint. This verifies source and build gates, not a Windows install.
 
 This file records implemented code and evidence without converting a passing
 unit suite into a claim of field readiness. Update it after frozen full-suite,
