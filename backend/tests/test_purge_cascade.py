@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from fastapi import HTTPException
+
 from app import settings as settings_mod
 from app.db.models import (
     Alert,
@@ -154,6 +157,27 @@ def test_failed_full_retention_keeps_alert_until_retry(db_session, tmp_path, mon
     retention.run_cleanup(s)
     assert s.get(Event, event_id).deletion_state == "pending_delete"
     assert s.get(Alert, "a-full-retry") is not None
+
+
+def test_tombstoned_alert_and_risk_are_hidden_from_read_apis(db_session, tmp_path):
+    from app.api.alerts import get_alert, list_alerts
+    from app.api.risks import list_risks
+
+    s = db_session
+    event_id, _, _, _ = _mk_chain(
+        s, tmp_path, suffix="hidden", severity="high", age_days=0,
+    )
+    user = User(display_name="Synthetic Parent", password_hash="x", recovery_hash="x")
+    s.add(user)
+    event = s.get(Event, event_id)
+    event.deletion_state = "pending_delete"
+    s.commit()
+
+    assert list_alerts(db=s, _=user, limit=50).items == []
+    assert list_risks(db=s, _=user, limit=100) == []
+    with pytest.raises(HTTPException) as exc:
+        get_alert("a-hidden", db=s, user=user)
+    assert exc.value.status_code == 404
 
 
 def test_wipe_old_events_leaves_no_orphans(db_session, tmp_path):

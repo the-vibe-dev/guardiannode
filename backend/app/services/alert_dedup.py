@@ -20,7 +20,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import Alert
+from app.db.models import Alert, Event, RiskResult
 from app.services.audit import log_action
 from app.settings import settings
 
@@ -63,7 +63,10 @@ def upsert_alert(
         cutoff = now - window
         existing = (
             session.query(Alert)
+            .join(RiskResult, Alert.risk_id == RiskResult.risk_id)
+            .join(Event, RiskResult.event_id == Event.event_id)
             .filter(
+                Event.deletion_state == "active",
                 Alert.dedup_key == key,
                 Alert.status == "open",
                 or_(Alert.last_seen_at >= cutoff, Alert.created_at >= cutoff),

@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import Alert, DigestRun, RiskResult, Setting
+from app.db.models import Alert, DigestRun, Event, RiskResult, Setting
 from app.services import notifications
 
 
@@ -43,6 +43,9 @@ def build_summary(session: Session, *, local_day: date, timezone: str) -> dict:
     start, end = _day_bounds(local_day, timezone)
     alerts = (
         session.query(Alert)
+        .join(RiskResult, Alert.risk_id == RiskResult.risk_id)
+        .join(Event, RiskResult.event_id == Event.event_id)
+        .filter(Event.deletion_state == "active")
         .filter(Alert.created_at >= start, Alert.created_at < end)
         .order_by(Alert.created_at.desc())
         .all()

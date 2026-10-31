@@ -252,7 +252,7 @@ def build_minimized_incident(
     alert = db.get(Alert, alert_id)
     risk = db.get(RiskResult, alert.risk_id) if alert else None
     event = db.get(Event, risk.event_id) if risk else None
-    if alert is None or risk is None or event is None:
+    if alert is None or risk is None or event is None or event.deletion_state != "active":
         raise InvalidIncidentError("Incident not found or incomplete")
     profile_id = alert.profile_id or event.profile_id
     profile = db.get(ChildProfile, profile_id) if profile_id else None

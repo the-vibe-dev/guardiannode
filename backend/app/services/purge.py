@@ -34,6 +34,10 @@ def delete_blob(session: Session, blob: EvidenceBlob) -> bool:
     blob.deletion_state = "pending_delete"
     blob.delete_requested_at = blob.delete_requested_at or now
     blob.delete_attempts = int(blob.delete_attempts or 0) + 1
+    # Check database constraints before unlinking the only on-disk copy.
+    # The caller still owns the transaction; durable intent requires a
+    # separate commit before this function is called.
+    session.flush()
     try:
         resolve_stored_evidence_path(blob.encrypted_path).unlink(missing_ok=True)
     except UnsafeEvidencePathError as e:
