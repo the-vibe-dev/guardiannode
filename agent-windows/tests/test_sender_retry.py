@@ -34,3 +34,17 @@ async def test_sender_discards_permanent_payload_errors():
 
     assert client.calls == 1
     assert q.empty()
+
+
+@pytest.mark.asyncio
+async def test_sender_returns_on_unauthorized_without_losing_queued_frame():
+    q: asyncio.Queue = asyncio.Queue(maxsize=2)
+    await q.put({"image_bytes": b"synthetic-frame", "app_name": "ExampleApp"})
+    client = RejectingClient(401)
+
+    await asyncio.wait_for(screenshot_sender_loop(client, q), timeout=1)
+
+    assert client.calls == 1
+    assert q.qsize() == 1
+    assert (await q.get())["image_bytes"] == b"synthetic-frame"
+    q.task_done()

@@ -5,7 +5,9 @@ import os
 from typing import Any
 
 from src.broker_protocol import (
+    MAX_MESSAGE_BYTES,
     PIPE_NAME,
+    PROTOCOL_VERSION,
     ProtocolError,
     decode_frame,
     encode_frame,
@@ -29,7 +31,8 @@ class BrokerClient:
         import win32file  # type: ignore
         import win32pipe  # type: ignore
 
-        frame = encode_frame(make_request(action, payload))
+        request = make_request(action, payload)
+        frame = encode_frame(request)
         try:
             win32pipe.WaitNamedPipe(self.pipe_name, self.timeout_ms)
             handle = win32file.CreateFile(
@@ -45,7 +48,7 @@ class BrokerClient:
             raise BrokerUnavailable(str(exc)) from exc
         try:
             win32file.WriteFile(handle, frame)
-            response = self._read_response(handle)
+            response = self._read_response(handle, request["request_id"])
         finally:
             win32file.CloseHandle(handle)
         if not response.get("ok"):
@@ -56,13 +59,32 @@ class BrokerClient:
         return payload_obj
 
     @staticmethod
-    def _read_response(handle) -> dict[str, Any]:  # noqa: ANN001
+    def _read_exact(handle, size: int) -> bytes:  # noqa: ANN001
         import win32file  # type: ignore
 
-        _, header = win32file.ReadFile(handle, 4)
+        data = bytearray()
+        while len(data) < size:
+            _, chunk = win32file.ReadFile(handle, size - len(data))
+            if not chunk:
+                raise ProtocolError("broker disconnected during response")
+            data.extend(chunk)
+        return bytes(data)
+
+    @staticmethod
+    def _read_response(handle, request_id: str) -> dict[str, Any]:  # noqa: ANN001
+        header = BrokerClient._read_exact(handle, 4)
         size = int.from_bytes(header, "big")
-        _, body = win32file.ReadFile(handle, size)
-        return decode_frame(header + body)
+        if size > MAX_MESSAGE_BYTES:
+            raise ProtocolError("broker response too large")
+        body = BrokerClient._read_exact(handle, size)
+        response = decode_frame(header + body)
+        if response.get("version") != PROTOCOL_VERSION:
+            raise ProtocolError("unsupported broker protocol version")
+        if response.get("request_id") != request_id:
+            raise ProtocolError("broker response request_id mismatch")
+        if not isinstance(response.get("ok"), bool):
+            raise ProtocolError("broker returned invalid response")
+        return response
 
     def health(self) -> dict[str, Any]:
         return self.request("health")

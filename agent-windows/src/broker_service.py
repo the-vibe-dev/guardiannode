@@ -115,6 +115,7 @@ class BrokerCommandHandler:
         self.replay_cache = replay_cache or RequestReplayCache()
         self._capture_config_lock = threading.Lock()
         self._capture_config: dict[str, Any] = {}
+        self._persisted_policy_generation: str | None = None
         self.capture_config_path = self.pause_path.with_name("capture_config.json")
         try:
             cached = json.loads(self.capture_config_path.read_text(encoding="utf-8"))
@@ -223,13 +224,21 @@ class BrokerCommandHandler:
             clean["policy_generation"] = generation
         with self._capture_config_lock:
             self._capture_config = clean
+            self._persisted_policy_generation = None
         try:
             self.capture_config_path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.capture_config_path.with_suffix(".tmp")
             temporary.write_text(json.dumps(clean), encoding="utf-8")
             os.replace(temporary, self.capture_config_path)
+            with self._capture_config_lock:
+                if self._capture_config == clean:
+                    self._persisted_policy_generation = clean.get("policy_generation")
         except OSError as exc:
             log.warning("capture policy could not be persisted: %s", type(exc).__name__)
+
+    def applied_policy_generation(self) -> str | None:
+        with self._capture_config_lock:
+            return self._persisted_policy_generation
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
         creds = load_credentials(self.credential_path)
@@ -532,12 +541,28 @@ async def _run_sender(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
         token = str(creds.get("device_token") or "")
         backend_url = str(creds.get("backend_url") or cfg.backend_url)
         if not token:
+            try:
+                await asyncio.to_thread(
+                    bootstrap_pairing,
+                    socket.gethostname(),
+                    __version__,
+                    pending_path=pending_pairing_path(),
+                    device_path=handler.credential_path,
+                    bootstrap_token_path=broker_bootstrap_token_path(),
+                    attempts=1,
+                )
+            except Exception as exc:
+                log.warning("broker pairing retry failed: %s", type(exc).__name__)
             await asyncio.sleep(10)
             continue
-        await screenshot_sender_loop(
-            BackendClient(backend_url, token, ca_path=creds.get("ca_path")),
-            handler.queue,
-        )  # type: ignore[arg-type]
+        try:
+            await screenshot_sender_loop(
+                BackendClient(backend_url, token, ca_path=creds.get("ca_path")),
+                handler.queue,
+            )  # type: ignore[arg-type]
+        except Exception as exc:
+            log.warning("broker sender restarted after %s", type(exc).__name__)
+        await asyncio.sleep(10)
 
 
 async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
@@ -558,7 +583,10 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
             ca_path=creds.get("ca_path"),
         )
         try:
-            await client.heartbeat(queued_frames=handler.queue.qsize())
+            await client.heartbeat(
+                queued_frames=handler.queue.qsize(),
+                applied_policy_generation=handler.applied_policy_generation(),
+            )
             capture_config = await client.get_capture_config()
             if capture_config:
                 handler.set_capture_config(capture_config)
@@ -637,6 +665,9 @@ def cli() -> None:
         force=True,
     )
     cfg = AgentConfig.from_path(Path(args.config))
+    if args.self_test:
+        log.info("broker self-test ok")
+        return
     handler = build_handler(cfg)
     try:
         bootstrap_pairing(
@@ -649,9 +680,6 @@ def cli() -> None:
     except Exception as exc:
         log.warning("broker pairing bootstrap failed: %s", exc)
     handler.ensure_broker_credentials()
-    if args.self_test:
-        log.info("broker self-test ok")
-        return
     if os.name != "nt":
         raise SystemExit("GuardianNode endpoint broker service currently runs only on Windows")
 

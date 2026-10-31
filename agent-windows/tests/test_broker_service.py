@@ -83,12 +83,24 @@ def test_parent_pause_reaches_capture_and_blocks_submit(tmp_path) -> None:
     assert config["paused"] is True
     assert config["capture_allowed"] is False
     assert config["policy_generation"] == "generation-2"
+    assert handler.applied_policy_generation() == "generation-2"
     assert "device_token" not in config
     assert handler.handle_message(make_request("status"))["payload"]["paused"] is True
     restarted = _handler(tmp_path)
     assert restarted.handle_message(make_request("status"))["payload"]["paused"] is True
+    assert restarted.applied_policy_generation() == "generation-2"
     restarted.set_capture_config({"paused": False, "capture_allowed": True})
     assert restarted.handle_message(make_request("status"))["payload"]["paused"] is False
+
+
+def test_failed_capture_policy_persistence_cannot_ack_generation(tmp_path, monkeypatch) -> None:
+    from src import broker_service
+
+    handler = _handler(tmp_path)
+    monkeypatch.setattr(broker_service.os, "replace", lambda *_args: (_ for _ in ()).throw(OSError("locked")))
+    handler.set_capture_config({"capture_allowed": False, "policy_generation": "generation-3"})
+    assert handler.applied_policy_generation() is None
+    assert handler.handle_message(make_request("capture_config"))["payload"]["capture_allowed"] is False
 
 
 def test_broker_migrates_legacy_credentials_to_secure_path(tmp_path) -> None:

@@ -240,8 +240,8 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status in (401, 403):
-                    log.error("screenshot upload unauthorized (%s); re-pair this device", status)
-                    backoff = 60.0
+                    log.error("screenshot upload unauthorized (%s); refreshing broker credentials", status)
+                    backoff = 10.0
                     _retry_payload(
                         screenshot_queue,
                         payload,
@@ -249,8 +249,9 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                         error=f"unauthorized: {status}",
                     )
                     handled = True
-                    await asyncio.sleep(backoff)
-                    continue
+                    # Return to the broker supervisor so a repaired pairing or
+                    # rotated trust bundle creates a fresh BackendClient.
+                    return
                 if status == 413:
                     log.error("screenshot rejected as too large; discarding frame")
                     backoff = 1.0
