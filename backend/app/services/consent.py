@@ -40,7 +40,7 @@ def effective_policy(session: Session) -> ProcessingPolicy:
         row.consent_id if row else None,
         active,
         active and choices.get("screenshots") is True and choices.get("retention") is True,
-        active and choices.get("apps_and_urls") is True,
+        active and choices.get("apps_and_urls") is True and choices.get("retention") is True,
         active and choices.get("retention") is True,
         active and choices.get("notifications") is True,
         active and choices.get("external_ai") is True,
@@ -53,4 +53,4 @@ def latest(session: Session) -> ConsentRecord | None:
 
 def monitoring_allowed(session: Session) -> bool:
     policy = effective_policy(session)
-    return policy.active and policy.screenshots
+    return policy.active and (policy.screenshots or policy.apps_and_urls)

@@ -67,6 +67,23 @@ def test_all_capture_choices_off_disable_monitoring(db_session):
     assert consent.effective_policy(db_session).apps_and_urls is False
 
 
+def test_capture_and_context_choices_resolve_independently(db_session):
+    user = _incident(db_session)
+    _consent(db_session, user, screenshots=False, apps_and_urls=True)
+    policy = consent.effective_policy(db_session)
+    assert policy.screenshots is False
+    assert policy.apps_and_urls is True
+    assert consent.monitoring_allowed(db_session) is True
+    db_session.query(ConsentRecord).delete()
+    db_session.commit()
+    _consent(db_session, user, consent_id="no-retention", screenshots=True,
+             apps_and_urls=True, retention=False)
+    policy = consent.effective_policy(db_session)
+    assert policy.screenshots is False
+    assert policy.apps_and_urls is False
+    assert consent.monitoring_allowed(db_session) is False
+
+
 def test_external_review_requires_global_opt_in(db_session, monkeypatch):
     user = _incident(db_session)
     _consent(db_session, user)

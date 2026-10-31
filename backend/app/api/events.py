@@ -105,7 +105,7 @@ async def ingest(
     device: Device = Depends(current_device),
 ):
     policy = consent.effective_policy(db)
-    if is_device_paused(device) or not policy.active:
+    if is_device_paused(device) or not (policy.screenshots or policy.apps_and_urls):
         # Quietly accept but don't store — pause behavior is honored server-side too
         return IngestResponse(
             event_id=req.event_id or "",
