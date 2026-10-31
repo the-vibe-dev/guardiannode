@@ -44,7 +44,7 @@ export default function Login({ onLogin }: Props) {
         <p className="text-sm text-gray-500 mb-6 text-center">Sign in to review alerts.</p>
         {!showRecovery ? (
           <form onSubmit={submit} className="space-y-3">
-            <input type="password" placeholder="Parent password"
+            <input type="password" placeholder="Parent password" aria-label="Parent password" autoComplete="current-password"
                    className="w-full border rounded px-3 py-2"
                    value={password} onChange={(e) => setPassword(e.target.value)} />
             {error && <div className="text-sm text-red-700">{error}</div>}
