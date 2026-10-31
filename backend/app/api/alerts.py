@@ -11,6 +11,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
+from app import settings as settings_mod
 from app.api.deps import current_user, get_db_dep, require_recent_auth
 from app.db.models import Alert, DeviceCommand, Event, RiskResult, User
 from app.services import encryption, purge
@@ -68,6 +69,19 @@ class AlertPage(BaseModel):
     open_count: int
 
 
+def _visible_alerts(db: Session):
+    return (
+        db.query(Alert)
+        .join(RiskResult, Alert.risk_id == RiskResult.risk_id)
+        .join(Event, RiskResult.event_id == Event.event_id)
+        .filter(Event.deletion_state == "active")
+    )
+
+
+def _visible_alert(db: Session, alert_id: str) -> Alert | None:
+    return _visible_alerts(db).filter(Alert.alert_id == alert_id).first()
+
+
 @router.get("", response_model=AlertPage)
 def list_alerts(
     severity: str | None = None,
@@ -79,7 +93,7 @@ def list_alerts(
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):
-    q = db.query(Alert)
+    q = _visible_alerts(db)
     if severity:
         q = q.filter(Alert.severity == severity)
     if status:
@@ -89,7 +103,7 @@ def list_alerts(
     if profile_id:
         q = q.filter(Alert.profile_id == profile_id)
     if cursor:
-        anchor = db.get(Alert, cursor)
+        anchor = _visible_alert(db, cursor)
         if anchor is None:
             raise HTTPException(400, "Invalid alert cursor")
         q = q.filter(or_(
@@ -118,7 +132,7 @@ def list_alerts(
     return AlertPage(
         items=out,
         next_cursor=rows[-1].alert_id if len(rows_with_extra) > limit else None,
-        open_count=db.query(Alert).filter(Alert.status == "open").count(),
+        open_count=_visible_alerts(db).filter(Alert.status == "open").count(),
     )
 
 
@@ -137,7 +151,7 @@ def get_alert(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
-    a = db.get(Alert, alert_id)
+    a = _visible_alert(db, alert_id)
     if a is None:
         raise HTTPException(404, "Alert not found")
     r = db.get(RiskResult, a.risk_id)
@@ -201,7 +215,7 @@ def review_alert(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
-    a = db.get(Alert, alert_id)
+    a = _visible_alert(db, alert_id)
     if a is None:
         raise HTTPException(404, "Alert not found")
     a.status = req.status
@@ -229,7 +243,7 @@ def record_feedback(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
-    a = db.get(Alert, alert_id)
+    a = _visible_alert(db, alert_id)
     if a is None:
         raise HTTPException(404, "Alert not found")
     r = db.get(RiskResult, a.risk_id)
@@ -264,7 +278,7 @@ def take_action(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
-    a = db.get(Alert, alert_id)
+    a = _visible_alert(db, alert_id)
     if a is None:
         raise HTTPException(404, "Alert not found")
     if req.action in {"pause_app", "block_app", "delete_evidence"}:
@@ -385,11 +399,13 @@ def create_confirmed_action(
     user: User = Depends(current_user),
     _: None = Depends(require_recent_auth),
 ):
-    alert = db.get(Alert, alert_id)
+    alert = _visible_alert(db, alert_id)
     if alert is None:
         raise HTTPException(404, "Alert not found")
     if not alert.device_id:
         raise HTTPException(409, "This alert is not linked to a child device")
+    if req.action in {"pause_app", "block_domain"} and not settings_mod.settings.device_enforcement_enabled:
+        raise HTTPException(409, "Device enforcement is not enabled on this installation")
     payload, preview = _action_payload(req)
     if req.confirmed_preview != preview:
         raise HTTPException(409, {"code": "confirmation_required", "preview": preview})

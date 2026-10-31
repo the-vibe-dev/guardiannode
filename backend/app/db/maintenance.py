@@ -30,7 +30,16 @@ class IntegrityResult:
 
 
 BACKUP_MANIFEST_FORMAT = "guardiannode-sqlite-backup-v1"
-SUPPORTED_SCHEMA_REVISIONS = {None, "0001_beta_baseline", "0002_complete_backups"}
+SUPPORTED_SCHEMA_REVISIONS = {
+    None,
+    "0001_beta_baseline",
+    "0002_complete_backups",
+    "0003_guardian_reviews",
+    "0004_guardian_review_privacy",
+    "0005_guardian_review_feedback",
+    "0006_beta_security_break",
+    "0007_family_beta_workflows",
+}
 
 
 def backup_manifest_path(database: Path) -> Path:

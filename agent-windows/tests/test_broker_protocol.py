@@ -27,6 +27,23 @@ def test_protocol_allows_capture_config_without_payload() -> None:
     assert request.payload == {}
 
 
+def test_child_request_protocol_limits_content_and_profile_authority() -> None:
+    request = parse_request(make_request("child_request_create", {
+        "request_type": "site_exception", "target": "example.test", "reason": "school project",
+    }))
+    assert request.payload["request_type"] == "site_exception"
+    parse_request(make_request("child_request_list"))
+    for payload in (
+        {"request_type": "site_exception", "profile_id": "another-child"},
+        {"request_type": "site_exception", "reason": "x" * 4097},
+        {"request_type": "arbitrary"},
+    ):
+        with pytest.raises(ProtocolError):
+            parse_request(make_request("child_request_create", payload))
+    with pytest.raises(ProtocolError):
+        parse_request(make_request("child_request_list", {"device_id": "another-device"}))
+
+
 def test_protocol_rejects_unknown_action() -> None:
     message = make_request("health")
     message["action"] = "read_device_token"

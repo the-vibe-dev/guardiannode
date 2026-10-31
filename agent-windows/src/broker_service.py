@@ -17,8 +17,11 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
+
+import httpx
 
 from src import __version__
 from src.broker_protocol import (
@@ -114,7 +117,32 @@ class BrokerCommandHandler:
         self.replay_cache = replay_cache or RequestReplayCache()
         self._capture_config_lock = threading.Lock()
         self._capture_config: dict[str, Any] = {}
-        self.set_capture_config(capture_config or {})
+        self._persisted_policy_generation: str | None = None
+        self.capture_config_path = self.pause_path.with_name("capture_config.json")
+        try:
+            cached = json.loads(self.capture_config_path.read_text(encoding="utf-8"))
+            if isinstance(cached, dict):
+                self.set_capture_config(cached)
+        except (OSError, ValueError):
+            pass
+        if capture_config:
+            self.set_capture_config(capture_config)
+
+    def _server_paused(self) -> bool:
+        with self._capture_config_lock:
+            cfg = dict(self._capture_config)
+        if cfg.get("paused") is not True:
+            return False
+        until = cfg.get("paused_until")
+        if not until:
+            return True
+        try:
+            expiry = datetime.fromisoformat(until)
+            if expiry.tzinfo is None:
+                return True
+            return expiry.astimezone(UTC) > datetime.now(UTC)
+        except ValueError:
+            return True
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -146,17 +174,62 @@ class BrokerCommandHandler:
                 "device_id": creds.get("device_id") or "",
                 "backend_url": creds.get("backend_url") or "",
                 "queue_depth": self.queue.qsize(),
-                "paused": pause.paused,
+                "paused": pause.paused or self._server_paused(),
                 "paused_until": pause.paused_until,
             }
         if request.action == "capture_config":
             with self._capture_config_lock:
                 return dict(self._capture_config)
+        if request.action in {"child_request_create", "child_request_list"}:
+            return self._child_request(request.action, request.payload)
         if request.action == "submit_screenshot":
+            if self._load_pause().paused or self._server_paused():
+                raise ProtocolError("capture is paused by parent policy")
             payload = self._screenshot_payload(request.payload)
             self.queue.put_nowait(payload)
             return {"status": "queued", "queue_depth": self.queue.qsize()}
         raise ProtocolError("unsupported action")
+
+    def _child_request(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Use broker-owned credentials; return only child-request DTO fields."""
+        from src.backend_client import BackendClient
+
+        creds = self._load_credentials()
+        token = str(creds.get("device_token") or "")
+        if not token:
+            raise ProtocolError("device is not paired")
+        client = BackendClient(
+            str(creds.get("backend_url") or ""), token, ca_path=creds.get("ca_path")
+        )
+        try:
+            with httpx.Client(timeout=5.0, verify=client._verify()) as transport:
+                if action == "child_request_create":
+                    response = transport.post(
+                        f"{client.base_url}/api/child-requests",
+                        json=payload,
+                        headers=client._headers(),
+                    )
+                else:
+                    response = transport.get(
+                        f"{client.base_url}/api/child-requests/mine",
+                        headers=client._headers(),
+                    )
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("child request backend call failed: %s", type(exc).__name__)
+            raise ProtocolError("child request could not reach the parent server") from exc
+        fields = {
+            "request_id", "device_id", "profile_id", "request_type", "target", "reason",
+            "status", "response_note", "created_at", "reviewed_at", "expires_at",
+        }
+        if action == "child_request_create":
+            if not isinstance(body, dict):
+                raise ProtocolError("invalid child request response")
+            return {key: body[key] for key in fields if key in body}
+        if not isinstance(body, list) or len(body) > 20 or not all(isinstance(item, dict) for item in body):
+            raise ProtocolError("invalid child request list")
+        return {"items": [{key: item[key] for key in fields if key in item} for item in body]}
 
     def set_capture_config(self, payload: dict[str, Any]) -> None:
         """Cache only bounded, non-secret capture controls for session agents."""
@@ -177,8 +250,40 @@ class BrokerCommandHandler:
         full_screen = payload.get("full_screen_capture_enabled")
         if isinstance(full_screen, bool):
             clean["full_screen_capture_enabled"] = full_screen
+        paused = payload.get("paused")
+        if isinstance(paused, bool):
+            clean["paused"] = paused
+        capture_allowed = payload.get("capture_allowed")
+        if isinstance(capture_allowed, bool):
+            clean["capture_allowed"] = capture_allowed
+            if not capture_allowed:
+                clean["paused"] = True
+        context_allowed = payload.get("apps_and_urls_allowed")
+        if isinstance(context_allowed, bool):
+            clean["apps_and_urls_allowed"] = context_allowed
+        paused_until = payload.get("paused_until")
+        if isinstance(paused_until, str) and len(paused_until) <= 40:
+            clean["paused_until"] = paused_until
+        generation = payload.get("policy_generation")
+        if isinstance(generation, str) and len(generation) <= 64:
+            clean["policy_generation"] = generation
         with self._capture_config_lock:
             self._capture_config = clean
+            self._persisted_policy_generation = None
+        try:
+            self.capture_config_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.capture_config_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(clean), encoding="utf-8")
+            os.replace(temporary, self.capture_config_path)
+            with self._capture_config_lock:
+                if self._capture_config == clean:
+                    self._persisted_policy_generation = clean.get("policy_generation")
+        except OSError as exc:
+            log.warning("capture policy could not be persisted: %s", type(exc).__name__)
+
+    def applied_policy_generation(self) -> str | None:
+        with self._capture_config_lock:
+            return self._persisted_policy_generation
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
         creds = load_credentials(self.credential_path)
@@ -210,6 +315,7 @@ class BrokerCommandHandler:
             "capture_scope",
             "policy_id",
             "policy_version",
+            "policy_generation",
             "collector_version",
             "timestamp",
             "idempotency_key",
@@ -481,12 +587,28 @@ async def _run_sender(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
         token = str(creds.get("device_token") or "")
         backend_url = str(creds.get("backend_url") or cfg.backend_url)
         if not token:
+            try:
+                await asyncio.to_thread(
+                    bootstrap_pairing,
+                    socket.gethostname(),
+                    __version__,
+                    pending_path=pending_pairing_path(),
+                    device_path=handler.credential_path,
+                    bootstrap_token_path=broker_bootstrap_token_path(),
+                    attempts=1,
+                )
+            except Exception as exc:
+                log.warning("broker pairing retry failed: %s", type(exc).__name__)
             await asyncio.sleep(10)
             continue
-        await screenshot_sender_loop(
-            BackendClient(backend_url, token, ca_path=creds.get("ca_path")),
-            handler.queue,
-        )  # type: ignore[arg-type]
+        try:
+            await screenshot_sender_loop(
+                BackendClient(backend_url, token, ca_path=creds.get("ca_path")),
+                handler.queue,
+            )  # type: ignore[arg-type]
+        except Exception as exc:
+            log.warning("broker sender restarted after %s", type(exc).__name__)
+        await asyncio.sleep(10)
 
 
 async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
@@ -501,19 +623,40 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
         if not token:
             await asyncio.sleep(10)
             continue
+        if pending_pairing_path().exists():
+            try:
+                await asyncio.to_thread(
+                    bootstrap_pairing,
+                    socket.gethostname(),
+                    __version__,
+                    pending_path=pending_pairing_path(),
+                    device_path=handler.credential_path,
+                    bootstrap_token_path=broker_bootstrap_token_path(),
+                    attempts=1,
+                    replace_existing=True,
+                )
+            except Exception as exc:
+                log.warning("broker re-pair retry failed: %s", type(exc).__name__)
+            creds = handler.ensure_broker_credentials()
+            token = str(creds.get("device_token") or "")
         client = BackendClient(
             str(creds.get("backend_url") or cfg.backend_url),
             token,
             ca_path=creds.get("ca_path"),
         )
         try:
-            await client.heartbeat(queued_frames=handler.queue.qsize())
+            await client.heartbeat(
+                queued_frames=handler.queue.qsize(),
+                applied_policy_generation=handler.applied_policy_generation(),
+            )
             capture_config = await client.get_capture_config()
             if capture_config:
                 handler.set_capture_config(capture_config)
             for command in await client.get_commands():
                 command_id = str(command.get("command_id") or "")
                 try:
+                    if command.get("command_type") in {"pause_app", "block_domain"} and not cfg.enforcement_enabled:
+                        raise ValueError("device enforcement is disabled pending Windows qualification")
                     result = enforcer.execute(command)
                     await client.report_command(command_id, "succeeded", result)
                 except ValueError as exc:
@@ -586,6 +729,9 @@ def cli() -> None:
         force=True,
     )
     cfg = AgentConfig.from_path(Path(args.config))
+    if args.self_test:
+        log.info("broker self-test ok")
+        return
     handler = build_handler(cfg)
     try:
         bootstrap_pairing(
@@ -594,13 +740,11 @@ def cli() -> None:
             pending_path=pending_pairing_path(),
             device_path=handler.credential_path,
             bootstrap_token_path=broker_bootstrap_token_path(),
+            replace_existing=True,
         )
     except Exception as exc:
         log.warning("broker pairing bootstrap failed: %s", exc)
     handler.ensure_broker_credentials()
-    if args.self_test:
-        log.info("broker self-test ok")
-        return
     if os.name != "nt":
         raise SystemExit("GuardianNode endpoint broker service currently runs only on Windows")
 

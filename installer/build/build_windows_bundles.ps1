@@ -17,9 +17,22 @@ function Invoke-Checked {
   )
   Push-Location $WorkingDirectory
   try {
-    & $Exe @Arguments
-    if ($LASTEXITCODE -ne 0) {
-      throw "$Exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+    # Windows PowerShell 5 treats native stderr as a terminating ErrorRecord
+    # when ErrorActionPreference is Stop. PyInstaller writes normal progress
+    # there, so capture stderr as text and rely on the process exit code.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    try {
+      $ErrorActionPreference = "Continue"
+      & $Exe @Arguments 2> $stderrFile
+      $nativeExitCode = $LASTEXITCODE
+      Get-Content -LiteralPath $stderrFile
+    } finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+      Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+    if ($nativeExitCode -ne 0) {
+      throw "$Exe $($Arguments -join ' ') failed with exit code $nativeExitCode"
     }
   } finally {
     Pop-Location

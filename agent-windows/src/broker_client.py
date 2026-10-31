@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from src.broker_protocol import (
+    MAX_MESSAGE_BYTES,
     PIPE_NAME,
+    PROTOCOL_VERSION,
     ProtocolError,
     decode_frame,
     encode_frame,
@@ -29,12 +32,13 @@ class BrokerClient:
         import win32file  # type: ignore
         import win32pipe  # type: ignore
 
-        frame = encode_frame(make_request(action, payload))
+        request = make_request(action, payload)
+        frame = encode_frame(request)
         try:
             win32pipe.WaitNamedPipe(self.pipe_name, self.timeout_ms)
             handle = win32file.CreateFile(
                 self.pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
+                0x00120003,  # SYNCHRONIZE | READ_CONTROL | read/write data, not pipe-instance creation
                 0,
                 None,
                 win32file.OPEN_EXISTING,
@@ -44,8 +48,9 @@ class BrokerClient:
         except Exception as exc:
             raise BrokerUnavailable(str(exc)) from exc
         try:
+            self._verify_broker_owner(handle)
             win32file.WriteFile(handle, frame)
-            response = self._read_response(handle)
+            response = self._read_response(handle, request["request_id"])
         finally:
             win32file.CloseHandle(handle)
         if not response.get("ok"):
@@ -56,13 +61,53 @@ class BrokerClient:
         return payload_obj
 
     @staticmethod
-    def _read_response(handle) -> dict[str, Any]:  # noqa: ANN001
-        import win32file  # type: ignore
+    def _verify_broker_owner(handle) -> None:  # noqa: ANN001
+        import win32security  # type: ignore
 
-        _, header = win32file.ReadFile(handle, 4)
+        descriptor = win32security.GetSecurityInfo(
+            handle,
+            win32security.SE_KERNEL_OBJECT,
+            win32security.OWNER_SECURITY_INFORMATION,
+        )
+        owner = descriptor.GetSecurityDescriptorOwner()
+        if win32security.ConvertSidToStringSid(owner) != "S-1-5-18":
+            raise BrokerUnavailable("local broker pipe is not owned by SYSTEM")
+
+    @staticmethod
+    def _read_exact(handle, size: int) -> bytes:  # noqa: ANN001
+        import win32file  # type: ignore
+        import win32pipe  # type: ignore
+
+        data = bytearray()
+        deadline = time.monotonic() + 5.0
+        while len(data) < size:
+            if time.monotonic() >= deadline:
+                raise BrokerUnavailable("broker response deadline exceeded")
+            _peeked, available, _left = win32pipe.PeekNamedPipe(handle, 0)
+            if not available:
+                time.sleep(0.01)
+                continue
+            _, chunk = win32file.ReadFile(handle, min(size - len(data), available))
+            if not chunk:
+                raise ProtocolError("broker disconnected during response")
+            data.extend(chunk)
+        return bytes(data)
+
+    @staticmethod
+    def _read_response(handle, request_id: str) -> dict[str, Any]:  # noqa: ANN001
+        header = BrokerClient._read_exact(handle, 4)
         size = int.from_bytes(header, "big")
-        _, body = win32file.ReadFile(handle, size)
-        return decode_frame(header + body)
+        if size > MAX_MESSAGE_BYTES:
+            raise ProtocolError("broker response too large")
+        body = BrokerClient._read_exact(handle, size)
+        response = decode_frame(header + body)
+        if response.get("version") != PROTOCOL_VERSION:
+            raise ProtocolError("unsupported broker protocol version")
+        if response.get("request_id") != request_id:
+            raise ProtocolError("broker response request_id mismatch")
+        if not isinstance(response.get("ok"), bool):
+            raise ProtocolError("broker returned invalid response")
+        return response
 
     def health(self) -> dict[str, Any]:
         return self.request("health")
@@ -84,6 +129,7 @@ class BrokerClient:
             "capture_scope",
             "policy_id",
             "policy_version",
+            "policy_generation",
             "collector_version",
             "timestamp",
             "idempotency_key",

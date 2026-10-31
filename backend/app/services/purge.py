@@ -1,7 +1,7 @@
 """Cascade-safe deletion of events and their dependent records.
 
 Events fan out into RiskResults, Alerts, EvidenceBlob rows, and encrypted blob
-files on disk. SQLite (as configured) does not enforce FK cascades, so every
+files on disk. SQLite enforces foreign keys but does not cascade them, so every
 delete path — retention cleanup and parent-initiated wipes — must go through
 these helpers or it strands orphaned rows and undeletable evidence files.
 """
@@ -18,7 +18,9 @@ from app.db.models import (
     Event,
     EvidenceBlob,
     GuardianReview,
+    GuardianReviewFeedback,
     GuardianReviewPreview,
+    NotificationJob,
     RiskResult,
 )
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
@@ -32,6 +34,10 @@ def delete_blob(session: Session, blob: EvidenceBlob) -> bool:
     blob.deletion_state = "pending_delete"
     blob.delete_requested_at = blob.delete_requested_at or now
     blob.delete_attempts = int(blob.delete_attempts or 0) + 1
+    # Check database constraints before unlinking the only on-disk copy.
+    # The caller still owns the transaction; durable intent requires a
+    # separate commit before this function is called.
+    session.flush()
     try:
         resolve_stored_evidence_path(blob.encrypted_path).unlink(missing_ok=True)
     except UnsafeEvidencePathError as e:
@@ -65,6 +71,9 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
         rows = session.query(Event).filter(Event.event_id.in_(chunk)).all()
         deletable_ids: list[str] = []
         for event in rows:
+            event.deletion_state = "pending_delete"
+            event.deletion_requested_at = event.deletion_requested_at or datetime.now(UTC)
+            session.flush()
             blobs = session.query(EvidenceBlob).filter(EvidenceBlob.event_id == event.event_id).all()
             failed = False
             for blob in blobs:
@@ -95,6 +104,17 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
                     row[0] for row in session.query(GuardianReviewPreview.preview_id)
                     .filter(GuardianReviewPreview.alert_id.in_(alert_ids)).all()
                 ]
+                review_ids = [
+                    row[0] for row in session.query(GuardianReview.review_id)
+                    .filter(GuardianReview.alert_id.in_(alert_ids)).all()
+                ]
+                if review_ids:
+                    session.query(GuardianReviewFeedback).filter(
+                        GuardianReviewFeedback.review_id.in_(review_ids)
+                    ).delete(synchronize_session=False)
+                session.query(NotificationJob).filter(
+                    NotificationJob.alert_id.in_(alert_ids)
+                ).delete(synchronize_session=False)
                 deleted["guardian_reviews"] += session.query(GuardianReview).filter(
                     GuardianReview.alert_id.in_(alert_ids)
                 ).delete(synchronize_session=False)
@@ -131,7 +151,7 @@ def delete_orphaned_blob_files(session: Session) -> int:
 
 
 def retry_pending_deletions(session: Session, *, limit: int = 100) -> dict[str, int]:
-    """Retry failed blob unlinks and finish their pending event cascades."""
+    """Retry file deletion, preserving events with only expired blobs."""
     blobs = (
         session.query(EvidenceBlob)
         .filter(EvidenceBlob.deletion_state.in_(["pending_delete", "delete_failed"]))
@@ -140,11 +160,20 @@ def retry_pending_deletions(session: Session, *, limit: int = 100) -> dict[str, 
         .all()
     )
     event_ids = {blob.event_id for blob in blobs if blob.event_id}
-    removed = sum(1 for blob in blobs if delete_blob(session, blob))
+    removed = 0
+    for blob in blobs:
+        if delete_blob(session, blob):
+            removed += 1
+            for event in session.query(Event).filter(Event.screenshot_blob_id == blob.blob_id).all():
+                event.screenshot_blob_id = None
+            for event in session.query(Event).filter(Event.image_blob_id == blob.blob_id).all():
+                event.image_blob_id = None
     session.flush()
     finished = {"events": 0, "risk_results": 0, "alerts": 0, "blobs": removed, "guardian_reviews": 0}
     for event_id in event_ids:
-        if session.query(EvidenceBlob).filter(EvidenceBlob.event_id == event_id).count() == 0:
+        pending_event = session.get(Event, event_id)
+        if (pending_event is not None and pending_event.deletion_state == "pending_delete"
+                and session.query(EvidenceBlob).filter(EvidenceBlob.event_id == event_id).count() == 0):
             counts = delete_events(session, [event_id])
             for key, value in counts.items():
                 finished[key] += value

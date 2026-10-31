@@ -59,6 +59,7 @@ class BackendClient:
         capture_scope: str = "monitored_app",
         policy_id: str | None = None,
         policy_version: str | None = None,
+        policy_generation: str | None = None,
         collector_version: str | None = None,
         timestamp: str | None = None,
         idempotency_key: str | None = None,
@@ -77,6 +78,8 @@ class BackendClient:
             data["policy_id"] = policy_id
         if policy_version:
             data["policy_version"] = policy_version
+        if policy_generation:
+            data["policy_generation"] = policy_generation
         if collector_version:
             data["collector_version"] = collector_version
         if timestamp:
@@ -93,15 +96,18 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
-    async def heartbeat(self, queued_frames: int = 0) -> bool:
+    async def heartbeat(self, queued_frames: int = 0, applied_policy_generation: str | None = None) -> bool:
         """Liveness + upload-backlog report. Falls back to the plain health
         probe when talking to a backend that predates /api/devices/heartbeat."""
         try:
             async with httpx.AsyncClient(timeout=5.0, verify=self._verify()) as c:
+                body: dict[str, int | str] = {"queued_frames": queued_frames}
+                if applied_policy_generation:
+                    body["applied_policy_generation"] = applied_policy_generation
                 r = await c.post(
                     f"{self.base_url}/api/devices/heartbeat",
                     headers=self._headers(),
-                    json={"queued_frames": queued_frames},
+                    json=body,
                 )
                 if r.status_code in (404, 405):
                     r = await c.get(f"{self.base_url}/api/health", headers=self._headers())

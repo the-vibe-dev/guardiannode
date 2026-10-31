@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, get_db_dep
-from app.db.models import RiskResult, User
+from app.db.models import Event, RiskResult, User
 from app.services.audit import log_action
 
 router = APIRouter(prefix="/risks", tags=["risks"])
@@ -47,7 +47,12 @@ def list_risks(
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):
-    q = db.query(RiskResult).order_by(RiskResult.created_at.desc())
+    q = (
+        db.query(RiskResult)
+        .join(Event, RiskResult.event_id == Event.event_id)
+        .filter(Event.deletion_state == "active")
+        .order_by(RiskResult.created_at.desc())
+    )
     if risk_level:
         q = q.filter(RiskResult.risk_level == risk_level)
     return [_to_dto(r) for r in q.limit(limit).all()]
@@ -65,7 +70,12 @@ def feedback(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
-    r = db.get(RiskResult, risk_id)
+    r = (
+        db.query(RiskResult)
+        .join(Event, RiskResult.event_id == Event.event_id)
+        .filter(RiskResult.risk_id == risk_id, Event.deletion_state == "active")
+        .first()
+    )
     if r is None:
         raise HTTPException(404, "Risk not found")
     if req.is_false_positive:

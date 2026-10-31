@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Alert, AuditLog, Event, EvidenceBlob, RiskResult
+from app.db.models import AuditLog, Event, EvidenceBlob, RiskResult
 
 log = logging.getLogger(__name__)
 
@@ -46,21 +46,13 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
         event_ids = [
             row[0]
             for row in session.query(RiskResult.event_id)
-            .filter(RiskResult.risk_level.in_(levels), RiskResult.created_at < cutoff)
+            .join(Event, RiskResult.event_id == Event.event_id)
+            .filter(RiskResult.risk_level.in_(levels), Event.timestamp < cutoff)
             .all()
         ]
         counts = purge.delete_events(session, event_ids)
         for key in ("alerts", "risk_results", "events", "blobs"):
             deleted[key] += counts[key]
-
-        # Defensive: also expire alert rows of this severity whose chain is
-        # already gone (e.g. rows from before cascade deletion existed).
-        sev_levels = [sev_group]
-        deleted["alerts"] += (
-            session.query(Alert)
-            .filter(Alert.severity.in_(sev_levels), Alert.created_at < cutoff)
-            .delete(synchronize_session=False)
-        )
 
     # 2) Events that never got a risk result (ingest interrupted mid-pipeline).
     cutoff = _cutoff(max(r["low"], 1))

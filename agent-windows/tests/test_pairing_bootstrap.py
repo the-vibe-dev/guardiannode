@@ -373,3 +373,46 @@ async def test_refresh_pairing_credentials_skips_already_paired(monkeypatch):
 
     assert changed is False
     assert client.token == "already-token"
+
+
+def test_broker_repair_can_replace_existing_device_token(tmp_path, monkeypatch):
+    device = tmp_path / "device.json"
+    pending = tmp_path / "pending_pairing.json"
+    pairing_client.save_credentials("dev-old", "old-token", "http://127.0.0.1:8787", device)
+    pending.write_text(json.dumps({
+        "backend_url": "http://127.0.0.1:8787",
+        "local_bootstrap": True,
+        "device_bootstrap_token": "synthetic-repair-token",
+    }))
+    monkeypatch.setattr(
+        pairing_client, "bootstrap_local_with_server",
+        lambda *_args, **_kwargs: ("dev-new", "new-token"),
+    )
+
+    result = pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.3", pending_path=pending,
+        device_path=device, replace_existing=True, attempts=1,
+    )
+
+    assert result["device_token"] == "new-token"
+    assert pairing_client.load_credentials(device)["device_token"] == "new-token"
+    assert not pending.exists()
+
+
+def test_failed_broker_repair_keeps_existing_credentials(tmp_path, monkeypatch):
+    device = tmp_path / "device.json"
+    pending = tmp_path / "pending_pairing.json"
+    pairing_client.save_credentials("dev-old", "old-token", "http://127.0.0.1:8787", device)
+    pending.write_text(json.dumps({
+        "backend_url": "http://127.0.0.1:8787",
+        "local_bootstrap": True,
+        "device_bootstrap_token": "synthetic-repair-token",
+    }))
+    monkeypatch.setattr(pairing_client, "bootstrap_local_with_server", lambda *_args, **_kwargs: (_ for _ in ()).throw(ConnectionError("offline")))
+
+    assert pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.3", pending_path=pending,
+        device_path=device, replace_existing=True, attempts=1,
+    ) is None
+    assert pairing_client.load_credentials(device)["device_token"] == "old-token"
+    assert pending.exists()

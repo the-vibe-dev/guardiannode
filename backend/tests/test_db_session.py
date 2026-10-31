@@ -104,3 +104,22 @@ def test_backup_refuses_to_overwrite_without_flag(tmp_path):
 
     with pytest.raises(Exception, match="already exists"):
         backup_database(destination, source=source)
+
+
+def test_current_schema_backup_restores(tmp_path, monkeypatch):
+    from app import settings as settings_mod
+    from app.db.maintenance import database_schema_revision
+    from app.db.migrations import upgrade_schema
+    from app.db.session import configure_sqlite_engine
+
+    source = tmp_path / "current.sqlite"
+    monkeypatch.setattr(settings_mod.settings, "db_url", f"sqlite:///{source}")
+    engine = configure_sqlite_engine(create_engine(f"sqlite:///{source}"))
+    upgrade_schema(engine)
+    engine.dispose()
+    assert database_schema_revision(source) == "0007_family_beta_workflows"
+    backup = tmp_path / "current-backup.sqlite"
+    backup_database(backup, source=source)
+    restored = tmp_path / "current-restored.sqlite"
+    restore_database(backup, destination=restored)
+    assert database_schema_revision(restored) == "0007_family_beta_workflows"

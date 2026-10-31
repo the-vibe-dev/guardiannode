@@ -281,10 +281,12 @@ the backend directly to the public internet. Mutual TLS is not implemented. See
 ## What It Monitors
 
 GuardianNode reviews visible screen content from the configured Windows session.
-Current installer defaults enable visible desktop screenshot capture so parents
-should assume screenshots may contain sensitive on-screen content. Depending on
-policy/settings, deployments may use full-screen captures or capture only when
-configured apps are active.
+Current installer defaults capture the primary display of the visible desktop,
+including content outside named apps. Parents should assume those screenshots
+may contain sensitive on-screen content. Secondary monitors are not captured
+by this mode; an active window on a secondary monitor can therefore be missed.
+Depending on policy/settings, deployments may capture the primary display or
+capture only when configured apps are active.
 
 GuardianNode can process:
 

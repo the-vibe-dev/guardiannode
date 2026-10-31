@@ -3,8 +3,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
+
 from app import settings as settings_mod
-from app.db.models import Alert, Device, Event, EvidenceBlob, RiskResult
+from app.db.models import (
+    Alert,
+    Device,
+    Event,
+    EvidenceBlob,
+    GuardianReview,
+    GuardianReviewFeedback,
+    GuardianReviewPreview,
+    NotificationJob,
+    RiskResult,
+    User,
+)
 from app.services import purge, retention
 
 
@@ -66,6 +81,120 @@ def test_delete_events_cascades_risk_alert_blob(db_session, tmp_path):
     assert s.query(Alert).filter_by(risk_id=risk_id).first() is None
     assert s.get(EvidenceBlob, blob_id) is None
     assert not blob_path.exists()
+
+
+def test_delete_events_removes_review_feedback_and_notification_jobs(db_session, tmp_path):
+    s = db_session
+    event_id, _, _, _ = _mk_chain(s, tmp_path, suffix="dependent", severity="high", age_days=0)
+    user = User(display_name="Synthetic Parent", password_hash="x", recovery_hash="x")
+    s.add(user)
+    s.flush()
+    s.add(GuardianReviewPreview(
+        preview_id="preview-dependent", alert_id="a-dependent", actor_user_id=user.id,
+        provider="mock", model_requested="mock", schema_version="1", prompt_version="v1",
+        payload_digest="0" * 64, incident_fingerprint="1" * 64,
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    ))
+    s.flush()
+    s.add(GuardianReview(
+        review_id="review-dependent", preview_id="preview-dependent", alert_id="a-dependent",
+        requester_user_id=user.id, provider="mock", dedup_key="2" * 64,
+        schema_version="1", prompt_version="v1", model_requested="mock", status="completed",
+    ))
+    s.flush()
+    s.add(GuardianReviewFeedback(
+        feedback_id="feedback-dependent", review_id="review-dependent", user_id=user.id,
+        labels=["helpful"], schema_version="1", prompt_version="v1",
+        redaction_version="v1", model="mock",
+    ))
+    s.add(NotificationJob(alert_id="a-dependent", severity="high", risk_summary="synthetic"))
+    s.commit()
+
+    purge.delete_events(s, [event_id])
+    s.commit()
+    assert s.get(Event, event_id) is None
+    assert s.query(GuardianReviewFeedback).count() == 0
+    assert s.query(NotificationJob).count() == 0
+    assert s.connection().exec_driver_sql("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_retry_expired_blob_keeps_unexpired_high_alert(db_session, tmp_path, monkeypatch):
+    s = db_session
+    event_id, _, blob_id, path = _mk_chain(
+        s, tmp_path, suffix="blob-retry", severity="high", age_days=40,
+    )
+    original_unlink = type(path).unlink
+
+    def locked(candidate, *args, **kwargs):
+        if candidate == path:
+            raise PermissionError("synthetic lock")
+        return original_unlink(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(type(path), "unlink", locked)
+    retention.run_cleanup(s)
+    assert s.get(EvidenceBlob, blob_id).deletion_state == "delete_failed"
+    monkeypatch.setattr(type(path), "unlink", original_unlink)
+    purge.retry_pending_deletions(s)
+    s.commit()
+    assert s.get(Event, event_id) is not None
+    assert s.get(Event, event_id).screenshot_blob_id is None
+    assert s.get(Alert, "a-blob-retry") is not None
+    assert s.get(EvidenceBlob, blob_id) is None
+
+
+def test_failed_full_retention_keeps_alert_until_retry(db_session, tmp_path, monkeypatch):
+    s = db_session
+    event_id, _, _, path = _mk_chain(
+        s, tmp_path, suffix="full-retry", severity="high", age_days=100,
+    )
+    original_unlink = type(path).unlink
+
+    def locked(candidate, *args, **kwargs):
+        if candidate == path:
+            raise PermissionError("synthetic lock")
+        return original_unlink(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(type(path), "unlink", locked)
+    retention.run_cleanup(s)
+    assert s.get(Event, event_id).deletion_state == "pending_delete"
+    assert s.get(Alert, "a-full-retry") is not None
+
+
+def test_tombstoned_alert_and_risk_are_hidden_from_read_apis(db_session, tmp_path):
+    from app.api.alerts import get_alert, list_alerts
+    from app.api.risks import list_risks
+
+    s = db_session
+    event_id, _, _, _ = _mk_chain(
+        s, tmp_path, suffix="hidden", severity="high", age_days=0,
+    )
+    user = User(display_name="Synthetic Parent", password_hash="x", recovery_hash="x")
+    s.add(user)
+    event = s.get(Event, event_id)
+    event.deletion_state = "pending_delete"
+    s.commit()
+
+    assert list_alerts(db=s, _=user, limit=50).items == []
+    assert list_risks(db=s, _=user, limit=100) == []
+    with pytest.raises(HTTPException) as exc:
+        get_alert("a-hidden", db=s, user=user)
+    assert exc.value.status_code == 404
+
+
+def test_database_failure_prevents_unlink(db_session, tmp_path):
+    s = db_session
+    event_id, _, _, path = _mk_chain(
+        s, tmp_path, suffix="sql-failure", severity="high", age_days=0,
+    )
+    s.add(Event(
+        event_id="invalid-extra", device_id="missing-device", source_type="image",
+        timestamp=datetime.now(UTC),
+    ))
+    with pytest.raises(IntegrityError):
+        purge.delete_events(s, [event_id])
+    s.rollback()
+    assert path.exists()
+    assert s.get(Event, event_id).deletion_state == "active"
 
 
 def test_wipe_old_events_leaves_no_orphans(db_session, tmp_path):

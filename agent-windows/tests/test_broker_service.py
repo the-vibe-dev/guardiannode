@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from src.broker_protocol import image_to_b64, make_request
+import httpx
+
+from src.broker_protocol import BrokerRequest, image_to_b64, make_request
 from src.broker_service import BrokerCommandHandler, CaptureProcessManager, WindowsNamedPipeServer
 from src.pairing_client import save_credentials
 
@@ -70,6 +73,67 @@ def test_broker_returns_only_bounded_capture_config(tmp_path) -> None:
     assert "must-not-cross-the-pipe" not in json.dumps(response)
 
 
+def test_parent_pause_reaches_capture_and_blocks_submit(tmp_path) -> None:
+    handler = _handler(tmp_path)
+    handler.set_capture_config({
+        "level": "balanced", "cadence_seconds": 5, "paused": True,
+        "paused_until": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+        "capture_allowed": False,
+        "policy_generation": "generation-2", "device_token": "must-not-cross-the-pipe",
+    })
+    config = handler.handle_message(make_request("capture_config"))["payload"]
+    assert config["paused"] is True
+    assert config["capture_allowed"] is False
+    assert config["policy_generation"] == "generation-2"
+    assert handler.applied_policy_generation() == "generation-2"
+    assert "device_token" not in config
+    assert handler.handle_message(make_request("status"))["payload"]["paused"] is True
+    restarted = _handler(tmp_path)
+    assert restarted.handle_message(make_request("status"))["payload"]["paused"] is True
+    assert restarted.applied_policy_generation() == "generation-2"
+    restarted.set_capture_config({"paused": False, "capture_allowed": True})
+    assert restarted.handle_message(make_request("status"))["payload"]["paused"] is False
+
+
+def test_failed_capture_policy_persistence_cannot_ack_generation(tmp_path, monkeypatch) -> None:
+    from src import broker_service
+
+    handler = _handler(tmp_path)
+    monkeypatch.setattr(broker_service.os, "replace", lambda *_args: (_ for _ in ()).throw(OSError("locked")))
+    handler.set_capture_config({"capture_allowed": False, "policy_generation": "generation-3"})
+    assert handler.applied_policy_generation() is None
+    assert handler.handle_message(make_request("capture_config"))["payload"]["capture_allowed"] is False
+
+
+def test_broker_child_request_uses_owned_token_but_returns_only_dto(tmp_path, monkeypatch) -> None:
+    from src import broker_service
+
+    handler = _handler(tmp_path)
+    save_credentials("dev-1", "private-device-token", "http://127.0.0.1:8787", handler.credential_path)
+    requests = []
+
+    def backend(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["authorization"] == "Bearer private-device-token"
+        return httpx.Response(200, json={
+            "request_id": "request-1", "status": "open", "request_type": "more_time",
+            "device_id": "dev-1", "device_token": "must-not-return",
+        })
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        broker_service.httpx, "Client",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(backend), **kwargs),
+    )
+    result = handler.handle_request(BrokerRequest(
+        action="child_request_create", request_id="ipc-1",
+        payload={"request_type": "more_time", "reason": "Synthetic test"},
+    ))
+    assert result["status"] == "open"
+    assert "device_token" not in json.dumps(result)
+    assert requests[0].url.path == "/api/child-requests"
+
+
 def test_broker_migrates_legacy_credentials_to_secure_path(tmp_path) -> None:
     handler = _handler(tmp_path)
     save_credentials("dev-1", "secret-token", "http://127.0.0.1:8787", handler.legacy_credential_path)
@@ -88,6 +152,7 @@ def test_broker_queues_screenshot_without_profile_authority(tmp_path) -> None:
             {
                 "image_b64": image_to_b64(b"jpeg bytes"),
                 "app_name": "Browser",
+                "policy_generation": "generation-1",
                 "profile_id": "should-not-be-accepted",
                 "age_group": "5_7",
             },
@@ -97,6 +162,7 @@ def test_broker_queues_screenshot_without_profile_authority(tmp_path) -> None:
     assert response["ok"]
     assert handler.queue.qsize() == 1
     assert handler.queue.items[0]["image_bytes"] == b"jpeg bytes"  # type: ignore[attr-defined]
+    assert handler.queue.items[0]["policy_generation"] == "generation-1"  # type: ignore[attr-defined]
     assert "profile_id" not in handler.queue.items[0]  # type: ignore[attr-defined]
     assert "age_group" not in handler.queue.items[0]  # type: ignore[attr-defined]
 

@@ -41,6 +41,7 @@ class AgentConfig:
     age_group: str = "10_13"
     policy_id: str = "default"
     policy_version: str = "0.1.0-alpha.3"
+    policy_generation: str | None = None
     ocr_engine: str = "tesseract"  # tesseract | paddle | none
     # Capture cadence. The phash is now computed on the foreground-window
     # region, so it correctly detects small text edits (e.g. lines added in
@@ -77,6 +78,9 @@ class AgentConfig:
     durable_queue_max_bytes: int = 256 * 1024 * 1024
     durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
     broker_enabled: bool = True
+    # Parent-confirmed process/domain enforcement needs Windows crash/undo
+    # qualification before it may be enabled for a family installation.
+    enforcement_enabled: bool = False
 
     def __post_init__(self) -> None:
         # PyYAML treats unquoted values like 10_13 as numeric 1013. Normalize

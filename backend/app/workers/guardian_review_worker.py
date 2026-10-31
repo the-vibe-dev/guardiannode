@@ -20,14 +20,16 @@ async def run_once() -> bool:
 
 
 async def loop() -> None:
-    db = get_sessionmaker()()
-    try:
-        recovered = guardian_review.recover_stale_jobs(db)
-        if recovered:
-            log.warning("requeued %d stale Guardian Review job(s)", recovered)
-    finally:
-        db.close()
     while True:
+        # A job started shortly before a restart may not yet be stale during
+        # startup. Recheck on every pass so it cannot remain running forever.
+        db = get_sessionmaker()()
+        try:
+            recovered = guardian_review.recover_stale_jobs(db)
+            if recovered:
+                log.warning("recovered %d stale Guardian Review job(s)", recovered)
+        finally:
+            db.close()
         try:
             processed = await run_once()
         except Exception as exc:  # pragma: no cover - supervisor handles repeated failures

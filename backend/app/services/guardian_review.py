@@ -34,7 +34,7 @@ from app.guardian_review_models import (
     ReviewStatus,
     ReviewSummary,
 )
-from app.services import encryption
+from app.services import consent, encryption
 from app.services import guardian_review_codex_auth as codex_auth
 from app.services.audit import log_action
 from app.services.guardian_review_minimization import InvalidIncidentError, build_minimized_incident
@@ -136,6 +136,20 @@ def _ensure_provider_ready(provider: str) -> None:
         raise WorkflowError(str(readiness["blocking_reason"]), status_code=503)
 
 
+def _ensure_review_policy(db: Session, provider: str, generation: str | None = None) -> None:
+    """Check the latest parent decision before each outbound review boundary."""
+    policy = consent.effective_policy(db)
+    if generation is not None and policy.generation != generation:
+        raise WorkflowError("consent_changed", status_code=409)
+    # Mock mode is a local synthetic demonstration, but a recorded withdrawal
+    # still stops its queued work. Live providers require an explicit opt in.
+    current = consent.latest(db)
+    if current is not None and not policy.active:
+        raise WorkflowError("consent_required", status_code=409)
+    if provider != "mock" and not policy.external_ai:
+        raise WorkflowError("external_ai_not_allowed", status_code=409)
+
+
 def _audit_details(
     *,
     alert_id: str,
@@ -173,6 +187,7 @@ def create_preview(
     if provider not in RETENTION_NOTICES:
         raise WorkflowError("configuration_error", status_code=503)
     _ensure_provider_ready(provider)
+    _ensure_review_policy(db, provider)
     schema_version = SCHEMA_VERSION
     prompt_version = _settings().guardian_review_prompt_version or PROMPT_VERSION
     try:
@@ -193,6 +208,7 @@ def create_preview(
     created_at = _now()
     expires_at = created_at + timedelta(seconds=_settings().guardian_review_preview_ttl_seconds)
     encrypted_record = {
+        "policy_generation": consent.effective_policy(db).generation,
         "context": context.model_dump(mode="json"),
         "outbound_payload": incident.payload,
         "redactions": incident.redactions,
@@ -287,6 +303,8 @@ def submit_review(
         raise WorkflowError("not_found", status_code=404)
     if preview.provider != _settings().guardian_review_provider.strip().lower():
         raise WorkflowError("preview_stale", status_code=409)
+    stored = _load_preview_payload(preview)
+    _ensure_review_policy(db, preview.provider, stored.get("policy_generation"))
     _ensure_provider_ready(preview.provider)
     if preview.review_id:
         existing = db.get(GuardianReview, preview.review_id)
@@ -296,7 +314,6 @@ def submit_review(
         raise WorkflowError("preview_expired", status_code=409)
     if not hmac.compare_digest(preview.payload_digest, preview_digest):
         raise WorkflowError("preview_stale", status_code=409)
-    stored = _load_preview_payload(preview)
     try:
         context = GuardianReviewContext.model_validate(stored["context"])
         incident = build_minimized_incident(
@@ -645,10 +662,16 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
     row = db.query(GuardianReview).filter(GuardianReview.status == "queued").order_by(GuardianReview.created_at).first()
     if row is None:
         return False
-    row.status = "running"
-    row.started_at = _now()
-    row.error_code = None
+    claimed = db.query(GuardianReview).filter(
+        GuardianReview.review_id == row.review_id, GuardianReview.status == "queued"
+    ).update({"status": "running", "started_at": _now(), "error_code": None}, synchronize_session=False)
     db.commit()
+    if not claimed:
+        return False
+    db.expire_all()
+    row = db.get(GuardianReview, row.review_id)
+    assert row is not None
+    review_id = row.review_id
     preview = db.get(GuardianReviewPreview, row.preview_id)
     if preview is None:
         _fail(db, row, "preview_stale")
@@ -661,6 +684,11 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
     payload = stored.get("outbound_payload")
     if not isinstance(payload, dict):
         _fail(db, row, "preview_stale")
+        return True
+    try:
+        _ensure_review_policy(db, row.provider, stored.get("policy_generation"))
+    except WorkflowError as exc:
+        _fail(db, row, exc.code)
         return True
     try:
         provider = provider_override or provider_for(_settings(), provider_name=row.provider)
@@ -679,11 +707,29 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
         status="sent",
     )
     for attempt in range(1, max_attempts + 1):
+        db.expire_all()
+        row = db.get(GuardianReview, review_id)
+        if row is None or row.status != "running":
+            return True
+        try:
+            _ensure_review_policy(db, row.provider, stored.get("policy_generation"))
+        except WorkflowError as exc:
+            _fail(db, row, exc.code)
+            return True
         row.attempts = attempt
         log_action(db, actor="system", action="guardian_review.sent", target=row.review_id, details={**audit_base, "attempt": attempt})
         db.commit()
         try:
             result = await provider.assess(payload=payload, prompt=_prompt(row.prompt_version), model=row.model_requested, timeout=float(_settings().guardian_review_timeout_seconds))
+            db.expire_all()
+            row = db.get(GuardianReview, review_id)
+            if row is None or row.status != "running":
+                return True
+            try:
+                _ensure_review_policy(db, row.provider, stored.get("policy_generation"))
+            except WorkflowError as exc:
+                _fail(db, row, exc.code)
+                return True
             row.assessment_enc = encryption.encrypt_bytes(result.assessment.model_dump_json().encode(), aad=_review_aad(row.review_id))
             row.model_returned = result.model_returned
             row.provider_response_id = result.response_id
@@ -710,7 +756,14 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
     return True
 
 
-def _fail(db: Session, row: GuardianReview, code: str) -> None:
+def _fail(db: Session, row: GuardianReview | None, code: str) -> None:
+    if row is None:
+        return
+    db.expire_all()
+    current = db.get(GuardianReview, row.review_id)
+    if current is None or current.status != "running":
+        return
+    row = current
     row.status = "failed"
     row.error_code = code
     row.completed_at = _now()
@@ -744,8 +797,15 @@ def recover_stale_jobs(db: Session, *, older_than_seconds: int = 120) -> int:
     cutoff = _now() - timedelta(seconds=older_than_seconds)
     rows = db.query(GuardianReview).filter(GuardianReview.status == "running", GuardianReview.started_at < cutoff).all()
     for row in rows:
-        row.status = "queued"
-        row.started_at = None
+        if row.attempts:
+            # Once an attempt was recorded the external outcome is unknown.
+            # Retrying automatically could dispatch the same private context twice.
+            row.status = "failed"
+            row.error_code = "outcome_uncertain"
+            row.completed_at = _now()
+        else:
+            row.status = "queued"
+            row.started_at = None
     if rows:
         db.commit()
     return len(rows)

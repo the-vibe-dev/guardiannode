@@ -9,7 +9,17 @@ from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app.api.deps import current_user, get_db_dep, require_recent_auth
-from app.db.models import ChildProfile, ConsentRecord, Device, Event, Setting, User
+from app.db.models import (
+    ChildProfile,
+    ConsentRecord,
+    Device,
+    Event,
+    GuardianReview,
+    NotificationJob,
+    RiskResult,
+    Setting,
+    User,
+)
 from app.services import consent, purge
 from app.services.audit import log_action
 
@@ -113,10 +123,23 @@ def withdraw_consent(
         supersedes_id=previous.consent_id if previous else None,
     )
     db.add(row)
+    db.query(GuardianReview).filter(GuardianReview.status.in_(["queued", "running"])).update(
+        {"status": "cancelled", "error_code": "consent_withdrawn", "completed_at": datetime.now(UTC)},
+        synchronize_session=False,
+    )
+    db.query(NotificationJob).filter(NotificationJob.status.in_(["queued", "retry"])).update(
+        {"status": "dead", "last_error": "consent withdrawn", "next_attempt_at": None},
+        synchronize_session=False,
+    )
     for device in db.query(Device).all():
-        device.paired = False
-        device.token_hash = None
-        device.status = "consent_withdrawn"
+        # Keep the existing token for control polling until the broker confirms
+        # it applied this generation. Other device endpoints reject it.
+        if device.paired and device.token_hash:
+            device.status = "consent_stop_requested"
+        else:
+            device.paired = False
+            device.token_hash = None
+            device.status = "consent_stop_offline"
     deletion = None
     if req.evidence_disposition == "delete":
         deletion = purge.delete_events(db, [item[0] for item in db.query(Event.event_id).all()])
@@ -138,6 +161,15 @@ def onboarding_status(
     _: User = Depends(current_user),
 ):
     active = consent.monitoring_allowed(db)
+    # A heartbeat proves only that the broker contacted the backend. Require
+    # an actual reviewed capture before marking this onboarding check done.
+    capture_reviewed = (
+        db.query(Event.event_id)
+        .join(RiskResult, RiskResult.event_id == Event.event_id)
+        .filter(Event.source_type == "image", Event.deletion_state == "active")
+        .first()
+        is not None
+    )
     steps = [
         {"id": "account", "complete": db.query(User).count() > 0},
         {"id": "timezone", "complete": db.get(Setting, "family_timezone") is not None},
@@ -145,7 +177,7 @@ def onboarding_status(
         {"id": "notice", "complete": active},
         {"id": "privacy_choices", "complete": active},
         {"id": "pairing", "complete": db.query(Device).filter(Device.paired.is_(True)).count() > 0},
-        {"id": "self_test", "complete": db.query(Device).filter(Device.last_seen.isnot(None)).count() > 0},
+        {"id": "self_test", "complete": capture_reviewed},
         {
             "id": "recovery",
             "complete": db.get(Setting, "recovery_acknowledged_at") is not None,

@@ -165,6 +165,9 @@ def _try_pystray() -> Callable[[], None] | None:
             pystray.MenuItem(_status_text, None, enabled=False),
             pystray.MenuItem(_device_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Ask parent for an exception", lambda *_: _show_child_request_dialog()),
+            pystray.MenuItem("View my requests", lambda *_: _show_child_requests()),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Pause monitoring in parent dashboard", _menu_pause),
             pystray.MenuItem("Resume in parent dashboard", _menu_resume),
             pystray.MenuItem("Open dashboard", lambda *_: _open_dashboard()),
@@ -180,6 +183,75 @@ def _open_dashboard() -> None:
     import webbrowser
     url = _backend_url().rstrip("/")
     webbrowser.open(url)
+
+
+def _show_child_request_dialog() -> None:
+    """Let a standard user request an exception through broker-owned transport."""
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+
+    window = tk.Tk()
+    window.title("Ask parent — GuardianNode")
+    window.resizable(False, False)
+    frame = ttk.Frame(window, padding=16)
+    frame.grid(sticky="nsew")
+    ttk.Label(frame, text="What would you like to ask your parent?").grid(row=0, column=0, columnspan=2, sticky="w")
+    request_type = tk.StringVar(value="more_time")
+    type_box = ttk.Combobox(
+        frame, textvariable=request_type, state="readonly",
+        values=("more_time", "site_exception", "app_exception", "other"), width=24,
+    )
+    type_box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 12))
+    ttk.Label(frame, text="Site or app (optional)").grid(row=2, column=0, sticky="w")
+    target = ttk.Entry(frame, width=48)
+    target.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 12))
+    ttk.Label(frame, text="Why are you asking? (optional)").grid(row=4, column=0, sticky="w")
+    reason = tk.Text(frame, width=48, height=4)
+    reason.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 12))
+
+    def submit() -> None:
+        payload = {
+            "request_type": request_type.get(),
+            "target": target.get().strip()[:1024] or None,
+            "reason": reason.get("1.0", "end-1c").strip()[:4096] or None,
+        }
+        try:
+            BrokerClient().request("child_request_create", payload)
+        except Exception as exc:
+            messagebox.showerror("Request not sent", str(exc), parent=window)
+            return
+        messagebox.showinfo("Request sent", "Your parent can review this request in GuardianNode.", parent=window)
+        window.destroy()
+
+    ttk.Button(frame, text="Send request", command=submit).grid(row=6, column=0, sticky="w")
+    ttk.Button(frame, text="Cancel", command=window.destroy).grid(row=6, column=1, sticky="e")
+    type_box.focus_set()
+    window.mainloop()
+
+
+def _show_child_requests() -> None:
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+
+    try:
+        response = BrokerClient().request("child_request_list")
+    except Exception as exc:
+        messagebox.showerror("Requests unavailable", str(exc))
+        return
+    items = response.get("items", []) if isinstance(response, dict) else []
+    window = tk.Tk()
+    window.title("My requests — GuardianNode")
+    frame = ttk.Frame(window, padding=16)
+    frame.grid(sticky="nsew")
+    if not items:
+        ttk.Label(frame, text="You have no requests yet.").grid(sticky="w")
+    for index, item in enumerate(items[:20]):
+        if not isinstance(item, dict):
+            continue
+        label = f"{item.get('request_type', 'request')}: {item.get('target') or 'general'} — {item.get('status', 'unknown')}"
+        ttk.Label(frame, text=label, wraplength=450).grid(row=index, column=0, sticky="w", pady=3)
+    ttk.Button(frame, text="Close", command=window.destroy).grid(row=21, column=0, sticky="e", pady=(12, 0))
+    window.mainloop()
 
 
 def _self_test() -> None:

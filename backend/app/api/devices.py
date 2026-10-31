@@ -12,7 +12,7 @@ from ulid import ULID
 
 from app import settings as settings_mod
 from app.api.deps import current_device, current_user, get_db_dep, require_recent_auth
-from app.db.models import Device, DeviceCommand, PairingCode, User
+from app.db.models import ConsentRecord, Device, DeviceCommand, PairingCode, User
 from app.db.session import begin_immediate_if_sqlite
 from app.services import consent, device_tokens, rate_limit
 from app.services import pairing as pairing_svc
@@ -335,13 +335,29 @@ def capture_config(
     child's policy. The agent polls this so a parent can tighten or loosen
     monitoring from the dashboard without touching the kid's PC."""
     from app.db.models import ChildProfile
-    from app.services import profile_policy
+    from app.services import consent, profile_policy
     prof = db.get(ChildProfile, device.profile_id) if device.profile_id else None
     policy = (prof.alert_policy or {}) if prof is not None else {}
     age = prof.age_group if prof is not None else "10_13"
     cfg = profile_policy.capture_settings(policy, age)
-    cfg["paused"] = is_device_paused(device)
+    processing = consent.effective_policy(db)
+    cfg["paused"] = is_device_paused(device) or not processing.screenshots
     cfg["paused_until"] = device.paused_until.isoformat() if device.paused_until else None
+    cfg["capture_allowed"] = processing.screenshots
+    cfg["apps_and_urls_allowed"] = processing.apps_and_urls
+    cfg["policy_generation"] = processing.generation
+    if device.status == "consent_stop_requested":
+        # A later re-grant does not silently resume a device that has not yet
+        # acknowledged the withdrawal. It must stop and then re-pair.
+        withdrawn = (
+            db.query(ConsentRecord)
+            .filter(ConsentRecord.status == "withdrawn")
+            .order_by(ConsentRecord.created_at.desc())
+            .first()
+        )
+        cfg["paused"] = True
+        cfg["capture_allowed"] = False
+        cfg["policy_generation"] = withdrawn.consent_id if withdrawn else processing.generation
     db.commit()  # persist any expired-pause cleanup done by is_device_paused
     return cfg
 
@@ -349,6 +365,7 @@ def capture_config(
 class HeartbeatRequest(BaseModel):
     queued_frames: int = Field(default=0, ge=0, le=10000)
     agent_version: str | None = None
+    applied_policy_generation: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/heartbeat")
@@ -361,7 +378,21 @@ def heartbeat(
     from app.services import pipeline_metrics
     paused_until = effective_paused_until(device)  # clears expired pauses
     device.last_seen = datetime.now(UTC)
-    if device.status not in ("paused", "disabled"):
+    if device.status == "consent_stop_requested":
+        latest = (
+            db.query(ConsentRecord)
+            .filter(ConsentRecord.status == "withdrawn")
+            .order_by(ConsentRecord.created_at.desc())
+            .first()
+        )
+        if (
+            latest is not None
+            and req.applied_policy_generation == latest.consent_id
+        ):
+            device.paired = False
+            device.token_hash = None
+            device.status = "consent_stop_applied"
+    elif device.status not in ("paused", "disabled"):
         device.status = "online"
     if req.agent_version:
         device.agent_version = req.agent_version

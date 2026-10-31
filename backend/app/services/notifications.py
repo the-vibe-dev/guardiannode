@@ -24,7 +24,7 @@ from urllib.parse import ParseResult, urlparse, urlunparse
 from sqlalchemy.orm import Session
 
 from app.db.models import Alert, NotificationJob, NotificationLog, Setting
-from app.services import encryption
+from app.services import consent, encryption
 
 log = logging.getLogger(__name__)
 
@@ -317,7 +317,7 @@ def dispatch(
         logs.append(nl)
 
     # 2) Email if SMTP configured and severity warrants immediate
-    cfg = _get_smtp_config(session)
+    cfg = _get_smtp_config(session) if consent.effective_policy(session).notifications else None
     if cfg and is_immediate:
         subject = f"[GuardianNode] {alert.severity.upper()} alert"
         body = (
@@ -384,7 +384,7 @@ def enqueue(
             detail=None,
         )
     )
-    if not is_immediate:
+    if not is_immediate or not consent.effective_policy(session).notifications:
         return None
     job = NotificationJob(
         alert_id=alert.alert_id,
@@ -422,6 +422,13 @@ def process_pending(session: Session, *, limit: int = 10, now: datetime | None =
     )
     processed = 0
     for job in candidates:
+        if not consent.effective_policy(session).notifications:
+            job.status = "dead"
+            job.last_error = "notifications disallowed by current consent"
+            job.next_attempt_at = None
+            job.updated_at = now
+            processed += 1
+            continue
         due = _as_aware_utc(job.next_attempt_at)
         if due is not None and due > now:
             continue

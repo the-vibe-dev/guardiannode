@@ -22,6 +22,7 @@ from app.archive.format import (
     _safe_member_target,
     _safe_members,
     create_archive,
+    extract_archive,
     inspect_archive,
     restore_archive,
     verify_archive,
@@ -109,6 +110,24 @@ def test_passphrase_archive_round_trip_and_restore(archive_instance, tmp_path: P
     assert row[0] == b"n" * 12 + b"ciphertext" + b"t" * 16
     assert evidence_path == "aa/blob.enc"
     assert (target / "keys" / "master.key").stat().st_size == 32
+
+
+def test_pending_deletion_excluded_from_both_archive_views(archive_instance, tmp_path: Path):
+    data_dir, database = archive_instance
+    with sqlite3.connect(database) as conn:
+        conn.execute("UPDATE events SET deletion_state='pending_delete' WHERE event_id='event-1'")
+    archive = tmp_path / "pending.gna"
+    create_archive(
+        archive, data_dir=data_dir, db_url=f"sqlite:///{database}",
+        passphrase="synthetic-test-passphrase",
+    )
+    extracted = tmp_path / "extracted"
+    extract_archive(archive, extracted, passphrase="synthetic-test-passphrase")
+    assert not (extracted / "records" / "events.jsonl").read_text().strip()
+    with sqlite3.connect(extracted / "database.sqlite3") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM events WHERE event_id='event-1'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM evidence_blobs WHERE blob_id='blob'").fetchone()[0] == 0
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_recipient_archive_and_wrong_key_fail(archive_instance, tmp_path: Path):

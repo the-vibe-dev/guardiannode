@@ -9,8 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.db.models import Alert, DigestRun, RiskResult, Setting
-from app.services import notifications
+from app.db.models import Alert, DigestRun, Event, RiskResult, Setting
+from app.services import consent, notifications
 
 
 def family_timezone(session: Session) -> str:
@@ -43,6 +43,9 @@ def build_summary(session: Session, *, local_day: date, timezone: str) -> dict:
     start, end = _day_bounds(local_day, timezone)
     alerts = (
         session.query(Alert)
+        .join(RiskResult, Alert.risk_id == RiskResult.risk_id)
+        .join(Event, RiskResult.event_id == Event.event_id)
+        .filter(Event.deletion_state == "active")
         .filter(Alert.created_at >= start, Alert.created_at < end)
         .order_by(Alert.created_at.desc())
         .all()
@@ -97,6 +100,8 @@ def _body(summary: dict) -> str:
 
 
 def run_due(session: Session, *, now: datetime | None = None) -> DigestRun | None:
+    if not consent.effective_policy(session).notifications:
+        return None
     config = _notification_config(session)
     if not config.get("enabled") or not config.get("daily_digest_enabled", True):
         return None

@@ -394,7 +394,10 @@ def requeue_pending(q: Any | None = None) -> int:
 
 
 async def _classify_token(token: str) -> None:
+    from app.db.models import Device
     from app.db.session import get_sessionmaker
+    from app.services import consent
+    from app.services.device_state import is_device_paused
 
     meta = _load_meta(token)
     if meta is None:
@@ -417,6 +420,17 @@ async def _classify_token(token: str) -> None:
 
     session = get_sessionmaker()()
     try:
+        policy = consent.effective_policy(session)
+        device = session.get(Device, meta["device_id"])
+        if (
+            not policy.screenshots
+            or policy.generation != meta.get("policy_generation")
+            or device is None
+            or not device.paired
+            or is_device_paused(device)
+        ):
+            _discard(token)
+            return
         await screenshot_ingest.ingest_screenshot(
             session,
             image_bytes=image_bytes,

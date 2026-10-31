@@ -247,7 +247,19 @@ def test_alert_detail_includes_feed_context(monkeypatch, tmp_path):
 
 def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    from app import settings as settings_mod
     from app.db.session import get_sessionmaker
+
+    notice_version = client.get("/api/consent").json()["notice_version"]
+    consent_response = client.post(
+        "/api/consent",
+        json={"notice_version": notice_version, "choices": {
+            "screenshots": True, "apps_and_urls": True, "retention": True,
+            "notifications": True, "external_ai": False,
+            "child_notice_acknowledged": True,
+        }},
+    )
+    assert consent_response.status_code == 200
 
     db = get_sessionmaker()()
     try:
@@ -274,6 +286,14 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
         "/api/alerts/action-alert/action", json={"action": "pause_app"}
     )
     assert unsupported.status_code == 409
+
+    gated = client.post(
+        "/api/alerts/action-alert/actions",
+        json={"action": "pause_app", "target": r"C:\Games\Chat.exe", "duration_seconds": 900},
+    )
+    assert gated.status_code == 409
+    assert "not enabled" in gated.json()["detail"]
+    settings_mod.settings.device_enforcement_enabled = True
 
     preview = client.post(
         "/api/alerts/action-alert/actions",

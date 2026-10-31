@@ -88,9 +88,9 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             app_name = active.name if active else None
             win_title = win.title if win else None
             active_rect = win.rect if win else None
-            # Full-screen mode means the visible desktop is the monitoring
-            # boundary. Every foreground app is therefore monitored; the app
-            # list only gates captures when full-screen mode is disabled.
+            # Full-screen mode captures the primary display. Every foreground
+            # app is eligible when it is on that display; other displays are
+            # outside this capture boundary until multi-monitor support lands.
             in_monitored = cfg.full_screen_capture_enabled or is_monitored(
                 active, cfg.monitored_apps
             )
@@ -100,7 +100,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
 
-            capture_scope = "visible_desktop" if cfg.full_screen_capture_enabled else "monitored_app"
+            capture_scope = "primary_monitor" if cfg.full_screen_capture_enabled else "monitored_app"
             shot = (
                 capture_full(active_rect=active_rect)
                 if cfg.full_screen_capture_enabled
@@ -140,6 +140,9 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 )
 
             if send:
+                if _is_locally_paused():
+                    await asyncio.sleep(cfg.ocr_cadence_seconds)
+                    continue
                 last_phash = shot.phash
                 last_full_phash = shot.full_phash
                 last_sent_at = time.time()
@@ -153,6 +156,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                     "capture_scope": capture_scope,
                     "policy_id": cfg.policy_id,
                     "policy_version": cfg.policy_version,
+                    "policy_generation": cfg.policy_generation,
                     "collector_version": __version__,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "phash_dist": dist,
@@ -219,6 +223,7 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                     capture_scope=payload.get("capture_scope", "monitored_app"),
                     policy_id=payload.get("policy_id"),
                     policy_version=payload.get("policy_version"),
+                    policy_generation=payload.get("policy_generation"),
                     collector_version=payload.get("collector_version"),
                     timestamp=payload.get("timestamp"),
                     idempotency_key=payload.get("idempotency_key"),
@@ -237,8 +242,8 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status in (401, 403):
-                    log.error("screenshot upload unauthorized (%s); re-pair this device", status)
-                    backoff = 60.0
+                    log.error("screenshot upload unauthorized (%s); refreshing broker credentials", status)
+                    backoff = 10.0
                     _retry_payload(
                         screenshot_queue,
                         payload,
@@ -246,8 +251,9 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                         error=f"unauthorized: {status}",
                     )
                     handled = True
-                    await asyncio.sleep(backoff)
-                    continue
+                    # Return to the broker supervisor so a repaired pairing or
+                    # rotated trust bundle creates a fresh BackendClient.
+                    return
                 if status == 413:
                     log.error("screenshot rejected as too large; discarding frame")
                     backoff = 1.0
@@ -381,6 +387,9 @@ async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue)
 
 
 def _apply_capture_config(cfg: AgentConfig, cc: dict) -> None:
+    generation = cc.get("policy_generation")
+    if isinstance(generation, str) and len(generation) <= 64:
+        cfg.policy_generation = generation
     if isinstance(cc.get("cadence_seconds"), (int, float)):
         cfg.ocr_cadence_seconds = max(2, int(cc["cadence_seconds"]))
     if isinstance(cc.get("phash_threshold"), (int, float)):
