@@ -48,6 +48,13 @@ integration remain unqualified. No new installer has been published or deployed.
   tests passed. Backend and agent Ruff checks and dashboard typecheck/build
   passed. Backend locked environment: Python 3.12.13, SQLAlchemy 2.0.51,
   cryptography 50.0.1, pytest 9.1.1, FastAPI 0.139.0.
+- After CI identified new advisories, both Python locks were updated to Pillow
+  13.0.0 and certifi 2026.10.23. Frozen backend/agent tests, backend mypy,
+  and strict pip-audit then passed. Dashboard lock updates cleared high-severity
+  npm audit findings; `npm audit --audit-level=high`, typecheck, 21 unit tests,
+  10 Playwright tests, and production build passed. A moderate advisory in
+  `minimatch`, through the development-only OpenAPI generator, remains; npm's
+  proposed force fix would downgrade the generator across a major version.
 - The supplied twelve regressions passed with `GN_REVIEW_SOURCE` set to this
   checkout and `uv run --frozen --extra dev --with psutil==7.2.2 --with
   mss==10.2.0 python -m pytest -q /tmp/gn-independent-repros.wMDPDB/repros`.
