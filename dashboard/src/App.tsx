@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { api } from "./api";
 import Layout from "./components/Layout";
+import StepUpDialog from "./components/StepUpDialog";
 import Login from "./pages/Login";
 import Setup from "./pages/Setup";
 
@@ -81,6 +82,7 @@ export default function App() {
 
   return (
     <Layout user={me!} onLogout={onLogout}>
+      <StepUpDialog />
       <Suspense fallback={<div className="page-status" role="status">Loading page…</div>}>
         <Routes>
           <Route path="/" element={<Dashboard />} />

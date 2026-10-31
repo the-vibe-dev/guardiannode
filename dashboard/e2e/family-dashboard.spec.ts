@@ -213,3 +213,39 @@ test("secure pairing instructions expose the exact trust handoff", async ({ page
   await expect(page.getByText("cedar · harbor · maple · river")).toBeVisible();
   await expect(page.getByRole("link", { name: "Download .gnpair bundle" })).toHaveAttribute("download", "");
 });
+
+test("protected pause uses masked step-up and resumes only after confirmation", async ({ page }, testInfo) => {
+  const errors = collectBrowserErrors(page);
+  let pauseCalls = 0;
+  let confirmed = false;
+  await page.route("**/api/devices/device-1/pause", async (route) => {
+    pauseCalls += 1;
+    if (!confirmed) return fulfill(route, { detail: { code: "step_up_required", level: "standard" } }, 403);
+    return fulfill(route, { ok: true });
+  });
+  await page.route("**/api/auth/reauth", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.password !== "synthetic-browser-password") return fulfill(route, { detail: "Invalid password" }, 401);
+    confirmed = true;
+    return fulfill(route, { ok: true });
+  });
+
+  await page.goto("/devices");
+  await expect(page).toHaveTitle(/GuardianNode/);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Confirm your password" })).toBeVisible();
+  await expect(dialog.getByLabel("Parent password")).toHaveAttribute("type", "password");
+  await mkdir("/tmp/guardiannode-qa", { recursive: true });
+  await page.screenshot({ path: `/tmp/guardiannode-qa/${testInfo.project.name}-step-up.png`, fullPage: false });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(pauseCalls).toBe(1);
+
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await dialog.getByLabel("Parent password").fill("synthetic-browser-password");
+  await dialog.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("Monitoring pause recorded.")).toBeVisible();
+  expect(pauseCalls).toBe(3);
+  expect(errors.filter((message) => !message.includes("status of 403 (Forbidden)"))).toEqual([]);
+});

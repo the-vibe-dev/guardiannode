@@ -1,5 +1,6 @@
 // Typed API client. Uses cookie auth (no token to manage in localStorage).
 import type { components } from "./api-schema";
+import { requestStepUp } from "./stepUp";
 
 export type Alert = components["schemas"]["AlertDTO"];
 export type AlertPage = components["schemas"]["AlertPage"];
@@ -66,16 +67,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (res.status === 403 && mutating) {
     const challenge = await res.clone().json().catch(() => null);
     if (challenge?.detail?.code === "step_up_required") {
-      const password = window.prompt(
-        challenge.detail.level === "critical"
-          ? "Confirm your password for this critical security action."
-          : "Confirm your password to continue.",
-      );
-      if (password === null) throw new Error("Recent authentication required");
-      await request<{ ok: boolean }>("/auth/reauth", {
-        method: "POST",
-        body: JSON.stringify({ password }),
-      });
+      await requestStepUp(challenge.detail.level);
     } else {
       cachedCsrfToken = null;
       headers.set("X-CSRF-Token", await getCsrfToken());
