@@ -197,7 +197,7 @@ function StatusRow({ label, value, ok }: { label: string; value: string; ok: boo
   return <div className="flex items-center justify-between gap-4"><dt className="text-slate-600">{label}</dt><dd className="flex items-center gap-1.5 font-semibold text-[#18313a]"><span className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-600" : "bg-amber-500"}`} />{value}</dd></div>;
 }
 
-const stepLabels: Record<string, string> = { timezone: "Set your family timezone", child: "Add a child", notice: "Review the monitoring notice", privacy_choices: "Choose privacy settings", pairing: "Pair a child device", self_test: "Run the first device check", recovery: "Store your recovery kit" };
+const stepLabels: Record<string, string> = { timezone: "Set your family timezone", child: "Add a child", notice: "Review the monitoring notice", privacy_choices: "Choose privacy settings", pairing: "Pair a child device", self_test: "Wait for the first capture to be reviewed", recovery: "Store your recovery kit" };
 
 function OnboardingCard({ currentStep, steps }: { currentStep: string | null; steps: Array<{ id: string; complete: boolean }> }) {
   const done = steps.filter((step) => step.complete).length;

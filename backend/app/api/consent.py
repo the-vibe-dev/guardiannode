@@ -16,6 +16,7 @@ from app.db.models import (
     Event,
     GuardianReview,
     NotificationJob,
+    RiskResult,
     Setting,
     User,
 )
@@ -160,6 +161,15 @@ def onboarding_status(
     _: User = Depends(current_user),
 ):
     active = consent.monitoring_allowed(db)
+    # A heartbeat proves only that the broker contacted the backend. Require
+    # an actual reviewed capture before marking this onboarding check done.
+    capture_reviewed = (
+        db.query(Event.event_id)
+        .join(RiskResult, RiskResult.event_id == Event.event_id)
+        .filter(Event.source_type == "image", Event.deletion_state == "active")
+        .first()
+        is not None
+    )
     steps = [
         {"id": "account", "complete": db.query(User).count() > 0},
         {"id": "timezone", "complete": db.get(Setting, "family_timezone") is not None},
@@ -167,7 +177,7 @@ def onboarding_status(
         {"id": "notice", "complete": active},
         {"id": "privacy_choices", "complete": active},
         {"id": "pairing", "complete": db.query(Device).filter(Device.paired.is_(True)).count() > 0},
-        {"id": "self_test", "complete": db.query(Device).filter(Device.last_seen.isnot(None)).count() > 0},
+        {"id": "self_test", "complete": capture_reviewed},
         {
             "id": "recovery",
             "complete": db.get(Setting, "recovery_acknowledged_at") is not None,

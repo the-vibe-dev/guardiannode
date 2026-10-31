@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException, Request
 
 from app import settings as settings_mod
-from app.api.consent import ConsentWithdrawalRequest, withdraw_consent
+from app.api.consent import ConsentWithdrawalRequest, onboarding_status, withdraw_consent
 from app.api.deps import current_device
 from app.api.devices import HeartbeatRequest, capture_config, heartbeat
 from app.db.models import Alert, ConsentRecord, Device, Event, RiskResult, User
@@ -198,3 +198,60 @@ def test_withdrawal_marks_unpaired_device_offline(db_session):
     )
     assert result["active"] is False
     assert db_session.get(Device, "synthetic-device").status == "consent_stop_offline"
+
+
+def test_onboarding_heartbeat_alone_does_not_complete_capture_check(db_session):
+    user = User(display_name="Synthetic Parent", password_hash="synthetic", recovery_hash="synthetic")
+    db_session.add(user)
+    db_session.add(Device(
+        device_id="synthetic-device", hostname="synthetic", paired=True,
+        last_seen=datetime.now(UTC),
+    ))
+    db_session.commit()
+    status = onboarding_status(db_session, user)
+    check = next(step for step in status["steps"] if step["id"] == "self_test")
+    assert check["complete"] is False
+
+
+def test_fast_restart_recovers_recent_running_review_in_worker_loop(db_session, monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db.models import GuardianReview, GuardianReviewPreview
+    from app.workers import guardian_review_worker
+
+    user = _incident(db_session)
+    now = [datetime.now(UTC)]
+    db_session.add(GuardianReviewPreview(
+        preview_id="restart-preview", alert_id="synthetic-alert", actor_user_id=user.id,
+        provider="mock", model_requested="mock", schema_version="1.1.0",
+        prompt_version="guardian-review-v2", payload_digest="0" * 64,
+        incident_fingerprint="1" * 64, expires_at=now[0] + timedelta(minutes=10),
+    ))
+    db_session.flush()
+    db_session.add(GuardianReview(
+        review_id="restart-review", preview_id="restart-preview", alert_id="synthetic-alert",
+        requester_user_id=user.id, provider="mock", dedup_key="3" * 64,
+        schema_version="1.1.0", prompt_version="guardian-review-v2",
+        model_requested="mock", status="running", attempts=0,
+        started_at=now[0] - timedelta(seconds=10),
+    ))
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.bind, autoflush=False)
+    monkeypatch.setattr(guardian_review_worker, "get_sessionmaker", lambda: factory)
+    monkeypatch.setattr(guardian_review, "_now", lambda: now[0])
+    sleeps = []
+
+    class EndProbe(Exception):
+        pass
+
+    async def advance_clock(_seconds):
+        now[0] += timedelta(seconds=180)
+        sleeps.append(1)
+        if len(sleeps) >= 2:
+            raise EndProbe()
+
+    monkeypatch.setattr(guardian_review_worker.asyncio, "sleep", advance_clock)
+    with pytest.raises(EndProbe):
+        asyncio.run(guardian_review_worker.loop())
+    db_session.expire_all()
+    assert db_session.get(GuardianReview, "restart-review").status != "running"

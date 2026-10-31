@@ -10,13 +10,18 @@ from uuid import uuid4
 
 PROTOCOL_VERSION = 1
 PIPE_NAME = r"\\.\pipe\GuardianNodeEndpointService"
-PIPE_SECURITY_SDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+# Interactive users may exchange data, but may not create a competing pipe
+# instance (FILE_CREATE_PIPE_INSTANCE is bit 0x4, included in GENERIC_WRITE).
+# 0x00120003 adds READ_CONTROL so clients can verify the pipe owner is SYSTEM.
+PIPE_SECURITY_SDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00120003;;;IU)"
 MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 MAX_SCREENSHOT_BYTES = 1024 * 1024
 MAX_STRING_BYTES = 4096
 MAX_REQUEST_ID_BYTES = 80
 
 ALLOWED_ACTIONS = {
+    "child_request_create",
+    "child_request_list",
     "capture_config",
     "health",
     "status",
@@ -123,6 +128,24 @@ def image_from_b64(value: Any) -> bytes:
 
 
 def _validate_payload(action: str, payload: dict[str, Any]) -> None:
+    if action == "child_request_list":
+        if payload:
+            raise ProtocolError("child_request_list takes no payload")
+        return
+    if action == "child_request_create":
+        if set(payload) - {"request_type", "target", "reason"}:
+            raise ProtocolError("unsupported child request field")
+        if payload.get("request_type") not in {
+            "more_time", "site_exception", "app_exception", "other",
+        }:
+            raise ProtocolError("invalid child request type")
+        for key, limit in (("target", 1024), ("reason", 4096)):
+            value = payload.get(key)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise ProtocolError(f"{key} must be a string")
+                _bound_string(key, value, limit)
+        return
     if action == "submit_screenshot":
         image_from_b64(payload.get("image_b64"))
         for key in (
