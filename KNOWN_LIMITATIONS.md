@@ -9,7 +9,10 @@ GuardianNode is alpha/developer-preview software.
   scaling.
 - Vision models may misclassify images or miss important context.
 - Local models vary by license, hardware requirements, speed, and quality.
-- Screenshot capture may include sensitive on-screen information.
+- Screenshot capture may include sensitive on-screen information. The default
+  full-screen mode currently captures only the primary monitor. It does not
+  provide all-monitor coverage, and downsampling can reduce small-text OCR
+  legibility on high-resolution displays.
 - Guardian Review is a fallible external-model second opinion, not a finding of
   intent, wrongdoing, diagnosis, or legal status.
 - Guardian Review redaction is deterministic defense-in-depth, not a guarantee.

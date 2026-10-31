@@ -315,6 +315,7 @@ class BrokerCommandHandler:
             "capture_scope",
             "policy_id",
             "policy_version",
+            "policy_generation",
             "collector_version",
             "timestamp",
             "idempotency_key",
@@ -622,6 +623,22 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
         if not token:
             await asyncio.sleep(10)
             continue
+        if pending_pairing_path().exists():
+            try:
+                await asyncio.to_thread(
+                    bootstrap_pairing,
+                    socket.gethostname(),
+                    __version__,
+                    pending_path=pending_pairing_path(),
+                    device_path=handler.credential_path,
+                    bootstrap_token_path=broker_bootstrap_token_path(),
+                    attempts=1,
+                    replace_existing=True,
+                )
+            except Exception as exc:
+                log.warning("broker re-pair retry failed: %s", type(exc).__name__)
+            creds = handler.ensure_broker_credentials()
+            token = str(creds.get("device_token") or "")
         client = BackendClient(
             str(creds.get("backend_url") or cfg.backend_url),
             token,
@@ -723,6 +740,7 @@ def cli() -> None:
             pending_path=pending_pairing_path(),
             device_path=handler.credential_path,
             bootstrap_token_path=broker_bootstrap_token_path(),
+            replace_existing=True,
         )
     except Exception as exc:
         log.warning("broker pairing bootstrap failed: %s", exc)

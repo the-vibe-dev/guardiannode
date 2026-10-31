@@ -152,6 +152,7 @@ def test_broker_queues_screenshot_without_profile_authority(tmp_path) -> None:
             {
                 "image_b64": image_to_b64(b"jpeg bytes"),
                 "app_name": "Browser",
+                "policy_generation": "generation-1",
                 "profile_id": "should-not-be-accepted",
                 "age_group": "5_7",
             },
@@ -161,6 +162,7 @@ def test_broker_queues_screenshot_without_profile_authority(tmp_path) -> None:
     assert response["ok"]
     assert handler.queue.qsize() == 1
     assert handler.queue.items[0]["image_bytes"] == b"jpeg bytes"  # type: ignore[attr-defined]
+    assert handler.queue.items[0]["policy_generation"] == "generation-1"  # type: ignore[attr-defined]
     assert "profile_id" not in handler.queue.items[0]  # type: ignore[attr-defined]
     assert "age_group" not in handler.queue.items[0]  # type: ignore[attr-defined]
 

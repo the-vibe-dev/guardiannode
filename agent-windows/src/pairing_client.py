@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import httpx
 from cryptography import x509
@@ -236,6 +237,8 @@ def _enroll_bundle(
     pending: dict,
     backend_url: str,
     device_path: Path | None,
+    *,
+    preserve_existing: bool = False,
 ) -> tuple[Path | None, str]:
     """Validate and persist an authenticated CA supplied out-of-band by the parent."""
     bundle = pending.get("bundle")
@@ -274,6 +277,8 @@ def _enroll_bundle(
     if not expected or not hmac.compare_digest(actual, expected):
         raise ValueError("pairing bundle CA fingerprint mismatch")
     enrolled = default_ca_path(device_path)
+    if preserve_existing and enrolled.exists():
+        enrolled = enrolled.with_name(f"family-ca-{uuid4().hex}.pem")
     _restricted_write(enrolled, pem.encode("ascii"))
     return enrolled, actual
 
@@ -332,6 +337,7 @@ def bootstrap_pairing(
     bootstrap_token_path: Path | None = None,
     attempts: int = 5,
     retry_delay: float = 10.0,
+    replace_existing: bool = False,
 ) -> dict | None:
     """Complete pairing from the installer's pending_pairing.json, if present.
 
@@ -344,7 +350,7 @@ def bootstrap_pairing(
     """
     pending_path = pending_path or pending_pairing_path()
     creds = load_credentials(device_path)
-    if creds and creds.get("device_token"):
+    if creds and creds.get("device_token") and not (replace_existing and pending_path.exists()):
         if pending_path.exists():
             try:
                 pending_path.unlink()
@@ -388,7 +394,10 @@ def bootstrap_pairing(
         return None
 
     try:
-        ca_path, ca_sha256 = _enroll_bundle(pending, backend_url, device_path)
+        ca_path, ca_sha256 = _enroll_bundle(
+            pending, backend_url, device_path,
+            preserve_existing=bool(creds and creds.get("device_token") and replace_existing),
+        )
     except (OSError, ValueError) as exc:
         log.error("pairing trust validation failed: %s", exc)
         return None

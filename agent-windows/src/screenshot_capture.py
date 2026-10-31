@@ -104,8 +104,9 @@ def capture_active(rect: tuple[int, int, int, int] | None) -> Screenshot | None:
 def capture_full(active_rect: tuple[int, int, int, int] | None = None) -> Screenshot | None:
     """Whole-primary-monitor capture.
 
-    Catches content in background apps / wallpapers / picture viewers — anything
-    visually present on the user's desktop, not just the focused window.
+    Catches content in background apps / wallpapers / picture viewers on the
+    primary display, not just the focused window. Other monitors are outside
+    this capture region and must not be described as covered.
 
     If `active_rect` (absolute screen coordinates of the foreground window) is
     given, the dedup phash is computed on that subregion of the captured frame
