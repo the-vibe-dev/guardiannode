@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 from ulid import ULID
 
@@ -167,10 +167,28 @@ def review_child_request(
     row = db.get(ChildRequest, request_id)
     if row is None:
         raise HTTPException(404, "Request not found")
-    row.status = req.status
-    row.response_note = req.response_note
-    row.reviewed_by = str(user.id)
-    row.reviewed_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    # A request can be answered only once while it is still open. The SQL
+    # transition also prevents two concurrent parent sessions overwriting one
+    # another's decision.
+    changed = db.execute(
+        update(ChildRequest)
+        .where(
+            ChildRequest.request_id == request_id,
+            ChildRequest.status == "open",
+            or_(ChildRequest.expires_at.is_(None), ChildRequest.expires_at > now),
+        )
+        .execution_options(synchronize_session=False)
+        .values(
+            status=req.status,
+            response_note=req.response_note,
+            reviewed_by=str(user.id),
+            reviewed_at=now,
+        )
+    ).rowcount
+    if changed != 1:
+        db.rollback()
+        raise HTTPException(409, "Request is closed or expired")
     log_action(
         db,
         actor=str(user.id),
@@ -180,4 +198,5 @@ def review_child_request(
         source_ip=request.client.host if request.client else None,
     )
     db.commit()
+    db.refresh(row)
     return row
