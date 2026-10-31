@@ -59,6 +59,7 @@ class BackendClient:
         capture_scope: str = "monitored_app",
         policy_id: str | None = None,
         policy_version: str | None = None,
+        policy_generation: str | None = None,
         collector_version: str | None = None,
         timestamp: str | None = None,
         idempotency_key: str | None = None,
@@ -77,6 +78,8 @@ class BackendClient:
             data["policy_id"] = policy_id
         if policy_version:
             data["policy_version"] = policy_version
+        if policy_generation:
+            data["policy_generation"] = policy_generation
         if collector_version:
             data["collector_version"] = collector_version
         if timestamp:

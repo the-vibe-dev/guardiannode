@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_device, current_user, get_db_dep
-from app.db.models import Device, Event, ScreenshotUploadReceipt, User
+from app.db.models import ConsentRecord, Device, Event, ScreenshotUploadReceipt, User
 from app.services import consent, encryption, event_ingest, screenshot_async
 from app.services.device_state import is_device_paused
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
@@ -248,6 +248,7 @@ async def ingest_screenshot(
     capture_scope: str = Form(default="monitored_app", max_length=64),
     policy_id: str | None = Form(default=None, max_length=64),
     policy_version: str | None = Form(default=None, max_length=64),
+    policy_generation: str | None = Form(default=None, max_length=64),
     collector_version: str | None = Form(default=None, max_length=64),
     timestamp: str | None = Form(default=None, max_length=64),
     idempotency_key: str | None = Form(default=None, max_length=128),
@@ -270,13 +271,19 @@ async def ingest_screenshot(
     if is_device_paused(device) or not policy.screenshots:
         # Honor pause server-side: drop quietly, don't store.
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
+    if policy_generation is not None and policy_generation != policy.generation:
+        raise HTTPException(409, "Capture policy changed; discard this older frame")
+    if policy_generation is None and db.query(ConsentRecord).filter(
+        ConsentRecord.status == "withdrawn"
+    ).first() is not None:
+        raise HTTPException(409, "Capture policy generation is required after withdrawal")
 
     image_bytes = await _read_upload_with_cap(image)
     if not image_bytes:
         raise HTTPException(400, "Empty image")
     if age_group not in {"under_10", "10_13", "14_17"}:
         raise HTTPException(400, "Invalid age group")
-    if capture_scope not in {"monitored_app", "visible_desktop", "browser_dom"}:
+    if capture_scope not in {"monitored_app", "primary_monitor", "visible_desktop", "browser_dom"}:
         raise HTTPException(400, "Invalid capture scope")
     mime_type = _validate_image_bytes(image_bytes)
     accepted, capacity_detail = screenshot_async.can_accept(device.device_id, len(image_bytes))

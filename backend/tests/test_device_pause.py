@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
-from app.db.models import Device, Event, ScreenshotUploadReceipt
-from app.services import pipeline_metrics, rate_limit
+from app.db.models import ConsentRecord, Device, Event, ScreenshotUploadReceipt, User
+from app.services import consent, pipeline_metrics, rate_limit
 from app.services.device_state import effective_paused_until, is_device_paused
 
 _JPEG_1X1 = base64.b64decode(
@@ -193,6 +193,43 @@ def test_expired_pause_does_not_block_screenshot_ingest(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert r.json()["status"] == "queued"
     assert r.json()["queued"] is True
+
+
+def test_screenshot_upload_rejects_stale_consent_generation(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _device_id, token = _pair(client)
+    from app.db.session import get_sessionmaker
+
+    db = get_sessionmaker()()
+    try:
+        parent = User(display_name="Synthetic Parent", password_hash="synthetic", recovery_hash="synthetic")
+        db.add(parent)
+        db.flush()
+        db.add(ConsentRecord(
+            consent_id="current-generation", user_id=parent.id,
+            notice_version=consent.NOTICE_VERSION, status="granted",
+            choices={"screenshots": True, "retention": True,
+                     "child_notice_acknowledged": True},
+        ))
+        db.commit()
+    finally:
+        db.close()
+    denied = client.post(
+        "/api/events/screenshot",
+        files={"image": ("frame.jpg", _JPEG_1X1, "image/jpeg")},
+        data={"policy_generation": "older-generation"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert denied.status_code == 409
+    assert _pending_count() == 0
+    accepted = client.post(
+        "/api/events/screenshot",
+        files={"image": ("frame.jpg", _JPEG_1X1, "image/jpeg")},
+        data={"policy_generation": "current-generation"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["queued"] is True
 
 
 def test_screenshot_idempotency_key_deduplicates_retries(monkeypatch, tmp_path):

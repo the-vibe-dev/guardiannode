@@ -128,6 +128,7 @@ class BrokerClient:
             "capture_scope",
             "policy_id",
             "policy_version",
+            "policy_generation",
             "collector_version",
             "timestamp",
             "idempotency_key",
