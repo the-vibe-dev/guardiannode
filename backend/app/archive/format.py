@@ -92,6 +92,90 @@ def _encoded_field(table: str, record_id: dict[str, Any], name: str, value: Any)
     return encoded
 
 
+def _sanitize_snapshot(database: Path) -> None:
+    """Apply the same deletion boundary to the restorable DB and JSONL view.
+
+    This operates only on the copied SQLite backup, never on the live database.
+    The archive must not reintroduce a tombstoned event or a pending blob whose
+    file is deliberately excluded from evidence coverage.
+    """
+    with closing(sqlite3.connect(database)) as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        tables = {
+            str(row[0]) for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if not {"events", "evidence_blobs"}.issubset(tables):
+            return
+        conn.execute(
+            "CREATE TEMP TABLE archive_deleted_events AS "
+            "SELECT event_id FROM events WHERE deletion_state != 'active'"
+        )
+        if "risk_results" in tables:
+            conn.execute(
+                "CREATE TEMP TABLE archive_deleted_risks AS "
+                "SELECT risk_id FROM risk_results WHERE event_id IN "
+                "(SELECT event_id FROM archive_deleted_events)"
+            )
+        if "alerts" in tables:
+            conn.execute(
+                "CREATE TEMP TABLE archive_deleted_alerts AS "
+                "SELECT alert_id FROM alerts WHERE risk_id IN "
+                "(SELECT risk_id FROM archive_deleted_risks)"
+            )
+            if "guardian_reviews" in tables:
+                if "guardian_review_feedback" in tables:
+                    conn.execute(
+                        "DELETE FROM guardian_review_feedback WHERE review_id IN "
+                        "(SELECT review_id FROM guardian_reviews WHERE alert_id IN "
+                        "(SELECT alert_id FROM archive_deleted_alerts))"
+                    )
+                conn.execute(
+                    "DELETE FROM guardian_reviews WHERE alert_id IN "
+                    "(SELECT alert_id FROM archive_deleted_alerts)"
+                )
+            if "guardian_review_previews" in tables:
+                conn.execute(
+                    "DELETE FROM guardian_review_previews WHERE alert_id IN "
+                    "(SELECT alert_id FROM archive_deleted_alerts)"
+                )
+            if "notification_jobs" in tables:
+                conn.execute(
+                    "DELETE FROM notification_jobs WHERE alert_id IN "
+                    "(SELECT alert_id FROM archive_deleted_alerts)"
+                )
+            conn.execute(
+                "DELETE FROM alerts WHERE alert_id IN "
+                "(SELECT alert_id FROM archive_deleted_alerts)"
+            )
+        if "risk_results" in tables:
+            conn.execute(
+                "DELETE FROM risk_results WHERE risk_id IN "
+                "(SELECT risk_id FROM archive_deleted_risks)"
+            )
+        conn.execute(
+            "UPDATE events SET screenshot_blob_id=NULL WHERE screenshot_blob_id IN "
+            "(SELECT blob_id FROM evidence_blobs WHERE deletion_state != 'active')"
+        )
+        conn.execute(
+            "UPDATE events SET image_blob_id=NULL WHERE image_blob_id IN "
+            "(SELECT blob_id FROM evidence_blobs WHERE deletion_state != 'active')"
+        )
+        conn.execute(
+            "DELETE FROM evidence_blobs WHERE deletion_state != 'active' OR event_id IN "
+            "(SELECT event_id FROM archive_deleted_events)"
+        )
+        conn.execute(
+            "DELETE FROM events WHERE event_id IN "
+            "(SELECT event_id FROM archive_deleted_events)"
+        )
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise ArchiveError("archive snapshot contains broken references")
+        conn.commit()
+
+
 def _write_logical_records(database: Path, records_dir: Path) -> dict[str, int]:
     counts: dict[str, int] = {}
     records_dir.mkdir(parents=True, exist_ok=True)
@@ -222,6 +306,7 @@ def create_archive(
         # The database backup helper emits an adjacent implementation manifest;
         # GNA has its own complete signed manifest, so do not duplicate it.
         database.with_name(database.name + ".manifest.json").unlink(missing_ok=True)
+        _sanitize_snapshot(database)
         counts = _write_logical_records(database, payload / "records")
         evidence_count, evidence_bytes, evidence_map = _copy_evidence(data_dir, payload, database)
         _write_json(payload / "evidence-map.json", evidence_map)
@@ -624,6 +709,11 @@ def restore_archive(
                 )
                 conn.execute("UPDATE pairing_codes SET used=1")
                 conn.execute("UPDATE notification_jobs SET status='cancelled'")
+                conn.execute(
+                    "UPDATE guardian_reviews SET status='cancelled', "
+                    "error_code='restored_reauthorization_required' "
+                    "WHERE status IN ('queued', 'running')"
+                )
                 for key in ("notification_settings", "complete_backup_config"):
                     row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
                     if row:
