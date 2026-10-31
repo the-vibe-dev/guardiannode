@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.broker_client import BrokerClient
+from src.broker_client import BrokerClient, BrokerUnavailable
 from src.broker_protocol import MAX_MESSAGE_BYTES, ProtocolError, encode_frame, make_response
 
 
@@ -19,6 +19,9 @@ def _response_reader(monkeypatch, chunks: list[bytes]):
         return 0, chunk
 
     monkeypatch.setitem(sys.modules, "win32file", SimpleNamespace(ReadFile=read))
+    monkeypatch.setitem(sys.modules, "win32pipe", SimpleNamespace(
+        PeekNamedPipe=lambda *_args: (b"", max(1, len(chunks[0])) if chunks else 0, 0),
+    ))
     return reads
 
 
@@ -50,4 +53,26 @@ def test_response_reader_rejects_disconnect_mid_frame(monkeypatch):
     frame = encode_frame(make_response("request-1", ok=True))
     _response_reader(monkeypatch, [frame[:4], frame[4:8], b""])
     with pytest.raises(ProtocolError, match="disconnected"):
+        BrokerClient._read_response(object(), "request-1")
+
+
+def test_broker_client_rejects_pipe_not_owned_by_system(monkeypatch):
+    fake_security = SimpleNamespace(
+        SE_KERNEL_OBJECT=1,
+        OWNER_SECURITY_INFORMATION=2,
+        GetSecurityInfo=lambda *_args: ("fake-user", None, None, None, None),
+        ConvertSidToStringSid=lambda owner: owner,
+    )
+    monkeypatch.setitem(sys.modules, "win32security", fake_security)
+    with pytest.raises(BrokerUnavailable, match="not owned by SYSTEM"):
+        BrokerClient._verify_broker_owner(object())
+
+
+def test_response_reader_times_out_when_broker_stays_silent(monkeypatch):
+    from src import broker_client
+
+    _response_reader(monkeypatch, [])
+    ticks = iter([0.0, 6.0])
+    monkeypatch.setattr(broker_client.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(BrokerUnavailable, match="deadline"):
         BrokerClient._read_response(object(), "request-1")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from src.broker_protocol import (
@@ -37,7 +38,7 @@ class BrokerClient:
             win32pipe.WaitNamedPipe(self.pipe_name, self.timeout_ms)
             handle = win32file.CreateFile(
                 self.pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
+                0x00120003,  # SYNCHRONIZE | READ_CONTROL | read/write data, not pipe-instance creation
                 0,
                 None,
                 win32file.OPEN_EXISTING,
@@ -47,6 +48,7 @@ class BrokerClient:
         except Exception as exc:
             raise BrokerUnavailable(str(exc)) from exc
         try:
+            self._verify_broker_owner(handle)
             win32file.WriteFile(handle, frame)
             response = self._read_response(handle, request["request_id"])
         finally:
@@ -59,12 +61,32 @@ class BrokerClient:
         return payload_obj
 
     @staticmethod
+    def _verify_broker_owner(handle) -> None:  # noqa: ANN001
+        import win32security  # type: ignore
+
+        owner, _group, _dacl, _sacl, _descriptor = win32security.GetSecurityInfo(
+            handle,
+            win32security.SE_KERNEL_OBJECT,
+            win32security.OWNER_SECURITY_INFORMATION,
+        )
+        if win32security.ConvertSidToStringSid(owner) != "S-1-5-18":
+            raise BrokerUnavailable("local broker pipe is not owned by SYSTEM")
+
+    @staticmethod
     def _read_exact(handle, size: int) -> bytes:  # noqa: ANN001
         import win32file  # type: ignore
+        import win32pipe  # type: ignore
 
         data = bytearray()
+        deadline = time.monotonic() + 5.0
         while len(data) < size:
-            _, chunk = win32file.ReadFile(handle, size - len(data))
+            if time.monotonic() >= deadline:
+                raise BrokerUnavailable("broker response deadline exceeded")
+            _peeked, available, _left = win32pipe.PeekNamedPipe(handle, 0)
+            if not available:
+                time.sleep(0.01)
+                continue
+            _, chunk = win32file.ReadFile(handle, min(size - len(data), available))
             if not chunk:
                 raise ProtocolError("broker disconnected during response")
             data.extend(chunk)
