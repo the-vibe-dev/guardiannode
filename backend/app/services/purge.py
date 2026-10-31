@@ -171,8 +171,8 @@ def retry_pending_deletions(session: Session, *, limit: int = 100) -> dict[str, 
     session.flush()
     finished = {"events": 0, "risk_results": 0, "alerts": 0, "blobs": removed, "guardian_reviews": 0}
     for event_id in event_ids:
-        event = session.get(Event, event_id)
-        if (event is not None and event.deletion_state == "pending_delete"
+        pending_event = session.get(Event, event_id)
+        if (pending_event is not None and pending_event.deletion_state == "pending_delete"
                 and session.query(EvidenceBlob).filter(EvidenceBlob.event_id == event_id).count() == 0):
             counts = delete_events(session, [event_id])
             for key, value in counts.items():

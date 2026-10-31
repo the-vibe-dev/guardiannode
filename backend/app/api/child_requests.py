@@ -171,7 +171,7 @@ def review_child_request(
     # A request can be answered only once while it is still open. The SQL
     # transition also prevents two concurrent parent sessions overwriting one
     # another's decision.
-    changed = db.execute(
+    changed = db.connection().execute(
         update(ChildRequest)
         .where(
             ChildRequest.request_id == request_id,
