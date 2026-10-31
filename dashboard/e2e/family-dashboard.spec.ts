@@ -187,6 +187,18 @@ test("family home is responsive, keyboard reachable, and accessible", async ({ p
   expect(errors).toEqual([]);
 });
 
+test("empty capture history never claims monitoring is active", async ({ page }) => {
+  await page.route("**/api/dashboard/capture-status", (route) => fulfill(route, {
+    latest_capture_at: null, latest_capture_device_id: null, latest_capture_hostname: null,
+    pending_review_count: 0, reviewing_count: 0, waiting_upload_count: 0,
+    estimated_wait_seconds: null, last_reviewed_at: null,
+  }));
+  await page.goto("/");
+  await expect(page.getByRole("status").filter({ hasText: "Coverage needs checking" })).toBeVisible();
+  await expect(page.getByText("No captures received yet")).toBeVisible();
+  await expect(page.getByText("Local protection active")).toHaveCount(0);
+});
+
 test("core parent journeys render without runtime errors", async ({ page }) => {
   const errors = collectBrowserErrors(page);
   const journeys = [

@@ -8,7 +8,9 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8787",
-        changeOrigin: true,
+        // Keep Host aligned with the browser Origin for the backend's CSRF
+        // origin check during local full-stack development.
+        changeOrigin: false,
       },
     },
   },

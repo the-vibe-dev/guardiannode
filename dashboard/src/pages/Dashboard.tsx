@@ -29,6 +29,11 @@ export default function Dashboard() {
   const attentionCount = data.open_alert_count + openRequests;
   const deviceRows = devices.data!;
   const profileRows = profiles.data!;
+  const recentlyReviewed = Boolean(
+    onboarding.data!.complete && data.devices_online > 0 && data.devices_paused === 0 &&
+    capture.data?.latest_capture_at && capture.data?.last_reviewed_at &&
+    Date.now() - new Date(capture.data.latest_capture_at).getTime() < 10 * 60_000,
+  );
 
   return (
     <div className="space-y-6">
@@ -40,8 +45,9 @@ export default function Dashboard() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">A calm summary of what needs you, what is covered, and whether protection is working.</p>
         </div>
-        <div className="inline-flex items-center gap-2 self-start rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800" role="status">
-          <span className="h-2 w-2 rounded-full bg-emerald-600" /> Local protection active
+        <div className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1.5 text-xs font-semibold ${recentlyReviewed ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`} role="status">
+          <span className={`h-2 w-2 rounded-full ${recentlyReviewed ? "bg-emerald-600" : "bg-amber-500"}`} />
+          {recentlyReviewed ? "Recent capture reviewed" : "Coverage needs checking"}
         </div>
       </header>
 
@@ -137,8 +143,10 @@ function CaptureQueueCard({ status, loading, error }: { status?: CaptureStatus; 
                 {wait ? ` · ${wait}` : ""}
               </p>
             </>
+          ) : status.latest_capture_at ? (
+            <p className="inline-flex items-center gap-2 font-semibold text-sky-900"><Check aria-hidden="true" size={17} /> No captures waiting for review</p>
           ) : (
-            <p className="inline-flex items-center gap-2 font-semibold text-emerald-800"><Check aria-hidden="true" size={17} /> All captured screens reviewed</p>
+            <p className="font-semibold text-slate-700">No captures received yet</p>
           )}
           {status.waiting_upload_count > 0 && <p className="mt-1 text-xs font-semibold text-amber-800">{status.waiting_upload_count} still waiting to upload</p>}
         </div>
