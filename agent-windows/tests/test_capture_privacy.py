@@ -13,6 +13,18 @@ class StopLoop(BaseException):
     pass
 
 
+@pytest.mark.asyncio
+async def test_disabled_monitoring_does_not_capture_or_enqueue(monkeypatch):
+    q: asyncio.Queue = asyncio.Queue(maxsize=2)
+    cfg = AgentConfig(monitoring_enabled=False, full_screen_capture_enabled=True)
+    monkeypatch.setattr("src.main.get_active_process", lambda: pytest.fail("capture attempted"))
+    monkeypatch.setattr("src.main.capture_full", lambda **_kwargs: pytest.fail("screenshot attempted"))
+    monkeypatch.setattr("src.main.asyncio.sleep", _stop_sleep)
+    with pytest.raises(StopLoop):
+        await capture_loop(cfg, q)
+    assert q.empty()
+
+
 async def _stop_sleep(_seconds):
     raise StopLoop()
 
@@ -31,7 +43,7 @@ def _stop_after(iterations: int):
 @pytest.mark.asyncio
 async def test_unmonitored_app_does_not_enqueue_screenshot(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=2)
-    cfg = AgentConfig(monitored_apps=["Roblox.exe"], full_screen_capture_enabled=False)
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True, monitored_apps=["Roblox.exe"], full_screen_capture_enabled=False)
 
     monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
     monkeypatch.setattr(
@@ -54,7 +66,7 @@ async def test_unmonitored_app_does_not_enqueue_screenshot(monkeypatch):
 @pytest.mark.asyncio
 async def test_monitored_app_enqueues_window_scoped_metadata(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=2)
-    cfg = AgentConfig(
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True,
         profile_id="child-1",
         age_group="under_10",
         policy_id="policy-1",
@@ -95,7 +107,7 @@ async def test_monitored_app_enqueues_window_scoped_metadata(monkeypatch):
 @pytest.mark.asyncio
 async def test_full_screen_mode_keeps_monitored_app_region_change(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
-    cfg = AgentConfig(
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True,
         monitored_apps=["notepad.exe"],
         full_screen_capture_enabled=True,
         phash_threshold=2,
@@ -129,7 +141,7 @@ async def test_full_screen_mode_keeps_monitored_app_region_change(monkeypatch):
 @pytest.mark.asyncio
 async def test_full_screen_mode_treats_every_foreground_app_as_monitored(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
-    cfg = AgentConfig(
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True,
         monitored_apps=["notepad.exe"],
         full_screen_capture_enabled=True,
         phash_threshold=2,

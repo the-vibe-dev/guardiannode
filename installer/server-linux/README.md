@@ -103,6 +103,9 @@ Host networking exposes the HTTPS backend according to
 LAN/VPN after first-run setup. Include each child-reachable name or IP in
 `GUARDIANNODE_ALLOWED_HOSTS` and set the matching
 `GUARDIANNODE_ADVERTISED_SERVER_URL` before the certificate is issued.
+The model initializer and backend both reach Ollama through host loopback;
+Ollama itself remains bound to `127.0.0.1:11434` in this mode. Only the
+GuardianNode HTTPS service needs to be reachable by child devices.
 
 Do not expose the backend directly to the public internet. Use a trusted LAN or
 Tailscale/WireGuard. A reverse proxy is an expert-only path because agents must

@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
@@ -49,14 +49,13 @@ class ChildRequestPage(BaseModel):
 
 def _expire_open(db: Session) -> int:
     now = datetime.now(UTC)
-    rows = db.query(ChildRequest).filter(
+    # Persist the state transition inside the current transaction before a
+    # subsequent count/list. The session intentionally has autoflush disabled.
+    return db.query(ChildRequest).filter(
         ChildRequest.status == "open",
         ChildRequest.expires_at.isnot(None),
         ChildRequest.expires_at <= now,
-    ).all()
-    for row in rows:
-        row.status = "expired"
-    return len(rows)
+    ).update({ChildRequest.status: "expired"}, synchronize_session="fetch")
 
 
 @router.post("", response_model=ChildRequestDTO)
@@ -164,31 +163,26 @@ def review_child_request(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
-    row = db.get(ChildRequest, request_id)
-    if row is None:
-        raise HTTPException(404, "Request not found")
     now = datetime.now(UTC)
-    # A request can be answered only once while it is still open. The SQL
-    # transition also prevents two concurrent parent sessions overwriting one
-    # another's decision.
-    changed = db.connection().execute(
-        update(ChildRequest)
-        .where(
-            ChildRequest.request_id == request_id,
-            ChildRequest.status == "open",
-            or_(ChildRequest.expires_at.is_(None), ChildRequest.expires_at > now),
-        )
-        .execution_options(synchronize_session=False)
-        .values(
-            status=req.status,
-            response_note=req.response_note,
-            reviewed_by=str(user.id),
-            reviewed_at=now,
-        )
-    ).rowcount
-    if changed != 1:
-        db.rollback()
-        raise HTTPException(409, "Request is closed or expired")
+    _expire_open(db)
+    # Compare-and-set preserves the first parent's decision when two open
+    # dashboards act at once; stale clients cannot overwrite a final response.
+    updated = db.query(ChildRequest).filter(
+        ChildRequest.request_id == request_id,
+        ChildRequest.status == "open",
+        or_(ChildRequest.expires_at.is_(None), ChildRequest.expires_at > now),
+    ).update({
+        ChildRequest.status: req.status,
+        ChildRequest.response_note: req.response_note,
+        ChildRequest.reviewed_by: str(user.id),
+        ChildRequest.reviewed_at: now,
+    }, synchronize_session="fetch")
+    row = db.get(ChildRequest, request_id)
+    if updated != 1:
+        db.commit()  # retain automatic expiration even when review is refused
+        if row is None:
+            raise HTTPException(404, "Request not found")
+        raise HTTPException(409, "This request is no longer open. Refresh to see its response.")
     log_action(
         db,
         actor=str(user.id),

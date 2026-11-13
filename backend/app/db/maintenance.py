@@ -30,16 +30,28 @@ class IntegrityResult:
 
 
 BACKUP_MANIFEST_FORMAT = "guardiannode-sqlite-backup-v1"
-SUPPORTED_SCHEMA_REVISIONS = {
-    None,
-    "0001_beta_baseline",
-    "0002_complete_backups",
-    "0003_guardian_reviews",
-    "0004_guardian_review_privacy",
-    "0005_guardian_review_feedback",
-    "0006_beta_security_break",
-    "0007_family_beta_workflows",
-}
+
+
+def supported_schema_revisions() -> frozenset[str | None]:
+    """Derive compatibility from the bundled migration head and its ancestors.
+
+    A separate hard-coded allowlist drifts as soon as a migration is added.
+    Legacy unstamped databases remain supported, but unknown/future revisions
+    must never be restored into an older application, even without a manifest.
+    """
+    from alembic.script import ScriptDirectory
+
+    # Imported lazily because the migration runner uses backup_database.
+    from app.db.migrations import alembic_config
+
+    try:
+        script = ScriptDirectory.from_config(alembic_config())
+        head = script.get_current_head()
+        if head is None:
+            raise RuntimeError("missing migration head")
+        return frozenset({None, *(revision.revision for revision in script.walk_revisions(base="base", head=head))})
+    except Exception as exc:
+        raise DatabaseMaintenanceError("Bundled schema revision history is unavailable") from exc
 
 
 def backup_manifest_path(database: Path) -> Path:
@@ -53,8 +65,21 @@ def database_schema_revision(path: Path) -> str | None:
         ).fetchone()
         if not exists:
             return None
-        row = conn.execute("SELECT version_num FROM alembic_version LIMIT 1").fetchone()
-        return str(row[0]) if row else None
+        rows = conn.execute("SELECT version_num FROM alembic_version LIMIT 2").fetchall()
+        if len(rows) > 1:
+            raise DatabaseMaintenanceError("Database has multiple schema revisions; restore is unsupported")
+        return str(rows[0][0]) if rows else None
+
+
+def validate_database_schema(path: Path) -> str | None:
+    """Return a supported embedded revision or fail before replacing live data."""
+    try:
+        revision = database_schema_revision(path)
+    except sqlite3.DatabaseError as exc:
+        raise DatabaseMaintenanceError("Database schema revision metadata is unreadable") from exc
+    if revision not in supported_schema_revisions():
+        raise DatabaseMaintenanceError("Backup database schema revision is unsupported by this build")
+    return revision
 
 
 def _sha256(path: Path) -> str:
@@ -81,6 +106,7 @@ def _write_backup_manifest(database: Path) -> None:
 
 
 def _validate_backup_manifest(database: Path) -> None:
+    embedded = validate_database_schema(database)
     manifest = backup_manifest_path(database)
     if not manifest.is_file():
         return
@@ -88,11 +114,10 @@ def _validate_backup_manifest(database: Path) -> None:
         payload = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise DatabaseMaintenanceError("Backup manifest is unreadable") from exc
-    if payload.get("format") != BACKUP_MANIFEST_FORMAT:
+    if not isinstance(payload, dict) or payload.get("format") != BACKUP_MANIFEST_FORMAT:
         raise DatabaseMaintenanceError("Backup manifest format is unsupported")
-    embedded = database_schema_revision(database)
     declared = payload.get("schema_revision")
-    if declared != embedded or declared not in SUPPORTED_SCHEMA_REVISIONS:
+    if declared != embedded:
         raise DatabaseMaintenanceError("Backup manifest schema revision is invalid")
     if payload.get("database_sha256") != _sha256(database):
         raise DatabaseMaintenanceError("Backup does not match its manifest checksum")

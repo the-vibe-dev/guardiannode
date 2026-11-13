@@ -341,6 +341,8 @@ def capture_config(
     age = prof.age_group if prof is not None else "10_13"
     cfg = profile_policy.capture_settings(policy, age)
     processing = consent.effective_policy(db)
+    cfg["monitoring_enabled"] = consent.collection_allowed(db, screenshots=True)
+    cfg["apps_and_urls_enabled"] = processing.apps_and_urls
     cfg["paused"] = is_device_paused(device) or not processing.screenshots
     cfg["paused_until"] = device.paused_until.isoformat() if device.paused_until else None
     cfg["capture_allowed"] = processing.screenshots
@@ -357,6 +359,7 @@ def capture_config(
         )
         cfg["paused"] = True
         cfg["capture_allowed"] = False
+        cfg["monitoring_enabled"] = False
         cfg["policy_generation"] = withdrawn.consent_id if withdrawn else processing.generation
     db.commit()  # persist any expired-pause cleanup done by is_device_paused
     return cfg

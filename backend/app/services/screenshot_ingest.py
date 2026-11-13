@@ -35,12 +35,14 @@ from ulid import ULID
 from app.db.models import ChildProfile, Device, Event, EvidenceBlob, RiskResult
 from app.services import (
     classifier,
+    consent,
     encryption,
     image_safety,
     multimodal_risk,
     pipeline_metrics,
     risk_rules,
 )
+from app.services.device_state import is_device_paused
 from app.services.evidence_paths import evidence_blob_path
 from app.services.ocr import OcrResult, OcrStatus, extract_tesseract
 from app.services.ollama_client import OllamaClient
@@ -56,13 +58,31 @@ _SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 VALID_TIERS = {"full", "vision", "text_llm", "rules_only"}
 
 
+def _monitoring_active(session: Session, device: Device | None) -> bool:
+    return bool(
+        device is not None
+        and device.paired
+        and not is_device_paused(device)
+        and consent.processing_allowed(session, screenshots=True)
+    )
+
+
+def _discarded_result() -> dict[str, Any]:
+    return {
+        "event_id": "", "risk_id": None, "alert_id": None,
+        "risk_level": "none", "score": 0, "categories": [],
+        "blob_stored": False, "vision_used": False, "extracted_text_chars": 0,
+        "status": "discarded", "discard_reason": "monitoring_disabled",
+    }
+
+
 def _ulid() -> str:
     return str(ULID())
 
 
 def _apply_policy(session, profile_id, severity, categories, age_group="10_13"):
     """Resolve the child's privacy/threshold policy into an alert decision."""
-    from app.services import profile_policy
+    from app.services import notifications, profile_policy
     if severity == "none":
         return profile_policy.Decision(False, False, "no_risk")
     prof = session.get(ChildProfile, profile_id) if profile_id else None
@@ -71,7 +91,10 @@ def _apply_policy(session, profile_id, severity, categories, age_group="10_13"):
     else:
         # Unassigned device: age default (balanced for 10_13 — alert medium+, notify high+).
         pol = profile_policy.default_policy_for_age(age_group)
-    return profile_policy.decide(pol, severity, categories)
+    return profile_policy.decide(
+        pol, severity, categories,
+        notification_min_severity=notifications.immediate_min_severity(session),
+    )
 
 
 def _should_store(severity: str) -> bool:
@@ -183,6 +206,11 @@ async def ingest_screenshot(
     configured_mode = settings.classifier_mode_resolved
     tier = configured_mode if configured_mode in VALID_TIERS else "rules_only"
 
+    # The setting also covers transient pipeline state and model context, not
+    # only saved events. Old queued frames may still contain earlier metadata.
+    if not consent.choice_allowed(session, "apps_and_urls"):
+        app_name = window_title = url = None
+
     # Register this frame as in-flight so the dashboard health widget can see it.
     pipeline_metrics.start(
         event_id=event_id,
@@ -250,6 +278,8 @@ async def _ingest_inner(
     # backend assignment is authoritative; device payload profile/age fields are
     # legacy hints only and may not select another child's policy.
     device = session.get(Device, device_id)
+    if not _monitoring_active(session, device):
+        return _discarded_result()
     resolved = resolve_profile(
         session,
         device=device,
@@ -263,7 +293,7 @@ async def _ingest_inner(
     if tier in {"rules_only", "text_llm"}:
         log.info("screenshot %s → mode=%s", event_id, tier)
         pipeline_metrics.set_stage(event_id, "tesseract")
-        ocr_result = _coerce_ocr_result(_tesseract_extract(image_bytes))
+        ocr_result = _coerce_ocr_result(await asyncio.to_thread(_tesseract_extract, image_bytes))
         extracted_text = ocr_result.text
         tesseract_used = ocr_result.status in {OcrStatus.OK, OcrStatus.NO_TEXT}
         if extracted_text and tier == "text_llm":
@@ -302,7 +332,7 @@ async def _ingest_inner(
         else:
             log.warning("vision mode but no vision model; running deterministic OCR only")
             pipeline_metrics.set_stage(event_id, "tesseract")
-            ocr_result = _coerce_ocr_result(_tesseract_extract(image_bytes))
+            ocr_result = _coerce_ocr_result(await asyncio.to_thread(_tesseract_extract, image_bytes))
             extracted_text = ocr_result.text
             tesseract_used = ocr_result.status in {OcrStatus.OK, OcrStatus.NO_TEXT}
         # Rules engine on text (free, deterministic, no LLM cost).
@@ -337,7 +367,7 @@ async def _ingest_inner(
 
         async def _text_path() -> tuple[OcrResult, dict[str, Any]]:
             # Tesseract first (~1s), then text LLM. Runs concurrently with vision call.
-            result = _coerce_ocr_result(_tesseract_extract(image_bytes))
+            result = _coerce_ocr_result(await asyncio.to_thread(_tesseract_extract, image_bytes))
             if not result.text:
                 return result, {}
             tr = await classifier.classify_text(
@@ -383,6 +413,15 @@ async def _ingest_inner(
         vision_result=vision_result or None,
     )
     severity = merged["risk_level"]
+
+    # Classification can take tens of seconds. A parent can pause, revoke, or
+    # withdraw consent while it runs; re-read current state before any evidence
+    # is persisted. No asynchronous work follows this final authorization check.
+    session.refresh(device)
+    if not _monitoring_active(session, device):
+        return _discarded_result()
+    if not consent.choice_allowed(session, "apps_and_urls"):
+        app_name = window_title = url = None
 
     # ----- Step 4: Persist event + (optional) blob -----
     blob_id: str | None = None

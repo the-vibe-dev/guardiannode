@@ -117,9 +117,9 @@ def test_current_schema_backup_restores(tmp_path, monkeypatch):
     engine = configure_sqlite_engine(create_engine(f"sqlite:///{source}"))
     upgrade_schema(engine)
     engine.dispose()
-    assert database_schema_revision(source) == "0007_family_beta_workflows"
+    assert database_schema_revision(source) == "0008_notification_delivery"
     backup = tmp_path / "current-backup.sqlite"
     backup_database(backup, source=source)
     restored = tmp_path / "current-restored.sqlite"
     restore_database(backup, destination=restored)
-    assert database_schema_revision(restored) == "0007_family_beta_workflows"
+    assert database_schema_revision(restored) == "0008_notification_delivery"

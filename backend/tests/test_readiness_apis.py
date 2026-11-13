@@ -317,11 +317,26 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
     assert queued.status_code == 200
     assert queued.json()["status"] == "queued"
 
+    undone = client.post(f"/api/actions/{queued.json()['action_id']}/undo")
+    assert undone.status_code == 200
+    with get_sessionmaker()() as undo_db:
+        undo = undo_db.get(DeviceCommand, undone.json()["action_id"])
+        assert undo.payload["original_command_id"] == queued.json()["action_id"]
+        assert undo.payload["original_action"] == "pause_app"
+
     notified = client.post(
         "/api/alerts/action-alert/action", json={"action": "notify"}
     )
     assert notified.status_code == 200
     assert notified.json()["action_taken"] == "notify"
+
+    configured = client.patch("/api/settings/notifications", json={
+        "enabled": True, "immediate_min_severity": "critical",
+    })
+    assert configured.status_code == 200
+    suppressed = client.post("/api/alerts/action-alert/action", json={"action": "notify"})
+    assert suppressed.status_code == 409
+    assert "does not qualify" in suppressed.json()["detail"]
 
     db = get_sessionmaker()()
     try:

@@ -46,6 +46,7 @@ def _add_alert_chain(session, *, alert_id: str, risk_id: str, severity: str, age
             summary="test alert",
             evidence=[],
             recommended_action="review",
+            created_at=_old(age_days),
         )
     )
     session.flush()
@@ -134,8 +135,9 @@ def test_run_cleanup_none_retention_does_not_delete_low_risks(db_session):
     assert s.get(RiskResult, "r-low") is not None
 
 
-def test_run_test_records_per_channel_without_leaking_secret(monkeypatch):
+def test_run_test_records_per_channel_without_leaking_secret(monkeypatch, caplog):
     captured = {}
+    real_email, real_webhook = notifications._send_email, notifications._send_webhook
 
     def fake_email(cfg, subject, body):
         captured["email_password"] = cfg.get("password")
@@ -166,6 +168,25 @@ def test_run_test_records_per_channel_without_leaking_secret(monkeypatch):
     assert captured["email_password"] == "s3cr3t"
     for r in results:
         assert "s3cr3t" not in (r["detail"] or "")
+
+    # Exercise the real exception boundaries, not only mocked safe outcomes.
+    def reject_smtp(*args, **kwargs):
+        raise notifications.smtplib.SMTPAuthenticationError(535, b"echoed password s3cr3t bearer-sensitive-marker")
+
+    def reject_webhook(*args, **kwargs):
+        raise ValueError("request URL contained s3cr3t bearer-sensitive-marker")
+
+    monkeypatch.setattr(notifications, "_send_email", real_email)
+    monkeypatch.setattr(notifications, "_send_webhook", real_webhook)
+    monkeypatch.setattr(notifications.smtplib, "SMTP", reject_smtp)
+    monkeypatch.setattr(notifications, "_post_webhook", reject_webhook)
+    failed = notifications.run_test(cfg)
+    assert [row["ok"] for row in failed] == [False, False]
+    assert failed[0]["detail"] == "SMTP: authentication rejected"
+    assert failed[1]["detail"] == "Webhook: transport request failed"
+    for secret in ("s3cr3t", "bearer-sensitive-marker"):
+        assert secret not in json.dumps(failed)
+        assert secret not in caplog.text
 
 
 def test_run_test_no_channels_configured():
@@ -206,6 +227,10 @@ def test_webhook_validation_rejects_userinfo_and_fragment():
     ok, detail = notifications._validate_webhook_url("https://example.test/hook#token")
     assert ok is False
     assert "fragment" in detail
+
+    ok, detail = notifications._validate_webhook_url("http://[invalid")
+    assert ok is False
+    assert detail == "webhook URL is malformed"
 
 
 def test_webhook_validation_rejects_metadata_host_with_trailing_dot():

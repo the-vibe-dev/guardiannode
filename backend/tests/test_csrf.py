@@ -63,3 +63,11 @@ def test_device_endpoints_are_not_browser_csrf_challenged(monkeypatch, tmp_path)
         json={"hostname": "kid-pc", "code": "000000"},
     )
     assert r.status_code == 400
+
+
+def test_arbitrary_bearer_header_does_not_bypass_session_csrf(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = client.post("/api/auth/logout", headers={"Authorization": "Bearer not-a-device-token"})
+    assert response.status_code == 403
+    assert "csrf" in response.json()["detail"].lower()
+    assert client.get("/api/auth/me").status_code == 200

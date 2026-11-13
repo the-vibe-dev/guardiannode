@@ -37,4 +37,4 @@ def test_parent_decision_cannot_overwrite_or_approve_expired_request(db_session)
         assert conflict.value.status_code == 409
     db_session.expire_all()
     assert db_session.get(ChildRequest, "open").status == "approved"
-    assert db_session.get(ChildRequest, "expired").status == "open"
+    assert db_session.get(ChildRequest, "expired").status == "expired"

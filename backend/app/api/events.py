@@ -104,6 +104,8 @@ async def ingest(
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
+    if not consent.collection_allowed(db):
+        raise HTTPException(403, "Monitoring is disabled by the current privacy choices")
     policy = consent.effective_policy(db)
     if is_device_paused(device) or not (policy.screenshots or policy.apps_and_urls):
         # Quietly accept but don't store — pause behavior is honored server-side too
@@ -125,6 +127,8 @@ async def ingest(
             device_id=device.device_id,
             source_ip=request.client.host if request.client else None,
         )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     db.commit()
@@ -258,6 +262,8 @@ async def ingest_screenshot(
     """Receive a raw screenshot, persist it immediately, and queue it for
     background classification (vision LLM → rules → alert). Returns fast so the
     agent's local queue never backs up and frames aren't lost on power-off."""
+    if not consent.collection_allowed(db, screenshots=True):
+        return ScreenshotIngestResponse(event_id="", status="privacy_disabled", queued=False)
     idempotency_key = (idempotency_key or "").strip() or None
     existing_receipt = _existing_screenshot_receipt(
         db,
@@ -279,6 +285,10 @@ async def ingest_screenshot(
         raise HTTPException(409, "Capture policy generation is required after withdrawal")
 
     image_bytes = await _read_upload_with_cap(image)
+    # Consent or pairing may change while the multipart body is being read.
+    db.refresh(device)
+    if not device.paired or not consent.collection_allowed(db, screenshots=True):
+        return ScreenshotIngestResponse(event_id="", status="privacy_disabled", queued=False)
     if not image_bytes:
         raise HTTPException(400, "Empty image")
     if age_group not in {"under_10", "10_13", "14_17"}:
@@ -300,6 +310,8 @@ async def ingest_screenshot(
         device.status = "online"
     db.commit()
 
+    if not consent.choice_allowed(db, "apps_and_urls"):
+        app_name = window_title = url = None
     token = screenshot_async.store_pending(
         image_bytes,
         {
@@ -320,6 +332,16 @@ async def ingest_screenshot(
             "policy_generation": policy.generation,
         },
     )
+    # A synchronous withdrawal can commit and finish its filesystem sweep
+    # while this request is writing the frame. Remove a late write before
+    # acknowledging it; the worker independently checks current permission.
+    db.refresh(device)
+    if not device.paired or not consent.collection_allowed(db, screenshots=True):
+        screenshot_async.discard(token)
+        return ScreenshotIngestResponse(event_id="", status="privacy_disabled", queued=False)
+    if is_device_paused(device):
+        screenshot_async.discard(token)
+        return ScreenshotIngestResponse(event_id="", status="paused", queued=False)
     if not screenshot_async.enqueue_nowait(token):
         screenshot_async.discard(token)
         raise HTTPException(

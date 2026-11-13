@@ -48,9 +48,28 @@ def effective_policy(session: Session) -> ProcessingPolicy:
 
 
 def latest(session: Session) -> ConsentRecord | None:
-    return session.query(ConsentRecord).order_by(ConsentRecord.created_at.desc()).first()
+    return session.query(ConsentRecord).order_by(
+        ConsentRecord.created_at.desc(), ConsentRecord.consent_id.desc()
+    ).first()
 
 
 def monitoring_allowed(session: Session) -> bool:
     policy = effective_policy(session)
     return policy.active and (policy.screenshots or policy.apps_and_urls)
+
+
+def choice_allowed(session: Session, choice: str) -> bool:
+    """Evaluate one current parent choice at the time it is used."""
+    if choice not in {"screenshots", "apps_and_urls", "retention", "notifications", "external_ai"}:
+        return False
+    return bool(getattr(effective_policy(session), choice))
+
+
+def processing_allowed(session: Session, *, screenshots: bool = False) -> bool:
+    policy = effective_policy(session)
+    return policy.retention and (not screenshots or policy.screenshots)
+
+
+def collection_allowed(session: Session, *, screenshots: bool = False) -> bool:
+    """Public ingestion requires completed setup and active retention consent."""
+    return session.query(User).count() > 0 and processing_allowed(session, screenshots=screenshots)

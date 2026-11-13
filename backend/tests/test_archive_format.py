@@ -201,6 +201,45 @@ def test_restore_requires_external_recovery_signer(archive_instance, tmp_path: P
         )
 
 
+def test_portable_restore_rejects_future_schema_before_creating_target(archive_instance, tmp_path):
+    data_dir, database = archive_instance
+    with sqlite3.connect(database) as conn:
+        conn.execute("UPDATE alembic_version SET version_num='9999_unknown_future'")
+    archive = tmp_path / "future.gna"
+    create_archive(
+        archive, data_dir=data_dir, db_url=f"sqlite:///{database}",
+        passphrase="synthetic recovery passphrase",
+    )
+    target = tmp_path / "must-not-be-created"
+    with pytest.raises(ArchiveError, match="schema revision"):
+        restore_archive(
+            archive, target, passphrase="synthetic recovery passphrase",
+            trusted_signer=load_or_create(data_dir / "keys").public_key,
+        )
+    assert not target.exists()
+
+
+def test_portable_restore_checks_signed_schema_against_database(archive_instance, tmp_path, monkeypatch):
+    from app.archive import format as archive_format
+
+    data_dir, database = archive_instance
+    # Construct an internally inconsistent but authentically signed artifact.
+    # A trusted signer alone does not make a mislabeled schema compatible.
+    monkeypatch.setattr(archive_format, "database_schema_revision", lambda _path: "0001_beta_baseline")
+    archive = tmp_path / "inconsistent.gna"
+    create_archive(
+        archive, data_dir=data_dir, db_url=f"sqlite:///{database}",
+        passphrase="synthetic recovery passphrase",
+    )
+    target = tmp_path / "must-not-be-created"
+    with pytest.raises(ArchiveError, match="schema revision does not match"):
+        restore_archive(
+            archive, target, passphrase="synthetic recovery passphrase",
+            trusted_signer=load_or_create(data_dir / "keys").public_key,
+        )
+    assert not target.exists()
+
+
 def test_missing_database_evidence_fails_closed(archive_instance, tmp_path: Path):
     data_dir, database = archive_instance
     (data_dir / "evidence" / "aa" / "blob.enc").unlink()

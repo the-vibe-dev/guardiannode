@@ -174,7 +174,7 @@ def test_tombstoned_alert_and_risk_are_hidden_from_read_apis(db_session, tmp_pat
     event.deletion_state = "pending_delete"
     s.commit()
 
-    assert list_alerts(db=s, _=user, limit=50).items == []
+    assert list_alerts(db=s, _=user, limit=50, q=None).items == []
     assert list_risks(db=s, _=user, limit=100) == []
     with pytest.raises(HTTPException) as exc:
         get_alert("a-hidden", db=s, user=user)
@@ -195,6 +195,65 @@ def test_database_failure_prevents_unlink(db_session, tmp_path):
     s.rollback()
     assert path.exists()
     assert s.get(Event, event_id).deletion_state == "active"
+@pytest.mark.parametrize("remove_parent", [False, True])
+def test_delete_events_completes_when_owned_ciphertext_is_already_missing(db_session, tmp_path, remove_parent):
+    event_id, risk_id, blob_id, blob_path = _mk_chain(
+        db_session, tmp_path, suffix="missing", severity="high", age_days=0,
+    )
+    blob_path.unlink()
+    if remove_parent:
+        blob_path.parent.rmdir()
+
+    counts = purge.delete_events(db_session, [event_id])
+    db_session.commit()
+
+    assert counts["events"] == counts["risk_results"] == counts["alerts"] == counts["blobs"] == 1
+    assert db_session.get(Event, event_id) is None
+    assert db_session.get(RiskResult, risk_id) is None
+    assert db_session.get(EvidenceBlob, blob_id) is None
+
+
+def test_retry_finishes_missing_ciphertext_after_interrupted_delete(db_session, tmp_path):
+    event_id, _, blob_id, blob_path = _mk_chain(
+        db_session, tmp_path, suffix="missing-retry", severity="high", age_days=0,
+    )
+    event = db_session.get(Event, event_id)
+    event.deletion_state = "pending_delete"
+    event.deletion_requested_at = datetime.now(UTC)
+    blob = db_session.get(EvidenceBlob, blob_id)
+    blob.deletion_state = "delete_failed"
+    blob.delete_requested_at = datetime.now(UTC)
+    db_session.commit()
+    blob_path.unlink()
+
+    counts = purge.retry_pending_deletions(db_session)
+    db_session.commit()
+
+    assert counts["events"] == counts["blobs"] == 1
+    assert db_session.get(Event, event_id) is None
+    assert db_session.get(EvidenceBlob, blob_id) is None
+
+
+@pytest.mark.parametrize("unsafe_kind", ["outside_missing", "dangling_symlink"])
+def test_missing_file_tolerance_preserves_evidence_path_boundary(db_session, tmp_path, unsafe_kind):
+    event_id, _, blob_id, blob_path = _mk_chain(
+        db_session, tmp_path, suffix="missing-unsafe", severity="high", age_days=0,
+    )
+    blob = db_session.get(EvidenceBlob, blob_id)
+    blob_path.unlink()
+    if unsafe_kind == "outside_missing":
+        blob.encrypted_path = str(tmp_path / "outside" / "missing.enc")
+    else:
+        # Even an in-root dangling symlink remains disallowed.
+        blob_path.symlink_to(blob_path.with_name("missing-target.enc"))
+    db_session.commit()
+
+    counts = purge.delete_events(db_session, [event_id])
+    db_session.commit()
+
+    assert counts["events"] == counts["blobs"] == 0
+    assert db_session.get(Event, event_id).deletion_state == "pending_delete"
+    assert db_session.get(EvidenceBlob, blob_id).deletion_state == "delete_failed"
 
 
 def test_wipe_old_events_leaves_no_orphans(db_session, tmp_path):
@@ -345,3 +404,91 @@ def test_wipe_low_severity_removes_chain(db_session, tmp_path):
     assert {e.event_id for e in s.query(Event).all()} == {"e-hi"}
     assert {r.risk_id for r in s.query(RiskResult).all()} == {"r-hi"}
     assert {a.alert_id for a in s.query(Alert).all()} == {"a-hi"}
+
+
+def test_retry_of_screenshot_only_expiry_preserves_alert_context(db_session, tmp_path, monkeypatch):
+    s = db_session
+    event_id, risk_id, blob_id, blob_path = _mk_chain(
+        s, tmp_path, suffix="image-only", severity="high", age_days=40,
+    )
+    real_unlink = type(blob_path).unlink
+
+    def fail_unlink(path, *args, **kwargs):
+        if path == blob_path:
+            raise PermissionError("synthetic file-in-use")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(blob_path), "unlink", fail_unlink)
+    retention.run_cleanup(s)
+    assert s.get(Event, event_id).deletion_state == "active"
+    assert s.get(EvidenceBlob, blob_id).deletion_state == "delete_failed"
+
+    monkeypatch.setattr(type(blob_path), "unlink", real_unlink)
+    retried = purge.retry_pending_deletions(s)
+    s.commit()
+
+    assert retried["events"] == 0
+    assert s.get(Event, event_id).screenshot_blob_id is None
+    assert s.get(RiskResult, risk_id) is not None
+    assert s.query(Alert).filter_by(risk_id=risk_id).count() == 1
+    assert s.get(EvidenceBlob, blob_id) is None
+    assert not blob_path.exists()
+
+
+def test_full_delete_removes_notifications_and_review_feedback(db_session, tmp_path):
+    from app.db.models import (
+        GuardianReview,
+        GuardianReviewFeedback,
+        GuardianReviewPreview,
+        NotificationJob,
+        NotificationLog,
+        User,
+    )
+    from app.services import notifications
+
+    s = db_session
+    event_id, risk_id, _, _ = _mk_chain(s, tmp_path, suffix="dependencies", severity="high", age_days=0)
+    alert = s.query(Alert).filter_by(risk_id=risk_id).one()
+    notifications.enqueue(s, alert=alert, risk_summary="synthetic sensitive summary", immediate=True)
+    user = User(display_name="Synthetic parent", password_hash="synthetic", recovery_hash="synthetic")
+    s.add(user)
+    s.flush()
+    preview = GuardianReviewPreview(
+        preview_id="preview-delete", alert_id=alert.alert_id, actor_user_id=user.id,
+        provider="mock", model_requested="mock", schema_version="1", prompt_version="1",
+        payload_digest="synthetic", incident_fingerprint="synthetic",
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    s.add(preview)
+    s.flush()
+    review = GuardianReview(
+        review_id="review-delete", preview_id=preview.preview_id, alert_id=alert.alert_id,
+        requester_user_id=user.id, provider="mock", dedup_key="synthetic-delete",
+        schema_version="1", prompt_version="1", model_requested="mock",
+    )
+    s.add(review)
+    s.flush()
+    s.add(GuardianReviewFeedback(
+        feedback_id="feedback-delete", review_id=review.review_id, user_id=user.id,
+        labels=["helpful"], schema_version="1", prompt_version="1", redaction_version="1", model="mock",
+    ))
+    s.commit()
+
+    counts = purge.delete_events(s, [event_id])
+    s.commit()
+
+    assert counts["events"] == counts["alerts"] == counts["guardian_reviews"] == 1
+    for model in (NotificationJob, NotificationLog, GuardianReviewFeedback, GuardianReview, GuardianReviewPreview):
+        assert s.query(model).count() == 0
+
+
+def test_old_alert_updated_with_fresh_risk_is_not_orphan_cleanup(db_session, tmp_path):
+    s = db_session
+    event_id, risk_id, _, _ = _mk_chain(s, tmp_path, suffix="fresh-risk", severity="high", age_days=0)
+    alert = s.query(Alert).filter_by(risk_id=risk_id).one()
+    alert.created_at = _old(200)
+    alert.last_seen_at = datetime.now(UTC)
+    s.commit()
+    retention.run_cleanup(s)
+    assert s.get(Event, event_id) is not None
+    assert s.query(Alert).filter_by(risk_id=risk_id).count() == 1

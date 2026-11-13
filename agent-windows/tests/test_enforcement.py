@@ -35,7 +35,11 @@ def test_domain_block_and_undo_only_touch_owned_lines(tmp_path) -> None:
     assert undone["undone"] == 1
     assert "GuardianNode command-1" not in hosts.read_text("utf-8")
     assert "existing.test # user entry" in hosts.read_text("utf-8")
-    assert json.loads(state.read_text("utf-8")) == {}
+    journal = json.loads(state.read_text("utf-8"))
+    assert journal["version"] == 2
+    assert journal["processes"] == {}
+    assert journal["actions"]["command-1"]["status"] == "undone"
+    assert enforcer._block_domain("command-1", {"target": "example.com"})["blocked"] is False
 
 
 def test_unknown_or_irreversible_undo_is_rejected(tmp_path) -> None:

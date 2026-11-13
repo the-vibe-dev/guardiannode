@@ -24,4 +24,13 @@ services:
 
   ollama:
     network_mode: "host"
+    environment:
+      - OLLAMA_HOST=127.0.0.1:11434
     ports: !reset []
+
+  # Host-network Ollama has no bridge-network DNS endpoint. Initialization
+  # must use the same host loopback endpoint as the backend or startup stalls.
+  pipeline-init:
+    network_mode: "host"
+    environment:
+      - GUARDIANNODE_OLLAMA_URL=http://127.0.0.1:11434

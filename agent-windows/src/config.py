@@ -81,6 +81,10 @@ class AgentConfig:
     # Parent-confirmed process/domain enforcement needs Windows crash/undo
     # qualification before it may be enabled for a family installation.
     enforcement_enabled: bool = False
+    # Runtime server consent gate. The production broker supplies the
+    # authoritative value; local YAML must not authorize broker collection.
+    monitoring_enabled: bool = False
+    apps_and_urls_enabled: bool = False
 
     def __post_init__(self) -> None:
         # PyYAML treats unquoted values like 10_13 as numeric 1013. Normalize

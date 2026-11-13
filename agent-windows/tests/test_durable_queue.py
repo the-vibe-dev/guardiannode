@@ -131,6 +131,82 @@ def test_durable_queue_enforces_item_cap_by_dropping_oldest(tmp_path):
     assert first["app_name"] == "Two"
 
 
+def _age_all_frames(tmp_path) -> None:
+    with closing(sqlite3.connect(tmp_path / "queue.sqlite")) as conn:
+        with conn:
+            conn.execute("UPDATE screenshot_queue SET created_at = 1")
+
+
+def test_durable_queue_does_not_upload_expired_frames_without_new_capture(tmp_path):
+    q = _queue(tmp_path, max_age_seconds=60)
+    q.put_nowait({"image_bytes": b"expired frame"})
+    _age_all_frames(tmp_path)
+
+    assert q._get_ready() is None
+    assert q.qsize() == 0
+
+
+def test_durable_queue_prunes_expired_frames_on_restart(tmp_path):
+    q = _queue(tmp_path, max_age_seconds=60)
+    q.put_nowait({"image_bytes": b"expired frame"})
+    _age_all_frames(tmp_path)
+
+    _queue(tmp_path, max_age_seconds=60)
+    with closing(sqlite3.connect(tmp_path / "queue.sqlite")) as conn:
+        assert conn.execute("SELECT count(*) FROM screenshot_queue").fetchone()[0] == 0
+
+
+def test_durable_queue_backlog_excludes_expired_delayed_retries(tmp_path):
+    q = _queue(tmp_path, max_age_seconds=60)
+    q.put_nowait({"image_bytes": b"expired retry"})
+    payload = q._get_ready()
+    q.retry_payload(payload, delay_seconds=3600)
+    _age_all_frames(tmp_path)
+
+    assert q.qsize() == 0
+
+
+def test_durable_queue_retention_disabled_keeps_old_frames(tmp_path):
+    q = _queue(tmp_path, max_age_seconds=0)
+    q.put_nowait({"image_bytes": b"retained frame"})
+    _age_all_frames(tmp_path)
+
+    assert q.qsize() == 1
+    assert q._get_ready()["image_bytes"] == b"retained frame"
+
+
+def test_durable_queue_purge_removes_pending_and_claimed_frames(tmp_path):
+    q = _queue(tmp_path)
+    q.put_nowait({"image_bytes": b"synthetic claimed frame"})
+    claimed = q._get_ready()
+    q.put_nowait({"image_bytes": b"synthetic pending frame"})
+    q.purge()
+    q.retry_payload(claimed, delay_seconds=0)
+    assert q.qsize() == 0
+    assert _queue(tmp_path)._get_ready() is None
+
+
+def test_context_opt_out_rewrites_pending_and_claimed_encrypted_frames(tmp_path):
+    q = _queue(tmp_path)
+    for index in range(2):
+        q.put_nowait({
+            "image_bytes": b"synthetic image", "app_name": "synthetic-app.exe",
+            "window_title": "synthetic private title", "url": "https://private.example.test",
+            "metadata": {"app_name": "nested synthetic app"}, "idempotency_key": f"synthetic-{index}",
+        })
+    claimed = q._get_ready()
+    q.redact_context()
+    # Retrying an already claimed payload updates its lease only; it cannot
+    # reintroduce the old app context into the rewritten encrypted row.
+    q.retry_payload(claimed, delay_seconds=0)
+    for _ in range(2):
+        frame = q._get_ready()
+        assert frame["image_bytes"] == b"synthetic image"
+        assert frame["idempotency_key"].startswith("synthetic-")
+        assert not {"app_name", "window_title", "url", "metadata"} & frame.keys()
+        q.ack_payload(frame)
+
+
 def test_concurrent_queue_constructors_converge_on_one_key(tmp_path):
     ctx = multiprocessing.get_context("spawn")
     barrier = ctx.Barrier(8)

@@ -4,11 +4,9 @@
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --frozen --extra dev
 GUARDIANNODE_DEV_MODE=true GUARDIANNODE_TLS_ENABLED=false \
-  uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
+  uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
 ```
 
 That command is an HTTP loopback-only development exception. Normal installs

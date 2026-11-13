@@ -9,15 +9,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app import settings as settings_mod
-from app.api.deps import current_user, get_db_dep, require_recent_auth
+from app.api.deps import current_user, get_db_dep, parent_user, require_recent_auth
 from app.archive.format import ArchiveError, create_archive
 from app.db.models import Alert, Event, EvidenceBlob, RiskResult, User
+from app.services import capture_queue, purge
 from app.services.audit import log_action
 
 router = APIRouter(prefix="/storage", tags=["storage"])
@@ -26,6 +27,114 @@ _MAX_EXPORTS = 5
 _MAX_EXPORT_BYTES = 2 * 1024 * 1024 * 1024
 _MIN_FREE_BYTES = 1024 * 1024 * 1024
 _export_lock = threading.Lock()
+
+
+class CaptureQueuePolicy(BaseModel):
+    dead_letter_retention_days: int = Field(default=7, ge=1, le=90)
+    dead_letter_max_bytes: int = Field(default=268435456, ge=1048576, le=4294967296)
+    cleanup_batch_files: int = Field(default=256, ge=1, le=1000)
+
+
+class CaptureQueuePolicyPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    dead_letter_retention_days: int | None = Field(default=None, ge=1, le=90)
+    dead_letter_max_bytes: int | None = Field(default=None, ge=1048576, le=4294967296)
+    cleanup_batch_files: int | None = Field(default=None, ge=1, le=1000)
+
+
+class CaptureQueueInventory(BaseModel):
+    files: int
+    frames: int
+    bytes: int
+    oldest_at: datetime | None
+    orphan_files: int
+    unsafe_files: int
+    scan_truncated: bool
+
+
+class CaptureQueueWorker(BaseModel):
+    enabled: bool
+    interval_seconds: int
+
+
+class CaptureQueueCleanup(BaseModel):
+    last_run_at: datetime | None
+    deleted_files: int
+    deleted_bytes: int
+    expired_files: int
+    quota_files: int
+    failed_files: int
+    budget_exhausted: bool
+    scan_truncated: bool
+
+
+class CaptureQueueWithdrawal(BaseModel):
+    pending: bool
+    requested_at: datetime | None
+    last_attempt_at: datetime | None
+    attempts: int
+    remaining_files: int
+    remaining_events: int
+    remaining_blobs: int
+    inventory_incomplete: bool
+    last_deleted_files: int
+    last_failed_files: int
+
+
+class CaptureQueueStatus(BaseModel):
+    policy: CaptureQueuePolicy
+    worker: CaptureQueueWorker
+    pending: CaptureQueueInventory
+    dead_letter: CaptureQueueInventory
+    cleanup: CaptureQueueCleanup
+    withdrawal_cleanup: CaptureQueueWithdrawal
+
+
+@router.get("/capture-queue", response_model=CaptureQueueStatus)
+def get_capture_queue(
+    db: Session = Depends(get_db_dep),
+    _: User = Depends(parent_user),
+):
+    return capture_queue.status(db)
+
+
+@router.patch("/capture-queue", response_model=CaptureQueueStatus)
+def update_capture_queue(
+    req: CaptureQueuePolicyPatch,
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+    _: None = Depends(require_recent_auth),
+):
+    changes = req.model_dump(exclude_unset=True)
+    if not changes or any(value is None for value in changes.values()):
+        raise HTTPException(422, "Provide at least one non-null capture cleanup policy field")
+    policy = capture_queue.set_policy(db, changes)
+    log_action(
+        db, actor=str(user.id), action="storage.capture_queue.policy", details=policy,
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return capture_queue.status(db)
+
+
+@router.post("/capture-queue/cleanup", response_model=CaptureQueueStatus)
+@capture_queue.serialized
+def clean_capture_queue(
+    request: Request,
+    db: Session = Depends(get_db_dep),
+    user: User = Depends(parent_user),
+    _: None = Depends(require_recent_auth),
+):
+    retained = purge.retry_pending_deletions(db)
+    result = capture_queue.run_cleanup(db)
+    log_action(
+        db, actor=str(user.id), action="storage.capture_queue.cleanup",
+        details={**result, "retained_events": retained["events"], "retained_blobs": retained["blobs"]},
+        source_ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return capture_queue.status(db)
 
 
 def _exports_dir() -> Path:

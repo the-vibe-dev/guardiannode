@@ -13,7 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db_dep, require_critical_auth, require_recent_auth
+from app.api.deps import (
+    current_user,
+    get_db_dep,
+    parent_user,
+    require_critical_auth,
+    require_recent_auth,
+)
 from app.db.models import BackupRun, Setting, User
 from app.services import encryption, retention
 from app.services.audit import log_action
@@ -98,6 +104,16 @@ def get_notifications(
     return _public_notifications(_get_json(db, "notification_settings", {}))
 
 
+@router.get("/notifications/status")
+def get_notification_status(
+    db: Session = Depends(get_db_dep),
+    _: User = Depends(current_user),
+):
+    from app.services.notification_status import delivery_status
+
+    return delivery_status(db)
+
+
 @router.patch("/notifications")
 def update_notifications(
     req: NotificationSettings,
@@ -179,7 +195,7 @@ def update_family_locale(
 def test_notifications(
     request: Request,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
 ):
     data = _get_json(db, "notification_settings", {})
     cfg = dict(data)

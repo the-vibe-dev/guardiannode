@@ -1,9 +1,9 @@
 """Cascade-safe deletion of events and their dependent records.
 
-Events fan out into RiskResults, Alerts, EvidenceBlob rows, and encrypted blob
-files on disk. SQLite enforces foreign keys but does not cascade them, so every
-delete path — retention cleanup and parent-initiated wipes — must go through
-these helpers or it strands orphaned rows and undeletable evidence files.
+Events fan out into risk results, alerts, notification jobs, review feedback,
+evidence rows, and encrypted files. SQLite enforces foreign keys, but these
+relations do not have automatic cascades. Every delete path must use the same
+dependency ordering and preserve failed file deletions for retry.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from app.db.models import (
     GuardianReviewFeedback,
     GuardianReviewPreview,
     NotificationJob,
+    NotificationLog,
     RiskResult,
 )
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
@@ -39,7 +40,10 @@ def delete_blob(session: Session, blob: EvidenceBlob) -> bool:
     # separate commit before this function is called.
     session.flush()
     try:
-        resolve_stored_evidence_path(blob.encrypted_path).unlink(missing_ok=True)
+        # A prior unlink may have succeeded before a crash/DB rollback. The
+        # absent owned file is already deleted; keep confinement/symlink checks
+        # but let its database deletion and dependent cascade finish.
+        resolve_stored_evidence_path(blob.encrypted_path, must_exist=False).unlink(missing_ok=True)
     except UnsafeEvidencePathError as e:
         blob.deletion_state = "delete_failed"
         blob.last_delete_error = str(e)[:2048]
@@ -50,8 +54,44 @@ def delete_blob(session: Session, blob: EvidenceBlob) -> bool:
         blob.last_delete_error = str(e)[:2048]
         log.warning("could not unlink evidence file %s: %s", blob.encrypted_path, e)
         return False
+    # A blob-only retention pass must also clear evidence pointers when an
+    # earlier file deletion failed and is now being retried.
+    session.query(Event).filter(Event.screenshot_blob_id == blob.blob_id).update(
+        {Event.screenshot_blob_id: None}, synchronize_session="fetch"
+    )
+    session.query(Event).filter(Event.image_blob_id == blob.blob_id).update(
+        {Event.image_blob_id: None}, synchronize_session="fetch"
+    )
     session.delete(blob)
     return True
+
+
+def delete_alerts(session: Session, alert_ids: Iterable[str]) -> dict[str, int]:
+    """Remove alert-dependent private records before their foreign-key parents."""
+    ids = list(dict.fromkeys(item for item in alert_ids if item))
+    deleted = {"alerts": 0, "guardian_reviews": 0}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        review_ids = session.query(GuardianReview.review_id).filter(GuardianReview.alert_id.in_(chunk))
+        session.query(GuardianReviewFeedback).filter(
+            GuardianReviewFeedback.review_id.in_(review_ids)
+        ).delete(synchronize_session=False)
+        deleted["guardian_reviews"] += session.query(GuardianReview).filter(
+            GuardianReview.alert_id.in_(chunk)
+        ).delete(synchronize_session=False)
+        session.query(GuardianReviewPreview).filter(
+            GuardianReviewPreview.alert_id.in_(chunk)
+        ).delete(synchronize_session=False)
+        session.query(NotificationJob).filter(
+            NotificationJob.alert_id.in_(chunk)
+        ).delete(synchronize_session=False)
+        session.query(NotificationLog).filter(
+            NotificationLog.alert_id.in_(chunk)
+        ).delete(synchronize_session=False)
+        deleted["alerts"] += session.query(Alert).filter(
+            Alert.alert_id.in_(chunk)
+        ).delete(synchronize_session=False)
+    return deleted
 
 
 def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
@@ -91,6 +131,9 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
 
         if not deletable_ids:
             continue
+        # Flush ORM blob deletes before the bulk event delete. SQLite's
+        # foreign-key cascade can otherwise remove the same row first.
+        session.flush()
         risk_ids = [
             r[0] for r in session.query(RiskResult.risk_id)
             .filter(RiskResult.event_id.in_(deletable_ids)).all()
@@ -99,32 +142,8 @@ def delete_events(session: Session, event_ids: Iterable[str]) -> dict[str, int]:
             alert_ids = [
                 row[0] for row in session.query(Alert.alert_id).filter(Alert.risk_id.in_(risk_ids)).all()
             ]
-            if alert_ids:
-                preview_ids = [
-                    row[0] for row in session.query(GuardianReviewPreview.preview_id)
-                    .filter(GuardianReviewPreview.alert_id.in_(alert_ids)).all()
-                ]
-                review_ids = [
-                    row[0] for row in session.query(GuardianReview.review_id)
-                    .filter(GuardianReview.alert_id.in_(alert_ids)).all()
-                ]
-                if review_ids:
-                    session.query(GuardianReviewFeedback).filter(
-                        GuardianReviewFeedback.review_id.in_(review_ids)
-                    ).delete(synchronize_session=False)
-                session.query(NotificationJob).filter(
-                    NotificationJob.alert_id.in_(alert_ids)
-                ).delete(synchronize_session=False)
-                deleted["guardian_reviews"] += session.query(GuardianReview).filter(
-                    GuardianReview.alert_id.in_(alert_ids)
-                ).delete(synchronize_session=False)
-                if preview_ids:
-                    session.query(GuardianReviewPreview).filter(
-                        GuardianReviewPreview.preview_id.in_(preview_ids)
-                    ).delete(synchronize_session=False)
-            deleted["alerts"] += (
-                session.query(Alert).filter(Alert.risk_id.in_(risk_ids)).delete(synchronize_session=False)
-            )
+            for key, count in delete_alerts(session, alert_ids).items():
+                deleted[key] += count
             deleted["risk_results"] += (
                 session.query(RiskResult).filter(RiskResult.risk_id.in_(risk_ids)).delete(synchronize_session=False)
             )
@@ -159,15 +178,15 @@ def retry_pending_deletions(session: Session, *, limit: int = 100) -> dict[str, 
         .limit(limit)
         .all()
     )
-    event_ids = {blob.event_id for blob in blobs if blob.event_id}
-    removed = 0
-    for blob in blobs:
-        if delete_blob(session, blob):
-            removed += 1
-            for event in session.query(Event).filter(Event.screenshot_blob_id == blob.blob_id).all():
-                event.screenshot_blob_id = None
-            for event in session.query(Event).filter(Event.image_blob_id == blob.blob_id).all():
-                event.image_blob_id = None
+    # Only an explicit full-event deletion may remove its context after a
+    # retry. A screenshot-only expiry must keep the live event/risk/alert.
+    event_ids = {
+        row[0] for row in session.query(Event.event_id)
+        .filter(Event.deletion_state == "pending_delete")
+        .order_by(Event.deletion_requested_at.asc())
+        .limit(limit).all()
+    }
+    removed = sum(1 for blob in blobs if delete_blob(session, blob))
     session.flush()
     finished = {"events": 0, "risk_results": 0, "alerts": 0, "blobs": removed, "guardian_reviews": 0}
     for event_id in event_ids:

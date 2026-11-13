@@ -149,6 +149,10 @@ def _try_pystray() -> Callable[[], None] | None:
             try:
                 status = BrokerClient().status()
                 if status.get("paired"):
+                    if status.get("monitoring_enabled") is False:
+                        return "Monitoring off — check parent dashboard"
+                    if status.get("paused"):
+                        return "Monitoring paused by parent"
                     return f"Paired with {status.get('backend_url', '?')}"
             except Exception:
                 pass

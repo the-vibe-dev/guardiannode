@@ -263,6 +263,28 @@ def test_bootstrap_keeps_pending_on_transient_failure(tmp_path, monkeypatch):
     assert pending.exists(), "transient failures retry on next agent start"
 
 
+@pytest.mark.parametrize("status", [408, 425, 429])
+def test_bootstrap_keeps_pending_on_transient_http_rejection(tmp_path, monkeypatch, status):
+    pending = tmp_path / "pending_pairing.json"
+    pending.write_text(json.dumps({
+        "backend_url": "https://srv:8787",
+        "code": "123456",
+        "bundle": _pairing_bundle(),
+    }))
+
+    def fake_pair(*_args, **_kwargs):
+        request = httpx.Request("POST", "https://srv:8787/api/devices/pair/complete")
+        response = httpx.Response(status, request=request)
+        raise httpx.HTTPStatusError("temporarily unavailable", request=request, response=response)
+
+    monkeypatch.setattr(pairing_client, "pair_with_server", fake_pair)
+    assert pairing_client.bootstrap_pairing(
+        "kid-pc", "0.1.0-alpha.3", pending_path=pending,
+        device_path=tmp_path / "device.json", attempts=1, retry_delay=0.0,
+    ) is None
+    assert pending.exists(), "temporary HTTP failures must not discard the enrollment code"
+
+
 def test_bootstrap_refuses_mdns_discovery_without_explicit_url(tmp_path, monkeypatch):
     """mDNS discovery is advisory only; it must not choose a backend."""
     pending = tmp_path / "pending_pairing.json"

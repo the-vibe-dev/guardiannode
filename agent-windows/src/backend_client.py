@@ -125,6 +125,10 @@ class BackendClient:
                 )
                 if r.status_code == 200:
                     return r.json()
+                if r.status_code in (401, 403):
+                    # Revoked enrollment/consent is not a network outage.
+                    # Keep policy polling alive while disabling new collection.
+                    return {"monitoring_enabled": False}
         except Exception:
             pass
         return None

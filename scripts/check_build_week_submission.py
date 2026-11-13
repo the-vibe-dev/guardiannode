@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -73,6 +74,15 @@ SRT_TIMESTAMP = re.compile(r"(?P<h>\d{2}):(?P<m>\d{2}):(?P<s>\d{2}),(?P<ms>\d{3}
 
 
 def _tracked_markdown() -> list[Path]:
+    if not (ROOT / ".git").exists():
+        # Published source archives deliberately lack VCS history. Validate
+        # their actual files without silently skipping local-link checks.
+        skip = {".git", ".venv", "venv", "node_modules", "dist", "build", "__pycache__"}
+        paths = []
+        for directory, names, files in os.walk(ROOT, followlinks=False):
+            names[:] = sorted(name for name in names if name not in skip)
+            paths.extend(Path(directory) / name for name in sorted(files) if name.endswith(".md"))
+        return paths
     result = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.md"],
         cwd=ROOT,
@@ -161,7 +171,10 @@ def validate() -> dict[str, object]:
     if version != "0.1.0-alpha.3":
         failures.append(f"unexpected submission version: {version}")
 
+    baseline_verification = "unavailable_source_archive"
     try:
+        if not (ROOT / ".git").exists():
+            raise FileNotFoundError("Source archive has no Git history")
         tag_commit = subprocess.run(
             ["git", "rev-list", "-n", "1", "pre-build-week-2026"],
             cwd=ROOT,
@@ -169,10 +182,19 @@ def validate() -> dict[str, object]:
             capture_output=True,
             text=True,
         ).stdout.strip()
+        baseline_verification = "verified"
         if tag_commit != "36b2a547056d40eff32f00aa59b7820f7d3e98d5":
+            baseline_verification = "failed"
             failures.append(f"baseline tag resolves to unexpected commit: {tag_commit}")
     except subprocess.CalledProcessError:
+        baseline_verification = "failed"
         failures.append("baseline tag pre-build-week-2026 is missing")
+    except FileNotFoundError:
+        if (ROOT / ".git").exists():
+            baseline_verification = "failed"
+            failures.append("Git is required to verify this checkout's baseline tag")
+        else:
+            warnings.append("Source archive has no Git history; baseline tag provenance was not verified")
 
     warnings.extend(
         [
@@ -184,6 +206,7 @@ def validate() -> dict[str, object]:
     return {
         "status": "passed" if not failures else "failed",
         "version": version,
+        "baseline_verification": baseline_verification,
         "failures": failures,
         "manual_gates": warnings,
     }

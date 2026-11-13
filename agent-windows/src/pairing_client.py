@@ -343,7 +343,7 @@ def bootstrap_pairing(
 
     Returns saved credentials on success, existing credentials if already
     paired, or None if there is nothing to do / pairing failed. The pending
-    file is deleted on success and on a definitive rejection (HTTP 4xx —
+    file is deleted on success and on a definitive rejection (non-transient HTTP 4xx —
     the code is single-use and expires in 10 minutes, so retrying a rejected
     code is pointless). Transient errors (server still booting, network)
     are retried a few times, then left pending for the next agent start.
@@ -429,7 +429,7 @@ def bootstrap_pairing(
             }
         except httpx.HTTPStatusError as e:
             log.error("pairing rejected by %s: %s", backend_url, e.response.status_code)
-            if 400 <= e.response.status_code < 500:
+            if 400 <= e.response.status_code < 500 and e.response.status_code not in {408, 425, 429}:
                 if local_bootstrap and e.response.status_code in {401, 403}:
                     log.warning("local bootstrap still pending; use installer repair to issue a fresh device token")
                     return None
@@ -439,5 +439,5 @@ def bootstrap_pairing(
             log.warning("pairing attempt %d/%d failed: %s", attempt, attempts, e)
         if attempt < attempts:
             time.sleep(retry_delay)
-    log.warning("pairing not completed; will retry on next agent start")
+    log.warning("pairing not completed; retaining pending enrollment for retry")
     return None

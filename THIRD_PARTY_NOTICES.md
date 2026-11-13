@@ -23,6 +23,7 @@ other: inno setup, winsw, pyinstaller, ollama
 | cryptography | Apache-2.0 / BSD-3-Clause | https://github.com/pyca/cryptography |
 | argon2-cffi | MIT | https://github.com/hynek/argon2-cffi |
 | httpx | BSD-3-Clause | https://github.com/encode/httpx |
+| certifi | MPL-2.0 | https://github.com/certifi/python-certifi |
 | python-multipart | Apache-2.0 | https://github.com/Kludex/python-multipart |
 | PyYAML | MIT | https://github.com/yaml/pyyaml |
 | zeroconf | LGPL-2.1 | https://github.com/python-zeroconf/python-zeroconf |
@@ -43,6 +44,7 @@ deployment if their compliance requirements demand it.
 | Component | License | Project |
 |---|---|---|
 | httpx | BSD-3-Clause | https://github.com/encode/httpx |
+| certifi | MPL-2.0 | https://github.com/certifi/python-certifi |
 | PyYAML | MIT | https://github.com/yaml/pyyaml |
 | psutil | BSD-3-Clause | https://github.com/giampaolo/psutil |
 | mss | MIT | https://github.com/BoboTiG/python-mss |

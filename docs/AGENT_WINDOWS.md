@@ -1,8 +1,9 @@
 # Windows Agent
 
 Runs on the child's PC in the signed-in Windows desktop session. It captures the
-visible screen, OCRs visible text, sends screenshots to the backend for local
-classification, and keeps a tray icon visible for pause/status actions.
+configured visible screen region, sends screenshots to the parent-owned backend
+for OCR and local classification, and keeps a tray icon visible for pause/status
+actions. Current desktop capture covers the primary monitor.
 
 The installer also registers a GuardianNode Endpoint Broker service and
 watchdog components for resilience. Desktop capture still happens in the user's
@@ -19,13 +20,14 @@ matrix. Source testing without the broker can set `broker_enabled: false` in
 
 ```bash
 cd agent-windows
-python3 -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate
-pip install -e ".[dev]"
-python -m src.main --dry-run
+uv sync --frozen --extra dev
+uv run python -m src.main --dry-run
 ```
 
-`--dry-run` prints what would be sent without making network calls.
+`--dry-run` suppresses screenshot uploads and prints the proposed capture
+metadata. Startup can still perform pairing, health checks, and policy polling.
+Use an isolated synthetic configuration when evaluating this path; it is not
+a network-isolation mode.
 
 To pair and run from Python source on a Windows child PC, download the
 short-lived `.gnpair` bundle from **Devices -> Add device** and transfer it
@@ -81,8 +83,7 @@ and is migrated by the broker when possible.
 - `process_watcher.py` — `psutil`-based active process detection
 - `window_tracker.py` — `pywin32` active window detection
 - `screenshot_capture.py` — `mss`-based fast capture
-- `ocr_engine.py` — Tesseract OCR wrapper; PaddleOCR is only a planned optional path
-- `redactor.py` — best-effort text filtering helpers where used
+- `ocr_engine.py` — legacy source OCR helper; the installed screenshot pipeline performs OCR in the backend
 - `durable_queue.py` — encrypted SQLite retry queue for screenshot payloads during outages
 - `broker_protocol.py` — bounded versioned local IPC protocol
 - `broker_client.py` — session-process client for the endpoint broker
