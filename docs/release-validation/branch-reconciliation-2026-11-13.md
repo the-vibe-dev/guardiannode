@@ -26,6 +26,10 @@ old lockfiles over the reviewed application.
 | `dependabot/pip/backend/python-ulid-gte-2.2-and-lt-5.0` | Recorded as merged; existing `<4.0` major-version bound retained. |
 | `dependabot/docker/installer/server-linux/python-3.15.0-slim-bookworm` | Recorded as merged; runtime image stays on Python 3.12.13 until a 3.15 build and migration qualification succeeds. |
 
+Dependabot is configured to keep Python on its qualified minor series while
+allowing patch releases, and to defer `python-ulid` major-version proposals.
+Those gates can be removed after the corresponding compatibility tests.
+
 The dashboard production assets in `backend/app/static` were rebuilt from the
 consolidated package lock. Validation: frozen npm install, TypeScript check,
 76 component tests, 16 desktop/mobile Playwright tests, production build,

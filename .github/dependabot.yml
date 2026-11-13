@@ -13,6 +13,10 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    ignore:
+      # The application currently qualifies python-ulid below major version 4.
+      - dependency-name: "python-ulid"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "pip"
     directory: "/agent-windows"
@@ -20,6 +24,9 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    ignore:
+      - dependency-name: "python-ulid"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/dashboard"
@@ -34,3 +41,7 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    ignore:
+      # Keep Python on its qualified minor series; allow patch refreshes.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
