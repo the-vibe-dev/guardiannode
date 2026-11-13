@@ -6,7 +6,7 @@ React + Vite + Tailwind. Served by the backend at `/` in production; runs separa
 
 ```bash
 cd dashboard
-npm install
+npm ci
 npm run dev
 ```
 
@@ -19,21 +19,22 @@ loopback development backend. Never use the HTTP development path for family dat
 npm run build
 ```
 
-Output to `dist/`, which the backend serves as static files.
+Output is written to `dist/`. Replace the complete contents of
+`backend/app/static` with that output for a matching production bundle.
 
 ## Pages
 
 - `/setup` — first-run parent account and recovery phrase
 - `/login` — sign-in
-- `/` — alert-first family overview and guided setup progress
+- `/` — screenshot acceptance, per-device review status, alerts and guided setup
 - `/devices` — manage devices and secure `.gnpair` trust bundles
 - `/profiles` — child profiles
 - `/risks` — risk feed (filterable)
-- `/alerts/:id` — alert detail, feedback, and parent-confirmed device actions
-- `/requests` — parent review of child time/site/app requests
+- `/alerts/:id` — retained screenshot, detector reasoning, review notes, feedback, optional AI second opinion and evidence deletion
 - `/privacy` — explicit privacy choices, consent, and withdrawal
 - `/models` — Ollama model status + test
-- `/settings` — notifications, retention, complete recovery backups, and local encrypted exports
+- `/settings` — notifications, capture queues, retention, recovery backups and local encrypted exports
+- `/audit` — retained audit history with filters and pagination
 
 ## API client
 
@@ -63,3 +64,13 @@ Playwright covers desktop/mobile home, keyboard-reachable navigation, secure
 pairing instructions, the core parent pages, browser-console failures, and axe
 WCAG A/AA serious/critical violations. Set `PLAYWRIGHT_CHROMIUM_PATH` to a local
 Chromium binary when Playwright-managed browsers are not installed.
+
+## Product scope
+
+No screen-time limits, schedules, app/website blocking or exception approvals
+are offered. A screenshot-monitoring pause controls capture only. Historical
+restriction receipts remain available solely for recovery of older installations.
+
+Per-device status separates server receipt from completed processing and reports
+AI, rules-only, degraded and unknown states. Read timestamps and diagnostics;
+no alert or an empty queue is not proof of complete or safe activity coverage.

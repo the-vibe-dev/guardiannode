@@ -1,22 +1,20 @@
 """Alert review + actions."""
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime, timedelta
-from pathlib import PureWindowsPath
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import String, and_, cast, or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app import settings as settings_mod
 from app.api.deps import get_db_dep, parent_user, require_recent_auth
-from app.db.models import Alert, DeviceCommand, Event, RiskResult, User
-from app.services import encryption, purge
+from app.db.models import Alert, DeviceCommand, Event, EvidenceBlob, RiskResult, User
+from app.services import encryption, purge, taxonomy
 from app.services.audit import log_action
+from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 actions_router = APIRouter(prefix="/actions", tags=["actions"])
@@ -189,6 +187,7 @@ def get_alert(
             redacted_text = encryption.decrypt_text(e.redacted_text_enc)
         except Exception:
             redacted_text = None
+    screenshot_status = _screenshot_status(db, e)
     log_action(db, actor=str(user.id), action="alert.view", target=alert_id)
     db.commit()
     return AlertDetail(
@@ -200,7 +199,8 @@ def get_alert(
             "categories": r.categories if r else [],
             "summary": r.summary if r else "",
             "evidence": r.evidence if r else [],
-            "recommended_action": r.recommended_action if r else "none",
+            "recommended_action": taxonomy.normalize_action(r.recommended_action) if r else "none",
+            "classifier_status": r.classifier_status if r else "unknown",
             "model": r.model if r else None,
             "rules_triggered": r.rules_triggered if r else [],
             "confidence": r.confidence if r else 0.0,
@@ -214,6 +214,8 @@ def get_alert(
             "window_title": e.window_title if e else None,
             "url": e.url if e else None,
             "timestamp": e.timestamp.isoformat() if e else None,
+            "has_screenshot": screenshot_status == "available",
+            "screenshot_status": screenshot_status,
         },
         redacted_text=redacted_text,
         synthetic=bool((e.event_metadata or {}).get("synthetic")) if e else False,
@@ -228,6 +230,23 @@ def get_alert(
             )
         } if e and (e.event_metadata or {}).get("synthetic") else None,
     )
+
+
+def _screenshot_status(db: Session, event: Event | None) -> str:
+    """Evidence availability without decrypting pixels or disclosing paths."""
+    if event is None or not event.screenshot_blob_id:
+        return "not_retained"
+    if event.deletion_state != "active":
+        return "pending_delete"
+    blob = db.get(EvidenceBlob, event.screenshot_blob_id)
+    if blob is None:
+        return "missing"
+    if blob.deletion_state != "active":
+        return "pending_delete"
+    try:
+        return "available" if resolve_stored_evidence_path(blob.encrypted_path).is_file() else "missing"
+    except (OSError, UnsafeEvidencePathError):
+        return "missing"
 
 
 class ReviewRequest(BaseModel):
@@ -294,7 +313,9 @@ def record_feedback(
 
 
 class ActionRequest(BaseModel):
-    action: str = Field(pattern="^(notify|escalate|pause_app|block_app|delete_evidence)$")
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(pattern="^(notify|escalate|delete_evidence)$")
     note: str | None = Field(default=None, max_length=4096)
 
 
@@ -308,7 +329,7 @@ def take_action(
     a = _visible_alert(db, alert_id)
     if a is None:
         raise HTTPException(404, "Alert not found")
-    if req.action in {"pause_app", "block_app", "delete_evidence"}:
+    if req.action == "delete_evidence":
         raise HTTPException(
             status_code=409,
             detail={
@@ -343,18 +364,12 @@ def take_action(
     return _to_dto(a)
 
 
-_FQDN_RE = re.compile(
-    r"^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$"
-)
-
-
 class ConfirmedActionRequest(BaseModel):
-    action: str = Field(
-        pattern="^(show_child_prompt|pause_app|block_domain|delete_evidence)$"
-    )
-    target: str | None = Field(default=None, max_length=1024)
-    duration_seconds: int | None = None
-    message: str | None = Field(default=None, max_length=500)
+    """Evidence deletion is the only newly supported confirmed action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(pattern="^delete_evidence$")
     confirmed_preview: str | None = Field(default=None, max_length=2048)
 
 
@@ -385,6 +400,8 @@ class ActionExecutionDTO(BaseModel):
     pending_recovery_processes: int | None = None
     legacy_unverified_processes: int | None = None
     undone: int | None = None
+    removed_domain_entries: int | None = None
+    pending_domain_blocks: int | None = None
 
 
 class ActionDTO(BaseModel):
@@ -401,42 +418,7 @@ class ActionDTO(BaseModel):
     execution: ActionExecutionDTO | None = None
 
 
-def _canonical_executable(value: str | None) -> str:
-    raw = (value or "").strip()
-    path = PureWindowsPath(raw)
-    if not raw or not path.is_absolute() or ".." in path.parts or path.suffix.lower() != ".exe":
-        raise HTTPException(422, "pause_app requires an exact absolute .exe path")
-    return str(path)
-
-
-def _canonical_domain(value: str | None) -> str:
-    raw = (value or "").strip().rstrip(".").lower()
-    if any(mark in raw for mark in ("://", "/", "*", "@")):
-        raise HTTPException(422, "block_domain requires one exact FQDN")
-    try:
-        canonical = raw.encode("idna").decode("ascii")
-    except UnicodeError as exc:
-        raise HTTPException(422, "block_domain target is not a valid FQDN") from exc
-    if not _FQDN_RE.fullmatch(canonical):
-        raise HTTPException(422, "block_domain requires one exact FQDN")
-    return canonical
-
-
 def _action_payload(req: ConfirmedActionRequest) -> tuple[dict, str]:
-    if req.action == "pause_app":
-        target = _canonical_executable(req.target)
-        if req.duration_seconds not in {900, 3600, 86400}:
-            raise HTTPException(422, "pause_app duration must be 15 minutes, 1 hour, or 24 hours")
-        label = {900: "15 minutes", 3600: "1 hour", 86400: "24 hours"}[req.duration_seconds]
-        return {"target": target, "duration_seconds": req.duration_seconds}, f"Pause {target} for {label}"
-    if req.action == "block_domain":
-        target = _canonical_domain(req.target)
-        return {"target": target}, f"Block exactly {target} until you undo this action"
-    if req.action == "show_child_prompt":
-        message = (req.message or "").strip()
-        if not message:
-            raise HTTPException(422, "show_child_prompt requires a message")
-        return {"message": message}, f"Show this notice on the child's device: {message}"
     return {}, "Permanently delete this alert's stored evidence and safety record"
 
 
@@ -456,6 +438,7 @@ def _command_dto(command: DeviceCommand) -> ActionDTO:
             "resumed_processes", "failed_processes", "skipped_protected_processes",
             "already_suspended_elsewhere", "uninspectable_processes", "stale_process_records",
             "pending_resume_processes", "pending_recovery_processes", "legacy_unverified_processes", "undone",
+            "removed_domain_entries", "pending_domain_blocks",
         ):
             value = result.get(field)
             if type(value) is int and 0 <= value <= 10_000_000:
@@ -515,8 +498,6 @@ def create_confirmed_action(
         raise HTTPException(404, "Alert not found")
     if not alert.device_id:
         raise HTTPException(409, "This alert is not linked to a child device")
-    if req.action in {"pause_app", "block_domain"} and not settings_mod.settings.device_enforcement_enabled:
-        raise HTTPException(409, "Device enforcement is not enabled on this installation")
     payload, preview = _action_payload(req)
     if req.confirmed_preview != preview:
         raise HTTPException(409, {"code": "confirmation_required", "preview": preview})
@@ -564,8 +545,18 @@ def undo_action(
     original = db.get(DeviceCommand, action_id)
     if original is None or original.command_type not in {"pause_app", "block_domain"}:
         raise HTTPException(409, "This action cannot be undone")
-    if db.query(DeviceCommand).filter(DeviceCommand.undo_of == action_id).first():
-        raise HTTPException(409, "This action has already been undone")
+    now = datetime.now(UTC)
+    previous = db.query(DeviceCommand).filter(DeviceCommand.undo_of == action_id).order_by(
+        DeviceCommand.created_at.desc(), DeviceCommand.command_id.desc(),
+    ).first()
+    if previous is not None:
+        deadline = previous.expires_at
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        if previous.status in {"queued", "claimed"} and deadline <= now:
+            previous.status = "expired"
+        elif previous.status not in {"failed", "rejected", "expired"}:
+            raise HTTPException(409, "Recovery already has an active or successful Undo receipt")
     command = DeviceCommand(
         command_id=str(ULID()),
         device_id=original.device_id,
@@ -579,7 +570,7 @@ def undo_action(
         preview=f"Undo: {original.preview}",
         status="queued",
         created_by=user.id,
-        expires_at=datetime.now(UTC) + timedelta(hours=24),
+        expires_at=now + timedelta(hours=24),
         undo_of=action_id,
     )
     db.add(command)

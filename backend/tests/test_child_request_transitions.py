@@ -15,7 +15,7 @@ def _request() -> Request:
     })
 
 
-def test_parent_decision_cannot_overwrite_or_approve_expired_request(db_session):
+def test_retired_approvals_preserve_existing_request_history(db_session):
     user = User(display_name="Synthetic Parent", password_hash="test", recovery_hash="test")
     db_session.add(user)
     db_session.add(ChildRequest(
@@ -28,13 +28,10 @@ def test_parent_decision_cannot_overwrite_or_approve_expired_request(db_session)
     ))
     db_session.commit()
 
-    decided = review_child_request("open", ChildRequestReview(status="approved"), _request(), db_session, user)
-    assert decided.status == "approved"
-
     for request_id in ("open", "expired"):
-        with pytest.raises(HTTPException) as conflict:
-            review_child_request(request_id, ChildRequestReview(status="denied"), _request(), db_session, user)
-        assert conflict.value.status_code == 409
+        with pytest.raises(HTTPException) as retired:
+            review_child_request(request_id, ChildRequestReview(status="approved"), _request(), db_session, user)
+        assert retired.value.status_code == 410
     db_session.expire_all()
-    assert db_session.get(ChildRequest, "open").status == "approved"
-    assert db_session.get(ChildRequest, "expired").status == "expired"
+    assert db_session.get(ChildRequest, "open").status == "open"
+    assert db_session.get(ChildRequest, "expired").status == "open"

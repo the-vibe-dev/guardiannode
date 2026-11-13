@@ -58,6 +58,32 @@ _SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 VALID_TIERS = {"full", "vision", "text_llm", "rules_only"}
 
 
+class InvalidModelAssessmentError(RuntimeError):
+    """Safe retry signal; the encrypted queue retains the unreviewed frame."""
+
+
+def _classifier_status(tier: str, ocr: OcrResult, vision: dict, text: dict) -> str:
+    if not ocr.ok:
+        return f"ocr_{ocr.status}"
+    if tier == "rules_only":
+        return "ok"
+    if tier in {"vision", "full"} and not vision.get("model"):
+        return (
+            "unclassified_invalid_vision_response"
+            if vision.get("status") == "unclassified_invalid_model_response"
+            else "unclassified_vision_unavailable"
+        )
+    if tier in {"text_llm", "full"} and ocr.text.strip() and not text.get("model"):
+        return (
+            "unclassified_invalid_text_response"
+            if text.get("status") == "unclassified_invalid_model_response"
+            else "unclassified_text_unavailable"
+        )
+    if tier == "text_llm" and not ocr.text.strip():
+        return "no_text_to_review"
+    return "ok"
+
+
 def _monitoring_active(session: Session, device: Device | None) -> bool:
     return bool(
         device is not None
@@ -220,6 +246,7 @@ async def ingest_screenshot(
         device_id=device_id,
     )
     severity_for_metrics = "none"
+    succeeded = False
     try:
         result = await _ingest_inner(
             session,
@@ -242,9 +269,10 @@ async def ingest_screenshot(
             source_ip=source_ip,
         )
         severity_for_metrics = result.get("risk_level", "none")
+        succeeded = True
         return result
     finally:
-        pipeline_metrics.finish(event_id, severity=severity_for_metrics)
+        pipeline_metrics.finish(event_id, severity=severity_for_metrics, succeeded=succeeded)
 
 
 async def _ingest_inner(
@@ -423,6 +451,17 @@ async def _ingest_inner(
     if not consent.choice_allowed(session, "apps_and_urls"):
         app_name = window_title = url = None
 
+    classifier_status = _classifier_status(tier, ocr_result, vision_result, text_result)
+    invalid_assessment = any(
+        item.get("status") == "unclassified_invalid_model_response"
+        for item in (vision_result, text_result)
+    )
+    if invalid_assessment and not _should_store(severity):
+        # A broken JSON response is not a clean screen. Keep the original
+        # encrypted pending frame for the existing bounded retry/quarantine
+        # path. Strong deterministic findings are persisted immediately below.
+        raise InvalidModelAssessmentError("invalid_model_assessment")
+
     # ----- Step 4: Persist event + (optional) blob -----
     blob_id: str | None = None
     if _should_store(severity):
@@ -469,7 +508,9 @@ async def _ingest_inner(
             "storage": "encrypted" if blob_id else "discarded_after_classification",
             "vision_model": vision_result.get("model"),
             "text_model": text_result.get("model"),
-            "vision_used": bool(vision_result),
+            "vision_used": bool(vision_result.get("model")),
+            "vision_status": vision_result.get("status"),
+            "text_status": text_result.get("status"),
             "tesseract_used": tesseract_used,
             "ocr_status": ocr_result.status,
             "ocr_error_code": ocr_result.error_code,
@@ -505,20 +546,9 @@ async def _ingest_inner(
         false_positive_notes="",
         prompt_version=vision_result.get("prompt_version") or text_result.get("prompt_version"),
         rules_version=text_result.get("rules_version"),
-        # Reduced-protection marker: no model judged this frame (vision missing
-        # or failed AND the text LLM never produced a result). Rules still ran.
-        classifier_status=(
-            f"ocr_{ocr_result.status}"
-            if not ocr_result.ok
-            else "ok"
-            if (
-                tier == "rules_only"
-                or vision_result.get("model")
-                or text_result.get("model")
-                or text_result.get("status") == "ok"
-            )
-            else "unclassified_model_unavailable"
-        ),
+        # Completion is specific to the configured modalities. A valid text
+        # result cannot silently substitute for a missing vision assessment.
+        classifier_status=classifier_status,
     )
     session.add(rr)
     session.flush()
@@ -550,6 +580,9 @@ async def _ingest_inner(
         "score": int(merged.get("score", 0)),
         "categories": merged.get("categories", []),
         "blob_stored": blob_id is not None,
-        "vision_used": bool(vision_result),
+        "vision_used": bool(vision_result.get("model")),
+        "vision_status": vision_result.get("status"),
+        "text_status": text_result.get("status"),
+        "classifier_status": classifier_status,
         "extracted_text_chars": len(extracted_text),
     }

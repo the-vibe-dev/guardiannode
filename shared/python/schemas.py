@@ -70,8 +70,6 @@ class RecommendedAction(str, Enum):
     NONE = "none"
     LOG = "log"
     ALERT_PARENT = "alert_parent"
-    PAUSE_APP = "pause_app"
-    BLOCK_APP = "block_app"
     EMERGENCY_REVIEW = "emergency_review"
 
 
@@ -113,16 +111,6 @@ class EvidenceKind(str, Enum):
 class ModelRole(str, Enum):
     TEXT_SAFETY_CLASSIFIER = "text_safety_classifier"
     IMAGE_SAFETY_CLASSIFIER = "image_safety_classifier"
-
-
-class EnforcementAction(str, Enum):
-    LOG_ONLY = "log_only"
-    NOTIFY_PARENT = "notify_parent"
-    NOTIFY_PARENT_DIGEST = "notify_parent_digest"
-    PAUSE_APP = "pause_app"
-    KILL_APP = "kill_app"
-    BLOCK_DOMAIN = "block_domain"
-    PROMPT_CHILD = "prompt_child"
 
 
 # ----- Models ----------------------------------------------------------------
@@ -211,21 +199,6 @@ class SeverityThresholds(BaseModel):
     notify_at: RiskLevel = RiskLevel.HIGH
 
 
-class EnforcementMap(BaseModel):
-    on_critical: list[EnforcementAction] = Field(
-        default_factory=lambda: [EnforcementAction.NOTIFY_PARENT]
-    )
-    on_high: list[EnforcementAction] = Field(
-        default_factory=lambda: [EnforcementAction.NOTIFY_PARENT]
-    )
-    on_medium: list[EnforcementAction] = Field(
-        default_factory=lambda: [EnforcementAction.NOTIFY_PARENT_DIGEST]
-    )
-    on_low: list[EnforcementAction] = Field(
-        default_factory=lambda: [EnforcementAction.LOG_ONLY]
-    )
-
-
 class RetentionDays(BaseModel):
     critical: int = 90
     high: int = 90
@@ -244,7 +217,6 @@ class Policy(BaseModel):
     image_safety_enabled: bool = True
     clipboard_monitoring_enabled: bool = False
     severity_thresholds: SeverityThresholds = Field(default_factory=SeverityThresholds)
-    enforcement: EnforcementMap = Field(default_factory=EnforcementMap)
     retention_days: RetentionDays = Field(default_factory=RetentionDays)
 
 

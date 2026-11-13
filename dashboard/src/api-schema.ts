@@ -1611,7 +1611,10 @@ export interface paths {
         /** List Child Requests */
         get: operations["list_child_requests_api_child_requests_get"];
         put?: never;
-        /** Create Child Request */
+        /**
+         * Create Child Request
+         * @deprecated
+         */
         post: operations["create_child_request_api_child_requests_post"];
         delete?: never;
         options?: never;
@@ -1645,7 +1648,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Review Child Request */
+        /**
+         * Review Child Request
+         * @deprecated
+         */
         post: operations["review_child_request_api_child_requests__request_id__review_post"];
         delete?: never;
         options?: never;
@@ -1760,6 +1766,10 @@ export interface components {
             legacy_unverified_processes?: number | null;
             /** Undone */
             undone?: number | null;
+            /** Removed Domain Entries */
+            removed_domain_entries?: number | null;
+            /** Pending Domain Blocks */
+            pending_domain_blocks?: number | null;
         };
         /** ActionRequest */
         ActionRequest: {
@@ -1936,12 +1946,41 @@ export interface components {
             policy_id?: string | null;
             /** Policy Version */
             policy_version?: string | null;
+            /** Policy Generation */
+            policy_generation?: string | null;
             /** Collector Version */
             collector_version?: string | null;
             /** Timestamp */
             timestamp?: string | null;
             /** Idempotency Key */
             idempotency_key?: string | null;
+        };
+        /** CaptureDeviceStatus */
+        CaptureDeviceStatus: {
+            /** Device Id */
+            device_id: string;
+            /** Hostname */
+            hostname: string;
+            /** Connection Status */
+            connection_status: string;
+            /** Latest Capture At */
+            latest_capture_at: string | null;
+            /** Last Reviewed At */
+            last_reviewed_at: string | null;
+            /** Last Review Status */
+            last_review_status: string;
+            /** Classifier Status */
+            classifier_status: string | null;
+            /** Review Model */
+            review_model: string | null;
+            /** Pending Review Count */
+            pending_review_count: number;
+            /** Reviewing Count */
+            reviewing_count: number;
+            /** Waiting Upload Count */
+            waiting_upload_count: number | null;
+            /** Queue Report Age Seconds */
+            queue_report_age_seconds: number | null;
         };
         /** CaptureQueueCleanup */
         CaptureQueueCleanup: {
@@ -2066,6 +2105,13 @@ export interface components {
             estimated_wait_seconds: number | null;
             /** Last Reviewed At */
             last_reviewed_at: string | null;
+            /** Devices */
+            devices?: components["schemas"]["CaptureDeviceStatus"][];
+            /**
+             * Review Failures 5M
+             * @default 0
+             */
+            review_failures_5m: number;
         };
         /** ChildRequestCreate */
         ChildRequestCreate: {
@@ -2124,16 +2170,13 @@ export interface components {
             /** Response Note */
             response_note?: string | null;
         };
-        /** ConfirmedActionRequest */
+        /**
+         * ConfirmedActionRequest
+         * @description Evidence deletion is the only newly supported confirmed action.
+         */
         ConfirmedActionRequest: {
             /** Action */
             action: string;
-            /** Target */
-            target?: string | null;
-            /** Duration Seconds */
-            duration_seconds?: number | null;
-            /** Message */
-            message?: string | null;
             /** Confirmed Preview */
             confirmed_preview?: string | null;
         };
@@ -2502,6 +2545,8 @@ export interface components {
             queued_frames: number;
             /** Agent Version */
             agent_version?: string | null;
+            /** Applied Policy Generation */
+            applied_policy_generation?: string | null;
         };
         /** ImmediateAction */
         ImmediateAction: {

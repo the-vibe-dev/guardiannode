@@ -3,7 +3,7 @@
 A risky note sitting on screen gets re-captured and re-classified every time
 anything else on the screen changes, which flooded the Risk Feed with dozens
 of near-identical alerts. Instead of a new alert per frame, an open alert with
-the same (device, profile, severity, categories) within the dedup window gets
+the same (device, profile, source, severity, categories) within the dedup window gets
 its repeat_count bumped and its risk_id pointed at the newest RiskResult, so
 the detail page always shows the latest evidence.
 
@@ -27,11 +27,12 @@ from app.settings import settings
 log = logging.getLogger(__name__)
 
 
-def dedup_key(device_id: str | None, profile_id: str | None, severity: str, categories: list[str]) -> str:
+def dedup_key(device_id: str | None, profile_id: str | None, severity: str, categories: list[str], source: str = "") -> str:
     raw = "|".join([
         device_id or "",
         profile_id or "",
         severity,
+        source,
         ",".join(sorted(set(categories or []))),
     ])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
@@ -57,7 +58,7 @@ def upsert_alert(
     first occurrence (repeats don't re-notify).
     """
     now = datetime.now(UTC)
-    key = dedup_key(device_id, profile_id, severity, categories)
+    key = dedup_key(device_id, profile_id, severity, categories, source)
     window = timedelta(seconds=settings.alert_dedup_window_seconds)
     if window.total_seconds() > 0:
         cutoff = now - window

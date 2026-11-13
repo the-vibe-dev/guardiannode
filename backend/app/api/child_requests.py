@@ -1,18 +1,15 @@
-"""Child-originated requests for time/site/app exceptions."""
+"""Read-only legacy exception history; new requests and decisions are retired."""
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
-from ulid import ULID
 
-from app.api.deps import current_device, current_user, get_db_dep
+from app.api.deps import current_device, get_db_dep, parent_user
 from app.db.models import ChildRequest, Device, User
-from app.services.audit import log_action
-from app.services.profile_resolution import resolve_profile
 
 router = APIRouter(prefix="/child-requests", tags=["child-requests"])
 
@@ -58,42 +55,14 @@ def _expire_open(db: Session) -> int:
     ).update({ChildRequest.status: "expired"}, synchronize_session="fetch")
 
 
-@router.post("", response_model=ChildRequestDTO)
+@router.post("", response_model=ChildRequestDTO, deprecated=True)
 def create_child_request(
     req: ChildRequestCreate,
     request: Request,
     db: Session = Depends(get_db_dep),
     device: Device = Depends(current_device),
 ):
-    _expire_open(db)
-    open_count = db.query(ChildRequest).filter(
-        ChildRequest.device_id == device.device_id,
-        ChildRequest.status == "open",
-    ).count()
-    if open_count >= 5:
-        raise HTTPException(429, "This device already has five open requests")
-    resolved = resolve_profile(db, device=device, payload_profile_id=req.profile_id)
-    row = ChildRequest(
-        request_id=str(ULID()),
-        device_id=device.device_id,
-        profile_id=resolved.profile_id,
-        request_type=req.request_type,
-        target=req.target,
-        reason=req.reason,
-        status="open",
-        expires_at=datetime.now(UTC) + timedelta(days=7),
-    )
-    db.add(row)
-    log_action(
-        db,
-        actor=device.device_id,
-        action="child_request.create",
-        target=row.request_id,
-        details={"request_type": row.request_type, "target": row.target},
-        source_ip=request.client.host if request.client else None,
-    )
-    db.commit()
-    return row
+    raise HTTPException(410, "Exception requests are retired. GuardianNode now focuses on screenshot capture and AI review.")
 
 
 @router.get("/mine", response_model=list[ChildRequestDTO])
@@ -119,7 +88,7 @@ def list_child_requests(
     cursor: str | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db_dep),
-    _: User = Depends(current_user),
+    _: User = Depends(parent_user),
 ):
     _expire_open(db)
     q = db.query(ChildRequest)
@@ -155,42 +124,12 @@ class ChildRequestReview(BaseModel):
     response_note: str | None = Field(default=None, max_length=4096)
 
 
-@router.post("/{request_id}/review", response_model=ChildRequestDTO)
+@router.post("/{request_id}/review", response_model=ChildRequestDTO, deprecated=True)
 def review_child_request(
     request_id: str,
     req: ChildRequestReview,
     request: Request,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
 ):
-    now = datetime.now(UTC)
-    _expire_open(db)
-    # Compare-and-set preserves the first parent's decision when two open
-    # dashboards act at once; stale clients cannot overwrite a final response.
-    updated = db.query(ChildRequest).filter(
-        ChildRequest.request_id == request_id,
-        ChildRequest.status == "open",
-        or_(ChildRequest.expires_at.is_(None), ChildRequest.expires_at > now),
-    ).update({
-        ChildRequest.status: req.status,
-        ChildRequest.response_note: req.response_note,
-        ChildRequest.reviewed_by: str(user.id),
-        ChildRequest.reviewed_at: now,
-    }, synchronize_session="fetch")
-    row = db.get(ChildRequest, request_id)
-    if updated != 1:
-        db.commit()  # retain automatic expiration even when review is refused
-        if row is None:
-            raise HTTPException(404, "Request not found")
-        raise HTTPException(409, "This request is no longer open. Refresh to see its response.")
-    log_action(
-        db,
-        actor=str(user.id),
-        action="child_request.review",
-        target=request_id,
-        details={"status": req.status},
-        source_ip=request.client.host if request.client else None,
-    )
-    db.commit()
-    db.refresh(row)
-    return row
+    raise HTTPException(410, "Exception approvals are retired. Existing request history remains available for reference.")

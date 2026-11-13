@@ -1,8 +1,8 @@
 # Child profiles & custom watch phrases
 
 GuardianNode can watch for the specific things that identify *your* child — their
-real name, home address, school, phone number — and alert you the moment any of
-them shows up on screen. You set this up once in the dashboard. **You never touch
+real name, home address, school or phone number - and flag a match in captured
+text that reaches the review pipeline. You set this up once in the dashboard. **You never touch
 the child's PC for this.**
 
 ## 1. Create a profile for your child
@@ -10,8 +10,8 @@ the child's PC for this.**
 1. Open the dashboard and go to **Profiles**.
 2. Click **Add profile**.
 3. Enter a name (e.g. "Alex") and pick the **age group** (Under 10 / 10–13 /
-   14–17). The age group tunes how sensitive detection is — younger ages flag
-   more aggressively.
+   14–17). The age group supplies context to the classifier; configured review
+   thresholds determine which results become alerts.
 4. In **Custom watch phrases**, add the personal details you want flagged, one
    per line. For example:
    - `Alex Example` (name)
@@ -27,18 +27,18 @@ the child's PC for this.**
 2. Find the child's PC in the list.
 3. In the **Child** column, pick the profile you just created from the dropdown.
 
-That's it. From now on, every screenshot from that device is checked against the
-profile's watch phrases.
+Eligible screenshots from that device use the assigned profile. A phrase must
+be visible in a sampled frame and successfully extracted or identified for it
+to be matched. OCR and models can miss text.
 
 ## What happens when a phrase is seen
 
-If any watch phrase appears on screen — typed in a Discord chat, pasted into a
-document, or even printed inside an image (like a photo of a school ID) — you get
-a **high-severity alert** in the Risk Feed with the category `custom_watch`. The
-alert quotes where it was seen.
+When the pipeline matches a configured watch phrase in captured text, it can
+produce a **high-severity alert** with the category `custom_watch`, subject to
+current capture and alert policy. The finding includes the matched evidence.
+A visible phrase does not guarantee a capture, readable OCR or an AI match.
 
-This is the single most useful signal for catching a child sharing identifying
-information with someone they met online ("what's your address?", "what school do
+This can help surface possible sharing of identifying information ("what's your address?", "what school do
 you go to?"). It works alongside the AI's normal grooming/self-harm/scam
 detection, not instead of it.
 
@@ -59,3 +59,6 @@ detection, not instead of it.
 The child's PC just captures the screen. *You* decide — from your dashboard —
 which child a device belongs to and what to watch for. The kid never sees the
 watch list, and you don't have to reconfigure their machine to change it.
+
+Watch phrases influence review and alerts. They never block a website, close an
+app or limit time spent on the device.

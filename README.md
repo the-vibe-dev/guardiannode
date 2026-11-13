@@ -11,14 +11,15 @@
 
 # GuardianNode Alpha / Developer Preview
 
-> **Reviewed source bundle — 13 November 2026, review.2.** This copy includes engineering,
-> privacy, reliability, recovery, dashboard and dependency improvements. See
-> [START_HERE.md](START_HERE.md) for the current report, verification evidence,
-> upgrade guidance and remaining release gates. Historical records below describe
-> earlier builds; this bundle remains an alpha source evaluation, not a newly
-> qualified signed Windows release.
+> **Screenshot and AI review edition - 13 November 2026, review.3.** This copy
+> is based on the supplied `guardiannode-main (6).zip` and focuses on capture,
+> AI-assisted assessment and parent review. Screen-time limits, app/website
+> blocking and exception approvals are outside this edition. See
+> [START_HERE.md](START_HERE.md) and the [integration record](docs/release-validation/screenshot-review-2026-11-13.md)
+> for changes, validation and upgrade guidance. This remains an alpha source
+> evaluation; historical release records do not qualify this changed build.
 
-**Local-first AI safety monitoring for families.**
+**Local-first screenshots and AI-assisted review for families.**
 
 [Documentation](https://the-vibe-dev.github.io/guardiannode/) ·
 [Install guides](https://the-vibe-dev.github.io/guardiannode/PARENT_GUIDES/install-on-one-pc/) ·
@@ -61,7 +62,27 @@ administer for their own children. It is not stealthware, employee monitoring
 software, a keylogger, or a tool for credential theft. The Windows agent is
 visible through its tray/status UI and the backend is operated by the parent.
 
-## Build Week 2026
+## Current product focus
+
+GuardianNode captures permitted visible screen content, reviews it using local
+OCR, rules and optional AI, and helps a parent understand retained evidence.
+The dashboard prioritizes capture freshness, review status, findings and feedback.
+There are no screen-time limits, website blocks, app restrictions or exception
+requests. Capture pause/resume controls screenshot collection and privacy only.
+
+Local image and text assessment remain available through the configured Ollama
+pipeline. Optional Guardian Review remains a separate, explicitly approved
+second opinion on minimized text. The app does not silently send screenshots to
+an external review service.
+
+See [Screenshot capture and AI review](docs/SCREENSHOT_REVIEW.md), the focused
+[roadmap](docs/ROADMAP.md) and [legacy recovery guidance](docs/ENFORCEMENT.md).
+
+## Historical Build Week 2026
+
+The following records describe the earlier Build Week work. They are preserved
+for provenance and do not establish qualification or scope for this edition.
+
 
 ### What GuardianNode is
 

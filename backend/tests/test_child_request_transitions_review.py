@@ -1,4 +1,4 @@
-"""Prevent expired requests and stale parent decisions from being approved."""
+"""Retired exception workflows preserve historical records without decisions."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -20,27 +20,27 @@ def _request(*, request_id="request-1", status="open", expired=False):
 
 def test_parent_cannot_overwrite_an_existing_decision(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
-    _request()
+    _request(status="approved")
     first = client.post("/api/child-requests/request-1/review", json={
         "status": "approved", "response_note": "After homework.",
     })
-    assert first.status_code == 200
+    assert first.status_code == 410
     stale = client.post("/api/child-requests/request-1/review", json={
         "status": "denied", "response_note": "stale response",
     })
-    assert stale.status_code == 409
+    assert stale.status_code == 410
     stored = client.get("/api/child-requests").json()["items"][0]
     assert stored["status"] == "approved"
-    assert stored["response_note"] == "After homework."
+    assert stored["response_note"] is None
 
 
 def test_expired_request_cannot_be_reviewed_even_without_prior_list(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _request(expired=True)
     response = client.post("/api/child-requests/request-1/review", json={"status": "approved"})
-    assert response.status_code == 409
+    assert response.status_code == 410
     with get_sessionmaker()() as db:
-        assert db.get(ChildRequest, "request-1").status == "expired"
+        assert db.get(ChildRequest, "request-1").status == "open"
 
 
 def test_list_expiration_applies_before_open_filter_and_count(monkeypatch, tmp_path):
@@ -52,7 +52,7 @@ def test_list_expiration_applies_before_open_filter_and_count(monkeypatch, tmp_p
     assert [item["request_id"] for item in body["items"]] == ["current"]
 
 
-def test_missing_request_review_is_not_found(monkeypatch, tmp_path):
+def test_missing_request_review_is_also_retired(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     response = client.post("/api/child-requests/missing/review", json={"status": "approved"})
-    assert response.status_code == 404
+    assert response.status_code == 410

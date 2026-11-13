@@ -128,6 +128,10 @@ def update_profile(
     if req.reset_policy_to_age_default:
         p.alert_policy = profile_policy.default_policy_for_age(p.age_group)
     elif req.alert_policy is not None:
+        try:
+            profile_policy.validate_update(req.alert_policy)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         # Store the normalized policy so it's always complete/valid.
         p.alert_policy = profile_policy.normalize(req.alert_policy, p.age_group)
     log_action(db, actor=str(user.id), action="profile.update", target=profile_id)

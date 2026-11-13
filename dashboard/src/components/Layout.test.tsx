@@ -18,9 +18,10 @@ function renderLayout() {
 describe("Layout responsive navigation", () => {
   it("renders every navigation destination", () => {
     renderLayout();
-    for (const label of ["Home", "Alerts", "Children", "Devices", "Requests", "Privacy & consent", "Models", "Audit", "Review history", "Diagnostics & settings"]) {
+    for (const label of ["Home", "Alerts", "Children", "Devices", "Privacy & consent", "Models", "Audit", "AI review history", "Diagnostics & settings"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
+    expect(screen.queryByRole("link", { name: "Requests" })).toBeNull();
   });
 
   it("uses responsive breakpoint classes rather than a fixed desktop-only width", () => {

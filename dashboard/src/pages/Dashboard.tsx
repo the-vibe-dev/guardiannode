@@ -1,15 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Check, CircleAlert, Clock3, Images, Laptop, ShieldCheck, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
-import { api, type Alert, type CaptureStatus, type Device, type Profile } from "../api";
-import { formatDateTime } from "../utils/datetime";
+import { api, type Alert, type CaptureStatus, type CaptureDeviceStatus, type Device, type Profile } from "../api";
+import { formatDateTime, toUtcDate } from "../utils/datetime";
 
 export default function Dashboard() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview, refetchInterval: 15_000 });
   const alerts = useQuery({ queryKey: ["alerts", "home"], queryFn: () => api.alerts({ limit: "5" }), refetchInterval: 15_000 });
   const devices = useQuery({ queryKey: ["devices"], queryFn: api.devices, refetchInterval: 15_000 });
   const profiles = useQuery({ queryKey: ["profiles"], queryFn: api.profiles });
-  const requests = useQuery({ queryKey: ["child-requests", "open"], queryFn: () => api.childRequests({ status: "open", limit: "5" }), refetchInterval: 15_000 });
   const onboarding = useQuery({ queryKey: ["onboarding"], queryFn: api.onboardingStatus });
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const capture = useQuery({
@@ -18,42 +17,36 @@ export default function Dashboard() {
     refetchInterval: 5_000,
   });
 
-  const firstError = [overview, alerts, devices, profiles, requests, onboarding].find((query) => query.error)?.error;
-  if (firstError) return <ErrorState message={(firstError as Error).message} />;
-  if ([overview, alerts, devices, profiles, requests, onboarding].some((query) => query.isPending)) {
-    return <div className="page-status" role="status">Loading your family overview…</div>;
+  const captureCard = <CaptureQueueCard status={capture.data} loading={capture.isPending} error={capture.error} onRetry={() => void capture.refetch()} retrying={capture.isFetching} />;
+
+  const firstError = [overview, alerts, devices, profiles, onboarding].find((query) => query.error)?.error;
+  if (firstError) return <div className="space-y-6"><ErrorState message={(firstError as Error).message} />{captureCard}</div>;
+  if ([overview, alerts, devices, profiles, onboarding].some((query) => query.isPending)) {
+    return <div className="space-y-6"><div className="page-status" role="status">Loading your family overview…</div>{captureCard}</div>;
   }
 
   const data = overview.data!;
-  const openRequests = requests.data!.open_count;
-  const attentionCount = data.open_alert_count + openRequests;
+  const attentionCount = data.open_alert_count;
   const deviceRows = devices.data!;
   const profileRows = profiles.data!;
-  const recentlyReviewed = Boolean(
-    onboarding.data!.complete && data.devices_online > 0 && data.devices_paused === 0 &&
-    capture.data?.latest_capture_at && capture.data?.last_reviewed_at &&
-    Date.now() - new Date(capture.data.latest_capture_at).getTime() < 10 * 60_000,
-  );
+
 
   return (
     <div className="space-y-6">
       <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
-          <p className="mb-1 text-sm font-medium text-[#275e3d]">Family overview</p>
+          <p className="mb-1 text-sm font-medium text-[#275e3d]">Screenshot review workspace</p>
           <h1 className="font-display text-2xl font-bold tracking-tight text-[#18313a] sm:text-3xl">
             Good {greeting()}, {me.data?.display_name || "Parent"}
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">A calm summary of what needs you, what is covered, and whether protection is working.</p>
+          <p className="mt-2 max-w-2xl text-sm text-slate-600">See which screenshots arrived, how they were reviewed, and which alerts need your context.</p>
         </div>
-        <div className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1.5 text-xs font-semibold ${recentlyReviewed ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`} role="status">
-          <span className={`h-2 w-2 rounded-full ${recentlyReviewed ? "bg-emerald-600" : "bg-amber-500"}`} />
-          {recentlyReviewed ? "Recent capture reviewed" : "Coverage needs checking"}
-        </div>
+        <Link to="/guardian-reviews" className="inline-flex min-h-11 items-center gap-2 self-start rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-[#0d3b4a] hover:bg-slate-50">AI review history <ArrowRight aria-hidden="true" size={16} /></Link>
       </header>
 
       {!onboarding.data!.complete && <OnboardingCard currentStep={onboarding.data!.current_step} steps={onboarding.data!.steps} />}
 
-      <CaptureQueueCard status={capture.data} loading={capture.isPending} error={capture.error} />
+      {captureCard}
 
       <section aria-labelledby="attention-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(13,59,74,0.06)] sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -63,10 +56,9 @@ export default function Dashboard() {
           </div>
           <Link to="/risks" className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-[#0d3b4a] hover:bg-slate-50">Review alerts <ArrowRight aria-hidden="true" size={16} /></Link>
         </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <AttentionStat label="Critical or high today" value={data.counts_24h.critical + data.counts_24h.high} tone="urgent" />
           <AttentionStat label="Open alerts" value={data.open_alert_count} />
-          <AttentionStat label="Child requests" value={openRequests} href="/requests" />
         </div>
       </section>
 
@@ -84,7 +76,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-2"><ShieldCheck aria-hidden="true" className="text-[#275e3d]" size={20} /><h2 id="system-heading" className="font-display font-semibold">System status</h2></div>
             <dl className="mt-4 space-y-3 text-sm">
               <StatusRow label="Devices online" value={`${data.devices_online} of ${data.devices_total}`} ok={data.devices_total > 0 && data.devices_online === data.devices_total} />
-              <StatusRow label="Devices paused" value={String(data.devices_paused)} ok={data.devices_paused === 0} />
+              <StatusRow label="Screenshot capture paused" value={String(data.devices_paused)} ok={data.devices_paused === 0} />
               <StatusRow label="Data location" value="This server" ok />
             </dl>
             <Link to="/settings" className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-[#275e3d] hover:underline">Open diagnostics <ArrowRight aria-hidden="true" size={15} /></Link>
@@ -105,14 +97,16 @@ function formatWait(seconds: number | null): string | null {
   return `about ${hours}h${remainder ? ` ${remainder}m` : ""}`;
 }
 
-function CaptureQueueCard({ status, loading, error }: { status?: CaptureStatus; loading: boolean; error: Error | null }) {
+function CaptureQueueCard({ status, loading, error, onRetry, retrying }: { status?: CaptureStatus; loading: boolean; error: Error | null; onRetry: () => void; retrying: boolean }) {
   if (loading) {
     return <section aria-label="Screen capture queue" className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500" role="status">Loading screen capture queue…</section>;
   }
   if (error || !status) {
-    return <section aria-label="Screen capture queue" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900" role="status">Screen capture queue status is temporarily unavailable.</section>;
+    return <section aria-label="Screen capture queue" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900" role="status">Screen capture and review status is temporarily unavailable. <button onClick={onRetry} disabled={retrying} className="ml-2 min-h-11 font-semibold underline disabled:opacity-50">Retry capture status</button></section>;
   }
 
+  const deviceRows = status.devices ?? [];
+  const failures = status.review_failures_5m ?? 0;
   const pending = status.pending_review_count;
   const waiting = Math.max(0, pending - status.reviewing_count);
   const wait = formatWait(status.estimated_wait_seconds);
@@ -124,13 +118,13 @@ function CaptureQueueCard({ status, loading, error }: { status?: CaptureStatus; 
         <div className="flex min-w-0 items-start gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-sky-800"><Images aria-hidden="true" size={20} /></span>
           <div className="min-w-0">
-            <h2 id="capture-queue-heading" className="font-display font-semibold text-[#18313a]">Screen capture queue</h2>
+            <h2 id="capture-queue-heading" className="font-display font-semibold text-[#18313a]">Screenshot capture & AI review</h2>
             {status.latest_capture_at ? (
               <p className="mt-1 text-sm text-slate-700"><strong>Captured from {source}</strong> · {formatDateTime(status.latest_capture_at)}</p>
             ) : (
               <p className="mt-1 text-sm text-slate-700">Waiting for the first screen capture.</p>
             )}
-            <p className="mt-1 text-xs text-slate-600">A capture appears here when this server accepts it; alerts appear after safety review.</p>
+            <p className="mt-1 text-xs text-slate-600">Capture times show server receipt. Review times show a completed result; the method and any problems are shown separately below.</p>
           </div>
         </div>
         <div className="shrink-0 sm:text-right">
@@ -138,9 +132,9 @@ function CaptureQueueCard({ status, loading, error }: { status?: CaptureStatus; 
             <>
               <p className="font-display text-lg font-bold text-sky-950">{pending} captured screen{pending === 1 ? "" : "s"} in review queue</p>
               <p className="mt-1 text-xs text-slate-600">
-                {status.reviewing_count > 0 ? `${status.reviewing_count} reviewing now` : "Review will start shortly"}
+                {status.reviewing_count > 0 ? `${status.reviewing_count} reviewing now` : "Waiting for the review worker"}
                 {waiting > 0 ? ` · ${waiting} waiting` : ""}
-                {wait ? ` · ${wait}` : ""}
+                {wait ? ` · estimated ${wait}` : ""}
               </p>
             </>
           ) : status.latest_capture_at ? (
@@ -148,11 +142,53 @@ function CaptureQueueCard({ status, loading, error }: { status?: CaptureStatus; 
           ) : (
             <p className="font-semibold text-slate-700">No captures received yet</p>
           )}
-          {status.waiting_upload_count > 0 && <p className="mt-1 text-xs font-semibold text-amber-800">{status.waiting_upload_count} still waiting to upload</p>}
+          {status.waiting_upload_count > 0 && <p className="mt-1 text-xs font-semibold text-amber-800">{status.waiting_upload_count} reported waiting to upload</p>}
         </div>
+      </div>
+      {failures > 0 && <p role="alert" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{failures} review failure{failures === 1 ? "" : "s"} recorded in the last 5 minutes. <Link className="font-semibold underline" to="/models">Check AI models</Link> and <Link className="font-semibold underline" to="/settings">diagnostics</Link>.</p>}
+      <div className="mt-5 border-t border-sky-200 pt-4">
+        <h3 className="text-sm font-semibold text-[#18313a]">Review status by device</h3>
+        <p className="mt-1 text-xs text-slate-600">A recent result describes one captured screen. Quiet activity, capture pauses, offline devices, and excluded screens can leave gaps.</p>
+        {deviceRows.length === 0 ? <p className="mt-3 text-sm text-slate-600">No device review records yet. <Link to="/devices" className="font-semibold underline">Check paired devices</Link>.</p> : <ul className="mt-3 space-y-3">
+          {deviceRows.map((device) => <DeviceReviewStatus key={device.device_id} device={device} />)}
+        </ul>}
       </div>
     </section>
   );
+}
+
+const reviewLabels: Record<string, string> = {
+  ai_reviewed: "AI result recorded",
+  rules_only: "Rules only — AI review not confirmed",
+  degraded: "Review degraded — needs checking",
+  not_reviewed: "No completed review",
+};
+
+function recentTimestamp(value: string | null): boolean {
+  if (!value) return false;
+  const age = Date.now() - toUtcDate(value).getTime();
+  return Number.isFinite(age) && age >= -60_000 && age < 10 * 60_000;
+}
+
+function DeviceReviewStatus({ device }: { device: CaptureDeviceStatus }) {
+  const recentCapture = recentTimestamp(device.latest_capture_at);
+  const recentReview = recentTimestamp(device.last_reviewed_at);
+  const aiRecent = device.last_review_status === "ai_reviewed" && recentReview && recentCapture && device.connection_status === "online";
+  return <li className="rounded-lg border border-sky-200 bg-white p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h4 className="text-sm font-semibold text-[#18313a]">{device.hostname}</h4>
+      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${aiRecent ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{reviewLabels[device.last_review_status] || "Review status unavailable"}</span>
+    </div>
+    <p className="mt-2 text-xs text-slate-600">Connection: <span className="font-semibold">{device.connection_status.replaceAll("_", " ")}</span>{device.connection_status === "paused" ? " · Screenshot capture is paused" : ""}</p>
+    <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+      <div><dt className="text-slate-500">Latest screenshot received</dt><dd className="mt-0.5 font-medium">{device.latest_capture_at ? formatDateTime(device.latest_capture_at) : "None recorded"}{device.latest_capture_at && !recentCapture ? " · Over 10 minutes ago or timestamp needs checking" : ""}</dd></div>
+      <div><dt className="text-slate-500">Latest completed review</dt><dd className="mt-0.5 font-medium">{device.last_reviewed_at ? formatDateTime(device.last_reviewed_at) : "None recorded"}{device.last_reviewed_at && !recentReview ? " · Over 10 minutes ago or timestamp needs checking" : ""}</dd></div>
+    </dl>
+    {device.review_model && <p className="mt-2 break-words text-xs text-slate-600">Review method: {device.review_model}</p>}
+    {device.classifier_status && <p className="mt-1 break-words text-xs text-slate-600">Classifier status: {device.classifier_status.replaceAll("_", " ")}</p>}
+    <p className="mt-2 text-xs text-slate-600">{device.pending_review_count} awaiting review · {device.reviewing_count} reviewing now · {device.waiting_upload_count === null ? "Upload backlog unknown" : `${device.waiting_upload_count} reported waiting to upload`}{device.queue_report_age_seconds !== null ? ` (report ${Math.floor(device.queue_report_age_seconds)}s old)` : ""}</p>
+    {device.last_review_status === "rules_only" || device.last_review_status === "degraded" ? <Link to="/models" className="mt-2 inline-flex min-h-10 items-center text-xs font-semibold text-[#275e3d] underline">Check AI review setup</Link> : null}
+  </li>;
 }
 
 function greeting() {
@@ -185,7 +221,7 @@ function SeverityDot({ severity }: { severity: string }) {
 }
 
 function EmptyActivity() {
-  return <div className="flex items-center gap-3 py-8 text-sm text-slate-600"><span className="grid h-10 w-10 place-items-center rounded-full bg-emerald-50 text-emerald-700"><Check aria-hidden="true" size={19} /></span><span><strong className="block text-[#18313a]">No recent alerts</strong>Your latest reviewed activity will appear here.</span></div>;
+  return <div className="flex items-center gap-3 py-8 text-sm text-slate-600"><span className="grid h-10 w-10 place-items-center rounded-full bg-emerald-50 text-emerald-700"><Check aria-hidden="true" size={19} /></span><span><strong className="block text-[#18313a]">No recent alerts</strong>No alerts were returned. Check capture and review status above; an empty alert feed does not confirm that every screen was reviewed.</span></div>;
 }
 
 function Coverage({ profiles, devices }: { profiles: Profile[]; devices: Device[] }) {
@@ -210,7 +246,7 @@ const stepLabels: Record<string, string> = { timezone: "Set your family timezone
 function OnboardingCard({ currentStep, steps }: { currentStep: string | null; steps: Array<{ id: string; complete: boolean }> }) {
   const done = steps.filter((step) => step.complete).length;
   const target = currentStep === "child" ? "/profiles" : currentStep === "pairing" || currentStep === "self_test" ? "/devices" : currentStep === "notice" || currentStep === "privacy_choices" ? "/privacy" : "/settings";
-  return <section className="flex flex-col justify-between gap-4 rounded-xl border border-sky-200 bg-sky-50 p-5 sm:flex-row sm:items-center"><div><p className="text-xs font-semibold uppercase tracking-wider text-sky-800">Finish setup · {done} of {steps.length}</p><h2 className="mt-1 font-display font-semibold text-[#18313a]">{stepLabels[currentStep || ""] || "Complete family setup"}</h2><p className="mt-1 text-sm text-slate-600">GuardianNode will keep this checklist here until protection is ready.</p></div><Link to={target} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0d3b4a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#164f60]">Continue setup <ArrowRight aria-hidden="true" size={16} /></Link></section>;
+  return <section className="flex flex-col justify-between gap-4 rounded-xl border border-sky-200 bg-sky-50 p-5 sm:flex-row sm:items-center"><div><p className="text-xs font-semibold uppercase tracking-wider text-sky-800">Finish setup · {done} of {steps.length}</p><h2 className="mt-1 font-display font-semibold text-[#18313a]">{stepLabels[currentStep || ""] || "Complete family setup"}</h2><p className="mt-1 text-sm text-slate-600">Complete these steps to begin screenshot capture and review.</p></div><Link to={target} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0d3b4a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#164f60]">Continue setup <ArrowRight aria-hidden="true" size={16} /></Link></section>;
 }
 
 function ErrorState({ message }: { message: string }) {

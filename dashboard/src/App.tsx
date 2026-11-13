@@ -16,7 +16,6 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Audit = lazy(() => import("./pages/Audit"));
 const GuardianReviewHistory = lazy(() => import("./pages/GuardianReviewHistory"));
 const Demo = lazy(() => import("./pages/Demo"));
-const Requests = lazy(() => import("./pages/Requests"));
 const PrivacyConsent = lazy(() => import("./pages/PrivacyConsent"));
 
 type AuthState = "unknown" | "needs_setup" | "logged_out" | "logged_in";
@@ -89,7 +88,6 @@ export default function App() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/profiles" element={<Profiles />} />
           <Route path="/risks" element={<RiskFeed />} />
-          <Route path="/requests" element={<Requests />} />
           <Route path="/privacy" element={<PrivacyConsent />} />
           <Route path="/alerts/:id" element={<AlertDetail />} />
           <Route path="/models" element={<ModelStatus />} />

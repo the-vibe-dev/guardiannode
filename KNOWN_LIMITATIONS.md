@@ -1,6 +1,11 @@
 # Known Limitations
 
-GuardianNode is alpha/developer-preview software.
+GuardianNode is alpha/developer-preview software focused on screenshot capture
+and AI-assisted review. Screen-time limits, app/website blocking and exception
+approvals are intentionally outside its product scope.
+
+The following are technical and detection limitations, not planned device-use
+restrictions.
 
 - It may miss risky content.
 - It may produce false positives.
@@ -19,9 +24,9 @@ GuardianNode is alpha/developer-preview software.
   Novel obfuscation, unsupported international identifiers/addresses,
   image-only private information, and relevant destination hostnames may still
   reveal context; the parent must inspect the exact outbound preview.
-- ChatGPT/Codex processing follows the connected plan or workspace controls.
+- The experimental coding-agent/ChatGPT subscription transport remains disabled.
   Direct Responses API mode uses `store=false` but is disabled unless the
-  operator separately confirms approved Zero Data Retention controls.
+  operator separately confirms the required provider retention controls.
 - Separated mode includes server-authenticated TLS with a local family CA, but
   mutual TLS and per-device client certificates are not implemented. Keep it on
   a trusted private LAN or VPN and do not expose it directly to the internet.
@@ -38,3 +43,12 @@ GuardianNode is alpha/developer-preview software.
   or direct intervention when a child may be in immediate danger.
 
 Use GuardianNode as one tool in a broader child-safety plan.
+
+## Current-build qualification
+
+The review.3 source changes need a fresh native Windows and browser release
+qualification. Passing source tests does not qualify the installers or establish
+representative AI accuracy. Review the included report for actual executed checks.
+Per-device receipt and review status improves diagnosis, but it does not count
+every screen change or prove that no frame was dropped. Model confidence is not
+a calibrated accuracy measure.

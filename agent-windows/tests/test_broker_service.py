@@ -7,10 +7,9 @@ from pathlib import Path
 from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
-import httpx
 import pytest
 
-from src.broker_protocol import BrokerRequest, image_to_b64, make_request
+from src.broker_protocol import image_to_b64, make_request
 from src.broker_service import BrokerCommandHandler, CaptureProcessManager, WindowsNamedPipeServer
 from src.pairing_client import save_credentials
 
@@ -118,33 +117,17 @@ def test_failed_capture_policy_persistence_cannot_ack_generation(tmp_path, monke
     assert handler.handle_message(make_request("capture_config"))["payload"]["capture_allowed"] is False
 
 
-def test_broker_child_request_uses_owned_token_but_returns_only_dto(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("action", ["child_request_create", "child_request_list"])
+def test_broker_rejects_retired_exception_ipc_without_backend_access(tmp_path, monkeypatch, action) -> None:
     from src import broker_service
 
     handler = _handler(tmp_path)
-    save_credentials("dev-1", "private-device-token", "http://127.0.0.1:8787", handler.credential_path)
-    requests = []
+    monkeypatch.setattr(broker_service, "BackendClient", lambda *_args, **_kwargs: pytest.fail("retired action contacted backend"))
+    result = handler.handle_message(make_request(action, {"request_type": "more_time"}))
+    assert result["ok"] is False
+    assert result["error"] == "unsupported action"
 
-    def backend(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert request.headers["authorization"] == "Bearer private-device-token"
-        return httpx.Response(200, json={
-            "request_id": "request-1", "status": "open", "request_type": "more_time",
-            "device_id": "dev-1", "device_token": "must-not-return",
-        })
 
-    real_client = httpx.Client
-    monkeypatch.setattr(
-        broker_service.httpx, "Client",
-        lambda **kwargs: real_client(transport=httpx.MockTransport(backend), **kwargs),
-    )
-    result = handler.handle_request(BrokerRequest(
-        action="child_request_create", request_id="ipc-1",
-        payload={"request_type": "more_time", "reason": "Synthetic test"},
-    ))
-    assert result["status"] == "open"
-    assert "device_token" not in json.dumps(result)
-    assert requests[0].url.path == "/api/child-requests"
 def test_parent_capture_boundary_survives_broker_restart(tmp_path) -> None:
     handler = _handler(tmp_path)
     handler.set_capture_config({
@@ -390,7 +373,7 @@ def test_policy_persistence_failure_cannot_prevent_monitoring_disable(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_enforcement_recovery_failure_does_not_stop_consent_polling(tmp_path, monkeypatch) -> None:
+async def test_legacy_recovery_failure_does_not_stop_consent_polling(tmp_path, monkeypatch) -> None:
     from src import broker_service
     from src.config import AgentConfig
 
@@ -399,7 +382,7 @@ async def test_enforcement_recovery_failure_does_not_stop_consent_polling(tmp_pa
 
     class BrokenEnforcer:
         def reconcile(self):
-            raise OSError("synthetic enforcement state unavailable")
+            raise OSError("synthetic recovery state unavailable")
 
     class FakeClient:
         def __init__(self, *_args, **_kwargs):
@@ -417,7 +400,7 @@ async def test_enforcement_recovery_failure_does_not_stop_consent_polling(tmp_pa
     async def stop_sleep(_seconds):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr("src.enforcement.WindowsEnforcer", BrokenEnforcer)
+    monkeypatch.setattr("src.legacy_recovery.LegacyRestrictionRecovery", BrokenEnforcer)
     monkeypatch.setattr("src.backend_client.BackendClient", FakeClient)
     monkeypatch.setattr(broker_service.asyncio, "sleep", stop_sleep)
     with pytest.raises(asyncio.CancelledError):
@@ -702,16 +685,16 @@ def test_capture_launch_uses_pywin32_duplicate_token_argument_order(monkeypatch,
 async def test_device_control_reports_truthful_partial_results(tmp_path, monkeypatch, outcome) -> None:
     from src import broker_service
     from src.config import AgentConfig
-    from src.enforcement import EnforcementStateError
+    from src.legacy_recovery import RecoveryStateError
 
     handler = _handler(tmp_path)
     save_credentials("dev-1", "synthetic-token", "http://127.0.0.1:8787", handler.credential_path)
     result = {
-        "suspended_processes": 1,
+        "resumed_processes": 1,
         "failed_processes": 0 if outcome == "success" else 1,
         "pending_resume_processes": 0,
         "partial_failure": outcome != "success",
-        "lease_status": "active",
+        "active_pause_leases": 0,
     }
     reports = []
 
@@ -721,7 +704,7 @@ async def test_device_control_reports_truthful_partial_results(tmp_path, monkeyp
 
         def execute(self, _command):
             if outcome == "persistence_failure":
-                raise EnforcementStateError("synthetic disk error", result=result.copy())
+                raise RecoveryStateError("synthetic disk error", result=result.copy())
             return result
 
     class FakeClient:
@@ -735,7 +718,7 @@ async def test_device_control_reports_truthful_partial_results(tmp_path, monkeyp
             return None
 
         async def get_commands(self):
-            return [{"command_id": "command-1"}]
+            return [{"command_id": "command-1", "command_type": "undo_action"}]
 
         async def report_command(self, command_id, status, detail):
             reports.append((command_id, status, detail))
@@ -743,7 +726,7 @@ async def test_device_control_reports_truthful_partial_results(tmp_path, monkeyp
     async def stop_sleep(_seconds):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr("src.enforcement.WindowsEnforcer", FakeEnforcer)
+    monkeypatch.setattr("src.legacy_recovery.LegacyRestrictionRecovery", FakeEnforcer)
     monkeypatch.setattr("src.backend_client.BackendClient", FakeClient)
     monkeypatch.setattr(broker_service.asyncio, "sleep", stop_sleep)
     with pytest.raises(asyncio.CancelledError):
@@ -752,8 +735,55 @@ async def test_device_control_reports_truthful_partial_results(tmp_path, monkeyp
     command_id, status, detail = reports[0]
     assert command_id == "command-1"
     assert status == ("succeeded" if outcome == "success" else "failed")
-    assert detail["suspended_processes"] == 1
-    assert detail["lease_status"] == "active"
+    assert detail["resumed_processes"] == 1
+    assert detail["active_pause_leases"] == 0
     assert detail["partial_failure"] is (outcome != "success")
     if outcome == "persistence_failure":
         assert detail["error"] == "synthetic disk error"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["pause_app", "block_domain", "show_child_prompt", "set_time_limit"])
+async def test_control_rejects_retired_commands_even_with_stale_enabled_flag(tmp_path, monkeypatch, action):
+    from src import broker_service
+    from src.config import AgentConfig
+
+    handler = _handler(tmp_path)
+    save_credentials("dev-1", "synthetic-token", "http://127.0.0.1:8787", handler.credential_path)
+    reports = []
+
+    class Recovery:
+        def reconcile(self):
+            return None
+
+        def execute(self, _command):
+            pytest.fail("retired command reached recovery executor")
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def heartbeat(self, **_kwargs):
+            return True
+
+        async def get_capture_config(self):
+            return {"monitoring_enabled": True, "apps_and_urls_enabled": False}
+
+        async def get_commands(self):
+            return [{"command_id": "old-1", "command_type": action}]
+
+        async def report_command(self, command_id, status, result):
+            reports.append((command_id, status, result))
+
+    async def stop(_seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("src.legacy_recovery.LegacyRestrictionRecovery", Recovery)
+    monkeypatch.setattr("src.backend_client.BackendClient", Client)
+    monkeypatch.setattr(broker_service.asyncio, "sleep", stop)
+    config = AgentConfig()
+    config.enforcement_enabled = True  # An older caller cannot restore the removed feature.
+    with pytest.raises(asyncio.CancelledError):
+        await broker_service._run_device_control(handler, config)
+    assert reports == [("old-1", "rejected", {"error": "restriction commands are unavailable in screenshot review mode"})]
+    assert handler.monitoring_enabled is True

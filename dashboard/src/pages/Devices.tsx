@@ -103,10 +103,10 @@ export default function Devices() {
     setError(null);
     try {
       await api.pauseDevice(deviceId, pauseSeconds);
-      setNotice("Monitoring pause recorded.");
+      setNotice("Screenshot monitoring pause recorded. It takes effect when the device receives the update.");
       reload();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not pause monitoring");
+      setError(reason instanceof Error ? reason.message : "Could not pause screenshot monitoring");
     }
   }
 
@@ -114,10 +114,10 @@ export default function Devices() {
     setError(null);
     try {
       await api.resumeDevice(deviceId);
-      setNotice("Monitoring resumed.");
+      setNotice("Screenshot monitoring resume recorded. It takes effect when the device receives the update.");
       reload();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not resume monitoring");
+      setError(reason instanceof Error ? reason.message : "Could not resume screenshot monitoring");
     }
   }
 
@@ -137,11 +137,11 @@ export default function Devices() {
     <div className="flex flex-wrap items-center gap-2">
       {device.status === "paused" ? (
         <button onClick={() => resume(device.device_id)} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-          <Play aria-hidden="true" size={16} /> Resume
+          <Play aria-hidden="true" size={16} /> Resume screenshots
         </button>
       ) : device.status !== "disabled" && device.status !== "consent_withdrawn" ? (
         <button onClick={() => pause(device.device_id)} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-          <Pause aria-hidden="true" size={16} /> Pause
+          <Pause aria-hidden="true" size={16} /> Pause screenshots
         </button>
       ) : null}
       {device.status !== "disabled" && (
@@ -155,7 +155,7 @@ export default function Devices() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
-        <div><p className="mb-1 text-sm font-medium text-[#275e3d]">Family coverage</p><h1 className="font-display text-2xl font-bold text-[#18313a] sm:text-3xl">Devices</h1><p className="mt-2 text-sm text-slate-600">Pair, assign, pause, or remove computers your family controls.</p></div>
+        <div><p className="mb-1 text-sm font-medium text-[#275e3d]">Family coverage</p><h1 className="font-display text-2xl font-bold text-[#18313a] sm:text-3xl">Devices</h1><p className="mt-2 text-sm text-slate-600">Pair computers and manage their screenshot capture. Pausing capture gives privacy; it does not interrupt the child’s apps or internet.</p></div>
         <button onClick={startPair} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#275e3d] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c4a30]"><Plus aria-hidden="true" size={18} /> Add device</button>
       </header>
 
@@ -176,11 +176,11 @@ export default function Devices() {
       {notice && <div role="status" className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"><Check aria-hidden="true" size={17} /> {notice}</div>}
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="paired-devices-heading">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4"><div><h2 id="paired-devices-heading" className="font-display font-semibold text-[#18313a]">Paired devices</h2><p className="text-xs text-slate-500">Last status reported by each endpoint.</p></div><label className="text-xs font-semibold text-slate-600">Pause duration<select value={pauseSeconds} onChange={(event) => setPauseSeconds(Number(event.target.value))} className="ml-2 min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800">{PAUSE_OPTIONS.map((option) => <option key={option.seconds} value={option.seconds}>{option.label}</option>)}</select></label></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4"><div><h2 id="paired-devices-heading" className="font-display font-semibold text-[#18313a]">Paired devices</h2><p className="text-xs text-slate-500">Last status reported by each endpoint.</p></div><label className="text-xs font-semibold text-slate-600">Screenshot pause duration<select value={pauseSeconds} onChange={(event) => setPauseSeconds(Number(event.target.value))} className="ml-2 min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800">{PAUSE_OPTIONS.map((option) => <option key={option.seconds} value={option.seconds}>{option.label}</option>)}</select></label></div>
 
         {devices.length === 0 ? <div className="grid place-items-center px-5 py-12 text-center"><Laptop aria-hidden="true" className="text-slate-300" size={38} /><p className="mt-3 font-semibold text-slate-700">No devices paired yet</p><p className="mt-1 text-sm text-slate-500">Complete privacy consent, then choose Add device.</p></div> : (
           <>
-            <div className="divide-y divide-slate-200 md:hidden">{devices.map((device) => <article key={device.device_id} className="space-y-4 p-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="truncate font-semibold text-[#18313a]">{device.hostname}</h3><p className="text-xs text-slate-500">Last seen {formatDateTime(device.last_seen)}</p></div><StatusBadge device={device} /></div><ProfileSelect device={device} profiles={profiles} onChange={(profileId) => assignProfile(device.device_id, profileId)} />{device.status === "paused" && device.paused_until && <p className="text-xs text-amber-800">Paused until {formatDateTime(device.paused_until)}</p>}{actions(device)}</article>)}</div>
+            <div className="divide-y divide-slate-200 md:hidden">{devices.map((device) => <article key={device.device_id} className="space-y-4 p-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="truncate font-semibold text-[#18313a]">{device.hostname}</h3><p className="text-xs text-slate-500">Last seen {formatDateTime(device.last_seen)}</p></div><StatusBadge device={device} /></div><ProfileSelect device={device} profiles={profiles} onChange={(profileId) => assignProfile(device.device_id, profileId)} />{device.status === "paused" && device.paused_until && <p className="text-xs text-amber-800">Screenshot capture paused until {formatDateTime(device.paused_until)}</p>}{actions(device)}</article>)}</div>
             <div className="hidden overflow-x-auto md:block"><table className="w-full"><caption className="sr-only">Paired GuardianNode child devices</caption><thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th scope="col" className="p-4">Computer</th><th scope="col" className="p-4">Child</th><th scope="col" className="p-4">Status</th><th scope="col" className="p-4">Last seen</th><th scope="col" className="p-4">Actions</th></tr></thead><tbody className="divide-y divide-slate-200">{devices.map((device) => <tr key={device.device_id}><th scope="row" className="p-4 text-left font-semibold text-[#18313a]">{device.hostname}</th><td className="p-4"><ProfileSelect device={device} profiles={profiles} onChange={(profileId) => assignProfile(device.device_id, profileId)} /></td><td className="p-4"><StatusBadge device={device} />{device.status === "paused" && device.paused_until && <span className="mt-1 block text-xs text-slate-500">until {formatDateTime(device.paused_until)}</span>}</td><td className="p-4 text-sm text-slate-600">{formatDateTime(device.last_seen)}</td><td className="p-4">{actions(device)}</td></tr>)}</tbody></table></div>
           </>
         )}

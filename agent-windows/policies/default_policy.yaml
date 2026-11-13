@@ -35,7 +35,7 @@ severity_thresholds:
   alert_at: medium
   notify_at: high
 
-enforcement:
+review_notifications:
   on_critical:
     - notify_parent
   on_high:

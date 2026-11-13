@@ -70,6 +70,13 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
     skipped_count = 0
     last_log_summary = time.time()
     last_sent_at = 0.0
+    last_capture_policy: tuple | None = None
+
+    def capture_policy() -> tuple:
+        return (
+            cfg.full_screen_capture_enabled, tuple(cfg.monitored_apps),
+            cfg.apps_and_urls_enabled, cfg.policy_generation, cfg.profile_id,
+        )
 
     while True:
         try:
@@ -79,13 +86,20 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             FULL_CHANGE_THRESHOLD = int(getattr(cfg, "full_screen_change_threshold", 0) or 10)
 
             if not cfg.monitoring_enabled and not cfg.dry_run:
+                last_phash = last_full_phash = None
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
 
             if _is_locally_paused():
+                last_phash = last_full_phash = None
                 log.debug("monitoring paused locally; skipping capture")
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
+
+            policy = capture_policy()
+            if policy != last_capture_policy:
+                last_phash = last_full_phash = None
+                last_capture_policy = policy
 
             active = get_active_process()
             win = get_active_window()
@@ -101,6 +115,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             )
 
             if not in_monitored and not cfg.full_screen_capture_enabled:
+                last_phash = last_full_phash = None
                 log.debug("active app is not monitored; skipping capture: %s", log_app_name)
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
@@ -145,13 +160,14 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 )
 
             if send:
-                if _is_locally_paused():
+                if (
+                    _is_locally_paused()
+                    or (not cfg.monitoring_enabled and not cfg.dry_run)
+                    or capture_policy() != policy
+                ):
+                    last_phash = last_full_phash = None
                     await asyncio.sleep(cfg.ocr_cadence_seconds)
                     continue
-                last_phash = shot.phash
-                last_full_phash = shot.full_phash
-                last_sent_at = time.time()
-                sent_count += 1
                 payload = {
                     "image_bytes": shot.jpeg_bytes,
                     "app_name": app_name if cfg.apps_and_urls_enabled else None,
@@ -174,9 +190,11 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                     # rather than dropping this new one. Otherwise the parent
                     # would see minutes-stale classifications.
                     dropped = 0
+                    admitted = False
                     while True:
                         try:
                             screenshot_queue.put_nowait(payload)
+                            admitted = True
                             break
                         except asyncio.QueueFull:
                             try:
@@ -185,11 +203,20 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                                 dropped += 1
                             except asyncio.QueueEmpty:
                                 break
+                    if not admitted:
+                        await asyncio.sleep(cfg.ocr_cadence_seconds)
+                        continue
                     log.info(
                         "queued frame: app=%s monitored=%s phash_dist=%d full_phash_dist=%d bytes=%d%s",
                         log_app_name, in_monitored, dist, full_dist, len(shot.jpeg_bytes),
                         f" (dropped {dropped} stale)" if dropped else "",
                     )
+                # Dedup remembers only frames the sink accepted. A transient
+                # broker failure must not suppress the next identical frame.
+                last_phash = shot.phash
+                last_full_phash = shot.full_phash
+                last_sent_at = time.time()
+                sent_count += 1
             else:
                 skipped_count += 1
 

@@ -1,21 +1,33 @@
-# GuardianNode — November review integration
+# GuardianNode - screenshot capture and AI review
 
-Review source: **2026-11-13-review.2** · Application: **0.1.0-alpha.3** · Status: **alpha / developer preview**
+Review source: **2026-11-13-review.3** · Application: **0.1.0-alpha.3** · Status: **alpha / developer preview**
 
-This branch integrates the reviewed source and rebuilds the parent dashboard. The supplied review PDF and ZIP are stored locally in `.ignored-cleanup/review-2026-11-13/`, outside Git. This source integration does not qualify a signed Windows installer, native Windows behavior, Docker deployment, or browsers.
+This edition integrates the supplied 2026-11-13 review.3 package and follows the
+product direction: screenshot capture, AI-assisted assessment and
+parent evidence review. It removes new device restrictions and exception
+approvals while preserving capture consent, privacy controls and local storage
+safeguards.
 
 ## Read first
 
-1. [Capture queue operations](docs/CAPTURE_QUEUE_OPERATIONS.md): pending capture state, cleanup, and recovery.
-2. [Audit and action history](docs/AUDIT_AND_ACTION_HISTORY.md): pagination, action records, and Undo.
-3. [Notification routing](docs/NOTIFICATIONS.md): current-policy delivery and retry behavior.
-4. [Backend setup](docs/BACKEND_SETUP.md) and [Windows agent](agent-windows/README.md): development and deployment prerequisites.
+1. [Integration record](docs/release-validation/screenshot-review-2026-11-13.md):
+   imported changes, current gaps and verification.
+2. [Screenshot and AI review workflow](docs/SCREENSHOT_REVIEW.md): capture,
+   processing, evidence, feedback and per-device status.
+3. [Legacy restriction recovery](docs/ENFORCEMENT.md): upgrade compatibility and
+   release-only recovery for actions created by older versions.
+4. [Capture queue operations](docs/CAPTURE_QUEUE_OPERATIONS.md) and
+   [notification routing](docs/NOTIFICATIONS.md): storage, retries and delivery.
+5. [Backend setup](docs/BACKEND_SETUP.md) and [Windows agent](agent-windows/README.md):
+   development and deployment prerequisites.
 
-The reviewed changes add audit pagination, independent Settings drafts, current-policy notification delivery, bounded quarantine cleanup, durable withdrawal retries, safer app pause leases, and parent action history/Undo. The review archive reported 799 passing automated tests in its isolated source tree; this integration requires its own verification.
+The matched production dashboard is included in `backend/app/static`. This
+repository contains source, frozen dependency manifests, tests and installer
+sources. No newly built or signed Windows installer is included.
 
-Read [Capture queue operations](docs/CAPTURE_QUEUE_OPERATIONS.md), [Audit and action history](docs/AUDIT_AND_ACTION_HISTORY.md), and [Notification routing](docs/NOTIFICATIONS.md) for the new operating contracts.
-
-The original AGPL-3.0 licensing and historical Build Week records remain in the project. Those historical records do not qualify this changed build. The deterministic rules version is `0.1.0-alpha.3-review.1`.
+The original licensing and historical Build Week/release records remain intact.
+Historical counts and qualifications apply to their original builds only. The
+integration record is the authority for this edition's checks.
 
 ## Evaluate from source
 
@@ -45,7 +57,7 @@ npm run build
 
 Replace the complete contents of `backend/app/static` with `dashboard/dist` after a successful build. Do not combine a new index file with stale hashed assets. Build and copy the production assets from this branch before release.
 
-The [Windows agent guide](agent-windows/README.md) and [native build guide](docs/POWER_USER_INSTALL.md) describe the native paths. Build and qualify the exact Windows artifacts before using this review build beyond technical evaluation. Do not reuse an old installer while assuming it contains these source changes.
+The [Windows agent guide](agent-windows/README.md) and [native build guide](docs/POWER_USER_INSTALL.md) describe the native paths. Build and qualify the exact Windows artifacts before using this screenshot-review build beyond technical evaluation. Do not reuse an old installer while assuming it contains these source changes.
 
 ## Upgrade an existing instance
 
@@ -69,7 +81,7 @@ uv run guardiannode-archive restore /secure-backups/pre-review.gna --target /saf
 Then perform an actual restore into a separate empty target and verify synthetic evidence decryption and application behavior. A dry run alone is not a full disaster-recovery rehearsal. Preserve the trusted signer and recovery credentials independently of the machine being recovered.
 
 4. Install this source with its frozen dependencies and matching compiled dashboard. Normal backend startup upgrades to Alembic revision `0008_notification_delivery`; this adds durable per-channel delivery state and digest retry fields. Verify readiness and logs before returning the instance to service.
-5. Undo active app pauses with the old endpoint before upgrading it. Legacy numeric-PID records become unverified rather than resuming a possibly unrelated process. Preserve corrupt/unresolved state for verified recovery. Install the matching reviewed endpoint build on a Windows test machine. Verify pair, capture, alert, pause/resume, policy-cache restart, notification configuration, consent opt-outs, withdrawal/delete, and offline recovery with synthetic data.
+5. Undo active app/domain restrictions with the old endpoint before upgrading it. The new endpoint is release-only: it retires verified old app-pause leases and removes owned legacy hosts entries. Numeric-PID-only records stay unverified; preserve corrupt or unresolved state for operator recovery. Install matching backend, dashboard and endpoint versions. Verify pairing, capture, OCR/AI review, screenshot-monitoring pause/resume, policy-cache restart, notifications, consent opt-outs, withdrawal/deletion and offline recovery with synthetic data. See [legacy recovery](docs/ENFORCEMENT.md).
 6. If rollback is required, restore a compatible complete backup with the matching old application. This migration has no supported in-place downgrade. Moving old code back without restoring its compatible database/configuration is insufficient.
 
 Existing historical digests are not reconstructed by this change. Subsequent digests cover the previous complete local calendar day. Withdrawal cannot recall a message or provider request already transmitted, reach an offline endpoint instantly, or erase existing exported backups/downloads.
@@ -99,8 +111,19 @@ backend/.venv/bin/python scripts/check_build_week_submission.py
 
 Windows shells use the corresponding `.venv\Scripts\python.exe` path. The root repository controls explicitly report that a source ZIP cannot verify Git history or the historical baseline tag.
 
-## What is still missing
+## What should improve next
 
-Major remaining items include signed installers and upgrades, complete rollback qualification, a measured usage/screen-time engine, persistent category/content filtering, more child-device platforms, named second-parent accounts, complete coverage/drop telemetry, native provider adapters, and representative detection evaluation. Child request approval currently records the parent decision; it does not create an automatic screen-time extension or unblock rule.
+Priorities are native Windows capture qualification, explicit multi-display
+coverage, representative OCR/AI evaluation, durable capture/drop diagnostics,
+optional capture exclusions, better incident/evidence navigation, and signed
+installers with qualified updates and rollback. Read [the focused roadmap](docs/ROADMAP.md)
+and [the integration record](docs/release-validation/screenshot-review-2026-11-13.md).
 
-The tests provide regression evidence, but do not prove real-world detection accuracy or substitute for the native release matrix. Review the locally retained PDF before promoting this alpha build.
+Screen-time budgets, usage schedules, website/app blocking and exception requests
+are outside the chosen product scope. Retention, queue bounds and request-size
+controls remain operational safeguards; they do not restrict a child's browsing
+or device use.
+
+No source-test result establishes real-world detection accuracy or qualifies a
+native Windows installer. The integration record separates executed checks from
+remaining release gates.

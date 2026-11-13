@@ -4,12 +4,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db_dep
-from app.db.models import Alert, Device, Event, ScreenshotUploadReceipt, User
+from app.api.deps import current_user, get_db_dep, parent_user
+from app.db.models import Alert, Device, Event, RiskResult, ScreenshotUploadReceipt, User
 from app.services import pipeline_metrics, screenshot_async
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -32,6 +32,21 @@ class Overview(BaseModel):
     recent_severity_counts: dict[str, int]  # by day (last 14 days)
 
 
+class CaptureDeviceStatus(BaseModel):
+    device_id: str
+    hostname: str
+    connection_status: str
+    latest_capture_at: datetime | None
+    last_reviewed_at: datetime | None
+    last_review_status: str
+    classifier_status: str | None
+    review_model: str | None
+    pending_review_count: int
+    reviewing_count: int
+    waiting_upload_count: int | None
+    queue_report_age_seconds: int | None
+
+
 class CaptureStatus(BaseModel):
     """Metadata-only receipt and review progress for screen captures."""
 
@@ -43,6 +58,8 @@ class CaptureStatus(BaseModel):
     waiting_upload_count: int
     estimated_wait_seconds: int | None
     last_reviewed_at: datetime | None
+    devices: list[CaptureDeviceStatus] = Field(default_factory=list)
+    review_failures_5m: int = 0
 
 
 def _count_since(db: Session, severity: str, since: datetime) -> int:
@@ -107,7 +124,7 @@ def overview(db: Session = Depends(get_db_dep), _: User = Depends(current_user))
 @router.get("/capture-status", response_model=CaptureStatus)
 def capture_status(
     db: Session = Depends(get_db_dep),
-    _: User = Depends(current_user),
+    _: User = Depends(parent_user),
 ) -> CaptureStatus:
     """Show acceptance separately from classification and alert creation.
 
@@ -125,9 +142,12 @@ def capture_status(
     latest_device = (
         db.get(Device, latest_receipt.device_id) if latest_receipt is not None else None
     )
+    # A receipt or an image Event alone does not prove completed review. Join
+    # the persisted RiskResult, then expose its degraded/rules-only state.
     last_reviewed_at = (
-        db.query(func.max(Event.received_at))
-        .filter(Event.source_type == "image")
+        db.query(func.max(RiskResult.created_at))
+        .join(Event, RiskResult.event_id == Event.event_id)
+        .filter(Event.source_type == "image", Event.deletion_state == "active")
         .scalar()
     )
 
@@ -145,10 +165,56 @@ def capture_status(
         if pending > 0 and latency_ms > 0
         else None
     )
-    waiting_upload = sum(
-        max(0, int(item.get("queued_frames", 0) or 0))
-        for item in pipeline_metrics.agent_queues()
-    )
+    queues = {item["device_id"]: item for item in pipeline_metrics.agent_queues()}
+    waiting_upload = sum(max(0, int(item.get("queued_frames", 0) or 0)) for item in queues.values())
+    pending_by_device = screenshot_async.pending_counts_by_device()
+    reviewing_by_device: dict[str, int] = {}
+    for item in snapshot.get("in_flight", []):
+        device_id = item.get("device_id")
+        if isinstance(device_id, str):
+            reviewing_by_device[device_id] = reviewing_by_device.get(device_id, 0) + 1
+    device_statuses = []
+    for device in db.query(Device).order_by(Device.created_at, Device.device_id).all():
+        receipt = db.query(ScreenshotUploadReceipt).filter(
+            ScreenshotUploadReceipt.device_id == device.device_id,
+        ).order_by(ScreenshotUploadReceipt.created_at.desc(), ScreenshotUploadReceipt.id.desc()).first()
+        latest = db.query(RiskResult, Event).join(
+            Event, RiskResult.event_id == Event.event_id,
+        ).filter(
+            Event.device_id == device.device_id, Event.source_type == "image",
+            Event.deletion_state == "active",
+        ).order_by(RiskResult.created_at.desc(), RiskResult.risk_id.desc()).first()
+        risk, event = latest if latest is not None else (None, None)
+        if risk is None:
+            review_status = "not_reviewed"
+        elif risk.classifier_status == "no_text_to_review":
+            review_status = "rules_only"
+        elif risk.classifier_status != "ok":
+            review_status = "degraded"
+        elif (
+            (event.event_metadata or {}).get("tier") == "rules_only" if event is not None else False
+        ) or (risk.model or "").strip().lower().replace("-", "_") in {"rules", "rules_only", "local_rules"}:
+            review_status = "rules_only"
+        elif risk.model:
+            review_status = "ai_reviewed"
+        else:
+            review_status = "degraded"
+        report = queues.get(device.device_id)
+        device_pending = pending_by_device.get(device.device_id, 0)
+        device_statuses.append(CaptureDeviceStatus(
+            device_id=device.device_id,
+            hostname=device.hostname,
+            connection_status=device.status,
+            latest_capture_at=receipt.created_at if receipt else None,
+            last_reviewed_at=risk.created_at if risk else None,
+            last_review_status=review_status,
+            classifier_status=risk.classifier_status if risk else None,
+            review_model=risk.model if risk else None,
+            pending_review_count=device_pending,
+            reviewing_count=min(device_pending, reviewing_by_device.get(device.device_id, 0)),
+            waiting_upload_count=max(0, int(report.get("queued_frames", 0) or 0)) if report else None,
+            queue_report_age_seconds=int(report["age_seconds"]) if report and "age_seconds" in report else None,
+        ))
 
     return CaptureStatus(
         latest_capture_at=latest_receipt.created_at if latest_receipt else None,
@@ -159,4 +225,6 @@ def capture_status(
         waiting_upload_count=waiting_upload,
         estimated_wait_seconds=estimated_wait_seconds,
         last_reviewed_at=last_reviewed_at,
+        devices=device_statuses,
+        review_failures_5m=max(0, int(snapshot.get("failed_frames_in_window", 0) or 0)),
     )

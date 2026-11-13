@@ -425,6 +425,17 @@ def claim_commands(
     device: Device = Depends(current_device),
 ):
     now = datetime.now(UTC)
+    # Product scope is screenshot capture + review. Even a pending command from
+    # an older backend must never introduce a restriction after this upgrade.
+    # Undo remains deliverable solely to recover already-applied legacy state.
+    db.query(DeviceCommand).filter(
+        DeviceCommand.device_id == device.device_id,
+        DeviceCommand.status.in_(["queued", "claimed"]),
+        DeviceCommand.command_type != "undo_action",
+    ).update({
+        "status": "rejected", "completed_at": now,
+        "result": {"error": "retired_product_capability", "retryable": False},
+    }, synchronize_session="fetch")
     db.query(DeviceCommand).filter(
         DeviceCommand.device_id == device.device_id,
         DeviceCommand.status.in_(["queued", "claimed"]),

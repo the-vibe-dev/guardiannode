@@ -37,7 +37,7 @@ Schema:
   "categories": ["string"],
   "summary": "one short sentence",
   "evidence": ["short quoted span", "another"],
-  "recommended_action": "none|log|alert_parent|pause_app|block_app|emergency_review",
+  "recommended_action": "none|log|alert_parent|emergency_review",
   "confidence": 0.0,
   "false_positive_notes": ""
 }}
@@ -57,3 +57,5 @@ Constraints:
 If the input is empty, garbled, or has no safety-relevant content, return risk_level "none" with score 0.
 
 Output the JSON now.
+
+GuardianNode only captures and reviews visible content. Recommend parent review or a conversation; never recommend automated app suspension, website blocking, screen-time limits, or device restrictions.

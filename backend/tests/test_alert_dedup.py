@@ -83,3 +83,21 @@ def test_reviewed_alert_does_not_absorb_new_findings(db_session):
     )
     assert created is True
     assert a1 != a2, "a reviewed alert is closed; recurrence needs fresh attention"
+
+
+def test_text_events_cannot_replace_screenshot_alert_evidence(db_session):
+    _add_risk(db_session, "screenshot-risk", "screenshot-event")
+    _add_risk(db_session, "text-risk", "text-event")
+    db_session.flush()
+    db_session.get(Event, "text-event").source_type = "text"
+    first, _ = upsert_alert(
+        db_session, risk_id="screenshot-risk", device_id="dev1", profile_id=None,
+        severity="critical", categories=["self_harm"], source="screenshot",
+    )
+    second, created = upsert_alert(
+        db_session, risk_id="text-risk", device_id="dev1", profile_id=None,
+        severity="critical", categories=["self_harm"], source="text",
+    )
+    assert created is True
+    assert first != second
+    assert db_session.get(Alert, first).risk_id == "screenshot-risk"

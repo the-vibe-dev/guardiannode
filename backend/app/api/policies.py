@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep, require_recent_auth
+from app.api.deps import get_db_dep, parent_user, require_recent_auth
 from app.db.models import Policy, User
 from app.services.audit import log_action
 
@@ -29,14 +29,56 @@ DEFAULT_POLICY_CONFIG = {
         "cadence_seconds": 5,
     },
     "severity_thresholds": {"alert_at": "medium", "notify_at": "high"},
-    "schedule": {"enabled": False, "windows": []},
-    "enforcement": {
-        "on_critical": ["notify_parent"],
-        "on_high": ["notify_parent"],
-        "on_medium": ["notify_parent_digest"],
-        "on_low": ["log_only"],
-    },
+
 }
+
+
+_MONITORING_KEYS = {"monitored_apps", "monitored_domains", "capture", "severity_thresholds"}
+_CAPTURE_KEYS = {"scope", "full_screen_capture_enabled", "cadence_seconds"}
+_THRESHOLD_KEYS = {"alert_at", "notify_at"}
+
+
+def _valid_config_value(key: str, value: object) -> bool:
+    if key in {"monitored_apps", "monitored_domains"}:
+        maximum = 256 if key == "monitored_apps" else 253
+        return isinstance(value, list) and len(value) <= 200 and all(
+            isinstance(item, str) and 1 <= len(item) <= maximum and not any(ord(c) < 32 for c in item)
+            for item in value
+        )
+    if key == "capture":
+        if not isinstance(value, dict):
+            return False
+        return all(
+            (field == "scope" and item in ("monitored_window", "full_screen"))
+            or (field == "full_screen_capture_enabled" and type(item) is bool)
+            or (field == "cadence_seconds" and type(item) is int and 2 <= item <= 300)
+            for field, item in value.items()
+        )
+    if key == "severity_thresholds":
+        return isinstance(value, dict) and all(
+            field in _THRESHOLD_KEYS and item in ("low", "medium", "high", "critical")
+            for field, item in value.items()
+        )
+    return False
+
+
+def _monitoring_config(config: dict, *, reject_unsupported: bool = False) -> dict:
+    """Expose only capture/review configuration; preserve old DB data on reads."""
+    unsupported = set(config) - _MONITORING_KEYS
+    for key, allowed in (("capture", _CAPTURE_KEYS), ("severity_thresholds", _THRESHOLD_KEYS)):
+        value = config.get(key)
+        if isinstance(value, dict):
+            unsupported.update(f"{key}.{field}" for field in set(value) - allowed)
+    if reject_unsupported and unsupported:
+        raise HTTPException(422, "Only screenshot capture and alert review settings are supported; device restrictions and usage schedules are retired.")
+    out = {key: value for key, value in config.items() if key in _MONITORING_KEYS}
+    for key, allowed in (("capture", _CAPTURE_KEYS), ("severity_thresholds", _THRESHOLD_KEYS)):
+        if isinstance(out.get(key), dict):
+            out[key] = {field: value for field, value in out[key].items() if field in allowed}
+    invalid = [key for key, value in out.items() if not _valid_config_value(key, value)]
+    if reject_unsupported and invalid:
+        raise HTTPException(422, "Invalid screenshot capture or review configuration")
+    return {key: value for key, value in out.items() if key not in invalid}
 
 
 class PolicyDTO(BaseModel):
@@ -46,9 +88,9 @@ class PolicyDTO(BaseModel):
 
 
 @router.get("", response_model=list[PolicyDTO])
-def list_policies(db: Session = Depends(get_db_dep), _: User = Depends(current_user)):
+def list_policies(db: Session = Depends(get_db_dep), _: User = Depends(parent_user)):
     rows = db.query(Policy).all()
-    return [PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=p.config_json) for p in rows]
+    return [PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=_monitoring_config(p.config_json)) for p in rows]
 
 
 class CreatePolicyRequest(BaseModel):
@@ -64,14 +106,14 @@ class EffectivePolicyUpdateRequest(BaseModel):
 def create_policy(
     req: CreatePolicyRequest,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
-    p = Policy(policy_id=str(ULID()), profile_id=req.profile_id, config_json=req.config)
+    p = Policy(policy_id=str(ULID()), profile_id=req.profile_id, config_json=_monitoring_config(req.config, reject_unsupported=True))
     db.add(p)
     log_action(db, actor=str(user.id), action="policy.create", target=p.policy_id)
     db.commit()
-    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=p.config_json)
+    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=_monitoring_config(p.config_json))
 
 
 def _effective_policy(db: Session, profile_id: str) -> Policy:
@@ -93,11 +135,11 @@ def _effective_policy(db: Session, profile_id: str) -> Policy:
 def get_effective_policy(
     profile_id: str,
     db: Session = Depends(get_db_dep),
-    _: User = Depends(current_user),
+    _: User = Depends(parent_user),
 ):
     p = _effective_policy(db, profile_id)
     db.commit()
-    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=p.config_json)
+    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=_monitoring_config(p.config_json))
 
 
 @router.patch("/{profile_id}/effective", response_model=PolicyDTO)
@@ -105,14 +147,14 @@ def update_effective_policy(
     profile_id: str,
     req: EffectivePolicyUpdateRequest,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
     p = _effective_policy(db, profile_id)
-    p.config_json = req.config
+    p.config_json = _monitoring_config(req.config, reject_unsupported=True)
     log_action(db, actor=str(user.id), action="policy.effective.update", target=p.policy_id)
     db.commit()
-    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=p.config_json)
+    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=_monitoring_config(p.config_json))
 
 
 class UpdatePolicyRequest(BaseModel):
@@ -124,13 +166,13 @@ def update_policy(
     policy_id: str,
     req: UpdatePolicyRequest,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
     p = db.get(Policy, policy_id)
     if p is None:
         raise HTTPException(404, "Policy not found")
-    p.config_json = req.config
+    p.config_json = _monitoring_config(req.config, reject_unsupported=True)
     log_action(db, actor=str(user.id), action="policy.update", target=policy_id)
     db.commit()
-    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=p.config_json)
+    return PolicyDTO(policy_id=p.policy_id, profile_id=p.profile_id, config=_monitoring_config(p.config_json))

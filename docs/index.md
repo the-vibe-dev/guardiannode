@@ -14,7 +14,8 @@ hide:
 An alpha/developer-preview safety monitor for families that runs on hardware you
 own. Local AI helps parents review risk signals from a child's Windows device:
 screenshots, OCR, vision/text classification, encrypted local evidence, and a
-parent dashboard.
+parent review dashboard. Screenshot monitoring does not limit device use or
+block apps and websites.
 </p>
 
 [Windows alpha install](PARENT_GUIDES/install-on-one-pc.md){ .md-button .md-button--primary }
@@ -36,17 +37,21 @@ parent dashboard.
 </div>
 <div class="gn-card" markdown>
 <h3>🤝 Trustworthy</h3>
-<p>No stealth mode, ever. A visible tray icon shows the child when monitoring is on. No raw keystroke capture, no password-field collection, and parent-controlled capture scope.</p>
+<p>No stealth mode, ever. A visible tray icon shows the child when monitoring is on. No raw keystroke capture, with parent-controlled capture scope. Screenshots can still contain sensitive visible information.</p>
 </div>
 <div class="gn-card" markdown>
 <h3>🧠 Technical & Modern</h3>
-<p>Vision LLM reads the screen the way a person would — text and imagery — backed by a deterministic rules engine that works even when the model is down.</p>
+<p>Local vision models assess visible text and imagery, with deterministic text rules available during model failures. Processing status makes reduced coverage visible.</p>
 </div>
 <div class="gn-card" markdown>
 <h3>💚 Calm & Supportive</h3>
 <p>Severity-ranked alerts with per-category playbooks. It will miss things and sometimes false-alarm — we say so plainly. It's one tool, not a replacement for parenting.</p>
 </div>
 </div>
+
+Read the current [screenshot and AI review workflow](SCREENSHOT_REVIEW.md) and
+[focused roadmap](ROADMAP.md). Historical release claims apply only to their
+named builds.
 
 ## How it works
 
@@ -69,8 +74,8 @@ The installer checks your hardware and picks the strongest tier it can run:
 
 | Tier | Hardware | What it catches |
 |---|---|---|
-| **Full** | NVIDIA GPU with 16+ GB VRAM | Everything, with the most nuance on ambiguous chat |
-| **Vision** *(default)* | NVIDIA GPU with 12–15 GB VRAM | Explicit imagery + grooming/self-harm/scam text + your custom watch phrases |
+| **Full** | NVIDIA GPU with 16+ GB VRAM | Vision and separate text assessment; results remain fallible |
+| **Vision** *(default)* | NVIDIA GPU with 12–15 GB VRAM | Visual and visible-text risk assessment plus custom watch phrases |
 | **Text-only** | Any PC with 8 GB RAM, no GPU | Text risks only — visual-only content (nudity/gore without text) is **not** detected |
 
 No GPU in the kid's PC? Use the [two-machine setup](PARENT_GUIDES/install-server-and-child.md): the child's PC runs only the lightweight agent and a Linux or Windows box with a GPU does the AI work.

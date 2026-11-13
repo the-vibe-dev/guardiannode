@@ -139,15 +139,16 @@ async def classify_text(
                         format_json=True,
                     )
                     parsed = _extract_json(response)
-                    if parsed is not None:
+                    if taxonomy.has_complete_assessment(parsed):
                         llm = _normalize_llm(parsed)
                         llm_used = True
                         break
-                    # one retry with correction prompt
+                    llm_error = "invalid_model_response"
+                    # One retry with correction prompt; never echo raw output.
                     if attempt == 0:
                         prompt = (
                             prompt
-                            + "\n\nYour previous response was not valid JSON. Return ONLY the JSON object now."
+                            + "\n\nYour previous response did not match the required assessment schema. Return ONLY one complete JSON object with every required key and its stated type."
                         )
                         continue
                 except OllamaError as e:
@@ -225,6 +226,8 @@ async def classify_text(
     # widgets surface the reduced-protection state.
     if llm_used or not use_llm or not (redacted_text or "").strip():
         status = "ok"
+    elif llm_error == "invalid_model_response":
+        status = "unclassified_invalid_model_response"
     else:
         status = "unclassified_model_unavailable"
 

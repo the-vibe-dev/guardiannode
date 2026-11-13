@@ -24,48 +24,25 @@ The dashboard gives each applied filter set its own query identity, displays
 load failures and retries, and keeps later-page failures separate from the
 already loaded records. Unsaved filter edits do not silently change the query.
 
-## Parent-confirmed actions
+## Evidence actions and historical recovery
 
-An alert's action history shows the latest 50 commands, their delivery state,
-the latest endpoint receipt, and an Undo control for reversible actions. The
-parent-only `GET /api/alerts/{alert_id}/actions` API accepts `limit` from 1 to
-100 and orders by creation time and command ID, newest first. Older audit
-activity remains available through the Audit page.
+The current alert workflow supports review notes, useful/false-positive feedback,
+notification and evidence deletion. Device restrictions and child notices cannot
+be created. New request creation and exception approvals are retired.
 
-Queued means the backend has accepted the command. Claimed means the endpoint
-has taken it for execution. A success or failure is a receipt from that
-execution; it is not continuous process telemetry. Refresh obtains the latest
-stored receipts. Later local reconciliation can recover a failure without
-rewriting the original command result.
+An alert's history keeps the latest 50 stored actions, their delivery state and
+allowlisted execution metadata. The parent-only
+`GET /api/alerts/{alert_id}/actions` endpoint accepts a limit of 1 to 100 and
+orders by creation time and command ID, newest first. Older audit activity can
+be found on the Audit page. Raw agent error strings and arbitrary result fields
+are not returned in the history view.
 
-An app pause can partly succeed. A failed receipt can therefore include active
-pause leases, suspended processes, or pending resume work. The dashboard shows
-that distinction and the last reported lease deadline. The command's delivery
-deadline is separate from the app pause deadline. Missing counters mean the
-endpoint did not report that measurement; they are not assumed to be zero.
+Existing restriction records retain recovery controls where appropriate. Undo
+queues a release-only command. Queued means accepted by the backend; claimed
+means collected by an endpoint. Neither is a success receipt. Missing counters
+mean not reported, not zero. The current endpoint also attempts local recovery
+from verified old journals without creating new restrictions.
 
-Undo queues a separate command and does not claim instant release. New undo
-commands identify the original pause, so undoing one lease does not remove a
-different overlapping pause. Older endpoint commands without that identity
-retain their original target-wide undo behavior. Deploy the matching backend,
-dashboard, and endpoint together when evaluating these semantics.
-
-The history API exposes only allowlisted booleans, counters, deadlines and
-lease status from endpoint results. Raw agent error text and arbitrary result
-fields are not returned in the history view. Known failures stay visible
-without making an unqualified promise that every matching process was checked
-or that no process remains paused.
-
-## Upgrade and recovery boundary
-
-Undo active app pauses with the old endpoint before upgrading it. Old journal
-entries contain only numeric PIDs, which can be reused by unrelated processes.
-The new endpoint preserves those entries as `legacy_unverified` and will not
-guess which process to resume. An unreadable or corrupt journal is preserved
-for verified operator recovery. Reboot/state recovery and the exact installed
-Windows service must be qualified on an isolated Windows machine.
-
-App restriction is reactive on the broker polling cadence, normally around ten
-seconds plus polling/storage delays. It is not process-creation interception,
-a daily screen-time budget, or a recurring schedule engine. See the Windows
-agent README and review backlog for the native qualification matrix.
+A receipt records a past execution, not continuous process telemetry. Subsequent
+local recovery can resolve a failed release without changing an older receipt.
+See [legacy restriction recovery](ENFORCEMENT.md) before upgrading a device.

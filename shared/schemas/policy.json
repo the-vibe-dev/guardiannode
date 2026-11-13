@@ -25,15 +25,6 @@
         "notify_at": {"type": "string", "enum": ["low", "medium", "high", "critical"]}
       }
     },
-    "enforcement": {
-      "type": "object",
-      "properties": {
-        "on_critical": {"type": "array", "items": {"type": "string"}},
-        "on_high": {"type": "array", "items": {"type": "string"}},
-        "on_medium": {"type": "array", "items": {"type": "string"}},
-        "on_low": {"type": "array", "items": {"type": "string"}}
-      }
-    },
     "retention_days": {
       "type": "object",
       "properties": {

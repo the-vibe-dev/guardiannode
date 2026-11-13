@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ApiError, api } from "../api";
+import { ApiError, api, type DeviceAction } from "../api";
 import SeverityBadge from "../components/SeverityBadge";
 import GuardianReviewPanel from "../components/GuardianReviewPanel";
 import ActionHistory from "../components/ActionHistory";
@@ -10,7 +10,7 @@ import { formatDateTime } from "../utils/datetime";
 export default function AlertDetail() {
   const { id } = useParams();
   // Route changes must discard all incident-specific state, including notes,
-  // action targets and an in-flight response for the previous alert.
+  // evidence-deletion confirmation and any response for the previous alert.
   return <AlertIncident key={id} id={id} />;
 }
 
@@ -21,11 +21,7 @@ function AlertIncident({ id }: { id: string | undefined }) {
   const [notes, setNotes] = useState("");
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showFullText, setShowFullText] = useState(false);
-  const [enforcementTarget, setEnforcementTarget] = useState("");
-  const [enforcementAction, setEnforcementAction] = useState("show_child_prompt");
-  const [enforcementMessage, setEnforcementMessage] = useState("");
-  const [enforcementDuration, setEnforcementDuration] = useState(900);
+  const [deletionReceipt, setDeletionReceipt] = useState<DeviceAction | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -79,21 +75,15 @@ function AlertIncident({ id }: { id: string | undefined }) {
     }
   }
 
-  async function confirmedAction() {
+  async function deleteEvidence() {
     if (!id) return;
     setBusy(true);
     setError(null);
     setActionMsg(null);
-    const body = {
-      action: enforcementAction,
-      ...(enforcementTarget ? { target: enforcementTarget } : {}),
-      ...(enforcementAction === "pause_app" ? { duration_seconds: enforcementDuration } : {}),
-      ...(enforcementAction === "show_child_prompt" ? { message: enforcementMessage } : {}),
-    };
+    const body = { action: "delete_evidence" as const };
     try {
       const result = await api.confirmedAlertAction(id, body);
-      setActionMsg(`Parent-confirmed action recorded (${result.status}). Check Action history for the latest report.`);
-      void queryClient.invalidateQueries({ queryKey: ["alert-actions", id] });
+      recordDeletion(result);
     } catch (error) {
       const preview = error instanceof ApiError ? error.body?.detail?.preview : null;
       if (!preview) {
@@ -101,14 +91,13 @@ function AlertIncident({ id }: { id: string | undefined }) {
         setBusy(false);
         return;
       }
-      if (!window.confirm(`${preview}\n\nGuardianNode will send this command only because you confirmed it. Continue?`)) {
+      if (!window.confirm(`${preview}\n\nThis removes the retained evidence for this alert. This cannot be undone. Continue?`)) {
         setBusy(false);
         return;
       }
       try {
         const result = await api.confirmedAlertAction(id, { ...body, confirmed_preview: preview });
-        setActionMsg(`Parent-confirmed action recorded (${result.status}). Check Action history for the latest report.`);
-        void queryClient.invalidateQueries({ queryKey: ["alert-actions", id] });
+        recordDeletion(result);
       } catch (secondError) {
         setError(`Action failed: ${(secondError as Error).message}`);
       }
@@ -117,11 +106,26 @@ function AlertIncident({ id }: { id: string | undefined }) {
     }
   }
 
+  function recordDeletion(result: DeviceAction) {
+    setDeletionReceipt(result);
+    setDetail(null);
+    for (const queryKey of [["alert-actions", id], ["alerts"], ["overview"], ["capture-status"]]) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
+  }
+
+  if (deletionReceipt) return <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-5">
+    <h1 className="font-display text-2xl font-bold text-[#18313a]">Evidence deletion</h1>
+    <p role="status" className="text-sm text-slate-700">{deletionReceipt.status === "completed" ? "The retained evidence for this alert has been deleted." : "Evidence deletion is pending. Background cleanup will retry removal; this incident is excluded from active review."}</p>
+    <p className="text-xs text-slate-500">Deletion receipt: {deletionReceipt.action_id} · {deletionReceipt.status}. Audit metadata records the request.</p>
+    <Link to="/risks" className="inline-flex min-h-11 items-center font-semibold text-[#275e3d] underline">Return to alerts</Link>
+  </section>;
+
   if (error && !detail) return <div role="alert" className="text-red-700 p-4">{error}</div>;
   if (!detail) return <div role="status" className="text-gray-500 p-4">Loading…</div>;
 
   const eventId = detail.event?.event_id;
-  const hasScreenshot = eventId && detail.alert?.severity && ["medium", "high", "critical"].includes(detail.alert.severity);
+  const hasScreenshot = Boolean(eventId && detail.event?.has_screenshot);
 
   return (
     <div className="space-y-4">
@@ -151,23 +155,14 @@ function AlertIncident({ id }: { id: string | undefined }) {
         <p>{detail.risk.summary || <em>(no summary)</em>}</p>
       </div>
 
-      <div className="bg-white shadow rounded p-4">
-        <h2 className="font-semibold mb-2">Next steps</h2>
-        <ul className="list-disc pl-5 text-sm space-y-1">
-          {playbook(detail.risk.categories || [], detail.alert.severity).map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </div>
-
       {/* Screenshot */}
-      {hasScreenshot && (
+      {eventId && (
         <div className="bg-white shadow rounded p-4">
           <h2 className="font-semibold mb-2 flex items-center gap-2">
             Screenshot
             <span className="text-xs font-normal text-gray-500">(encrypted at rest; viewing logs an audit entry)</span>
           </h2>
-          <ScreenshotViewer eventId={eventId} />
+          {hasScreenshot ? <ScreenshotViewer eventId={eventId} /> : <p role={detail.event.screenshot_status === "missing" ? "alert" : "status"} className="text-sm text-slate-600">{detail.event.screenshot_status === "missing" ? "The screenshot record exists, but its image is unavailable. Check storage diagnostics." : detail.event.screenshot_status === "pending_delete" ? "This screenshot is pending deletion and cannot be displayed." : detail.event.screenshot_status === "not_retained" ? "No screenshot is retained for this alert." : "Screenshot availability has not been reported."}</p>}
         </div>
       )}
 
@@ -197,16 +192,19 @@ function AlertIncident({ id }: { id: string | undefined }) {
 
       <GuardianReviewPanel alertId={id!} detail={detail} />
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-        <h2 className="font-display font-semibold text-[#18313a]">Parent-confirmed device action</h2>
-        <p className="mt-1 text-sm text-slate-600">GuardianNode never takes these actions from a classifier result. You will see and confirm the exact command first. App pausing and domain blocking are unavailable while their Windows recovery behavior is being qualified.</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="text-sm"><span className="mb-1 block text-xs font-medium text-slate-600">Action</span><select value={enforcementAction} onChange={(e) => setEnforcementAction(e.target.value)} className="min-h-11 w-full rounded-lg border border-slate-300 px-3"><option value="show_child_prompt">Show a notice to the child</option><option value="delete_evidence">Delete this evidence</option></select></label>
-          {enforcementAction === "pause_app" && <label className="text-sm"><span className="mb-1 block text-xs font-medium text-slate-600">Duration</span><select value={enforcementDuration} onChange={(e) => setEnforcementDuration(Number(e.target.value))} className="min-h-11 w-full rounded-lg border border-slate-300 px-3"><option value={900}>15 minutes</option><option value={3600}>1 hour</option><option value={86400}>24 hours</option></select></label>}
-          {enforcementAction === "show_child_prompt" && <label className="text-sm sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-600">Child-facing message</span><textarea value={enforcementMessage} onChange={(e) => setEnforcementMessage(e.target.value)} maxLength={500} rows={3} className="w-full rounded-lg border border-slate-300 p-3" placeholder="Use calm, supportive language…" /></label>}
-          {(enforcementAction === "pause_app" || enforcementAction === "block_domain") && <label className="text-sm sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-600">{enforcementAction === "pause_app" ? "Exact absolute .exe path" : "Exact domain"}</span><input value={enforcementTarget} onChange={(e) => setEnforcementTarget(e.target.value)} className="min-h-11 w-full rounded-lg border border-slate-300 px-3" placeholder={enforcementAction === "pause_app" ? "C:\\Program Files\\Example\\Example.exe" : "example.com"} /></label>}
-        </div>
-        <button onClick={confirmedAction} disabled={busy} className={`mt-4 min-h-11 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${enforcementAction === "delete_evidence" ? "bg-red-700 hover:bg-red-800" : "bg-[#0d3b4a] hover:bg-[#164f60]"}`}>Preview exact action…</button>
+      <div className="bg-white shadow rounded p-4">
+        <h2 className="font-semibold mb-2">Conversation & next steps</h2>
+        <ul className="list-disc pl-5 text-sm space-y-1">
+          {playbook(detail.risk.categories || [], detail.alert.severity).map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
+
+      <section aria-labelledby="evidence-controls-heading" className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 id="evidence-controls-heading" className="font-display font-semibold text-[#18313a]">Evidence controls</h2>
+        <p className="mt-1 text-sm text-slate-600">Delete the retained evidence for this alert after reviewing it. You will confirm the exact deletion first.</p>
+        <button onClick={deleteEvidence} disabled={busy} className="mt-4 min-h-11 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50">Preview evidence deletion…</button>
       </section>
 
       <ActionHistory alertId={id!} />
@@ -227,12 +225,14 @@ function AlertIncident({ id }: { id: string | undefined }) {
           <h3 className="font-semibold mb-2">Classification</h3>
           <dl className="text-sm space-y-1">
             <Item k="Score" v={String(detail.risk.score)} />
-            <Item k="Confidence" v={String(detail.risk.confidence)} />
+            <Item k="Model confidence" v={String(detail.risk.confidence)} />
             <Item k="Categories" v={(detail.risk.categories || []).join(", ") || "—"} />
             <Item k="Rules" v={(detail.risk.rules_triggered || []).join(", ") || "—"} />
-            <Item k="Model" v={detail.risk.model || "(rules only)"} />
-            <Item k="Recommended" v={detail.risk.recommended_action} />
+            <Item k="Review method" v={detail.risk.model || "Not reported"} />
+            <Item k="Classifier status" v={detail.risk.classifier_status?.replaceAll("_", " ") || "Not reported"} />
+            <Item k="Suggested review" v={detail.risk.recommended_action} />
           </dl>
+          <p className="mt-3 text-xs text-slate-500">Scores and model confidence are review signals, not a verified probability of harm. Read the screenshot and surrounding context.</p>
         </div>
       </div>
 
@@ -331,12 +331,13 @@ function playbook(categories: string[], severity: string): string[] {
   if (severity === "critical") {
     return ["Review immediately.", "Use the evidence and source details below to decide the safest next action."];
   }
-  return ["Review the evidence and mark whether this alert was useful.", "Adjust watch phrases or policy if this is noisy."];
+  return ["Review the evidence and mark whether this alert was useful.", "Adjust watch phrases or alert settings if this is noisy."];
 }
 
 function ScreenshotViewer({ eventId }: { eventId: string }) {
   const [reveal, setReveal] = useState(false);
   const [imgError, setImgError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   if (!reveal) {
     return (
@@ -346,7 +347,7 @@ function ScreenshotViewer({ eventId }: { eventId: string }) {
           Every view is recorded in the audit log.
         </p>
         <button
-          onClick={() => setReveal(true)}
+          onClick={() => { setImgError(null); setLoading(true); setReveal(true); }}
           className="bg-brand-500 hover:bg-brand-700 text-white px-4 py-2 rounded text-sm"
         >
           Reveal screenshot
@@ -357,12 +358,14 @@ function ScreenshotViewer({ eventId }: { eventId: string }) {
 
   return (
     <div>
-      {imgError && <div className="text-sm text-red-700 mb-2">{imgError}</div>}
+      {loading && <p role="status" className="mb-2 text-sm text-slate-600">Loading retained screenshot…</p>}
+      {imgError && <div role="alert" className="text-sm text-red-700 mb-2">{imgError} Hide and reveal it again to retry.</div>}
       <img
         src={`/api/events/${eventId}/screenshot`}
         alt="Captured screenshot"
         className="max-w-full border rounded shadow-sm"
-        onError={() => setImgError("Failed to load screenshot (decryption error or missing blob).")}
+        onLoad={() => { setLoading(false); setImgError(null); }}
+        onError={() => { setLoading(false); setImgError("The screenshot could not be loaded. It may have expired, been removed, or become unavailable."); }}
       />
       <div className="mt-2 flex gap-2">
         <a
@@ -373,7 +376,7 @@ function ScreenshotViewer({ eventId }: { eventId: string }) {
           Download
         </a>
         <button
-          onClick={() => setReveal(false)}
+          onClick={() => { setLoading(false); setImgError(null); setReveal(false); }}
           className="text-xs text-gray-500 underline"
         >
           Hide

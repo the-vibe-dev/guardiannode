@@ -111,6 +111,7 @@ async def classify_image(
         "confidence": 0.0,
         "false_positive_notes": "",
         "model": None,
+        "status": "unclassified_model_unavailable",
         "prompt_version": _prompt_version(),
     }
 
@@ -135,9 +136,10 @@ async def classify_image(
             log.warning("%s; retrying vision classification with num_ctx=%d", e, retry_ctx)
             response = await _generate(retry_ctx)
         parsed = _extract_json(response)
-        if parsed is None:
+        if not taxonomy.has_complete_assessment(parsed, vision=True):
+            result["status"] = "unclassified_invalid_model_response"
             log.warning(
-                "vision classifier returned no parseable JSON (model=%s response_chars=%d)",
+                "vision classifier returned an invalid assessment (model=%s response_chars=%d)",
                 chosen,
                 len(response),
             )
@@ -147,6 +149,7 @@ async def classify_image(
         # bogus severities, or injected keys must not reach policy/storage).
         result.update(taxonomy.normalize_vision_output(parsed))
         result["model"] = chosen
+        result["status"] = "ok"
         result["prompt_version"] = _prompt_version()
     except OllamaError as e:
         log.warning("vision classifier ollama error: %s", e)

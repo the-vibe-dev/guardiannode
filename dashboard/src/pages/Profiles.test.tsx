@@ -14,22 +14,22 @@ describe("profile policy editing", () => {
   it("updates visible policy controls with the server age defaults after reset", async () => {
     vi.mocked(api.updateProfile).mockResolvedValue({ ...profile, alert_policy: { min_severity: "medium", capture: { level: "balanced" }, categories: {} } });
     render(<Profiles />);
-    fireEvent.click(await screen.findByRole("button", { name: /Privacy & alert settings/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Screenshot & alert settings/ }));
     const level = screen.getByLabelText("Only alert me at or above") as HTMLSelectElement;
     expect(level.value).toBe("critical");
     fireEvent.click(screen.getByRole("button", { name: "Reset to age defaults" }));
     await waitFor(() => expect(level.value).toBe("medium"));
-    expect((screen.getByLabelText("How much to capture") as HTMLSelectElement).value).toBe("balanced");
+    expect((screen.getByLabelText("Screenshot frequency") as HTMLSelectElement).value).toBe("balanced");
     expect(api.updateProfile).toHaveBeenCalledWith("child-1", { reset_policy_to_age_default: true });
   });
   it("shows a policy save failure and keeps the draft editable", async () => {
     vi.mocked(api.updateProfile).mockRejectedValue(new Error("Connection lost"));
     render(<Profiles />);
-    fireEvent.click(await screen.findByRole("button", { name: /Privacy & alert settings/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Screenshot & alert settings/ }));
     fireEvent.change(screen.getByLabelText("Only alert me at or above"), { target: { value: "high" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save privacy settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save screenshot settings" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Connection lost");
     expect((screen.getByLabelText("Only alert me at or above") as HTMLSelectElement).value).toBe("high");
-    expect((screen.getByRole("button", { name: "Save privacy settings" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save screenshot settings" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

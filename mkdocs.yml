@@ -105,7 +105,10 @@ nav:
       - Data retention: RETENTION.md
       - Archive and recovery format: ARCHIVE_FORMAT.md
       - Redaction: REDACTION.md
-      - Enforcement: ENFORCEMENT.md
+      - Screenshot and AI review: SCREENSHOT_REVIEW.md
+      - Legacy restriction recovery: ENFORCEMENT.md
+      - Audit and evidence actions: AUDIT_AND_ACTION_HISTORY.md
+      - Capture queue operations: CAPTURE_QUEUE_OPERATIONS.md
       - Event schema: EVENT_SCHEMA.md
   - For Developers:
       - Backend setup: BACKEND_SETUP.md

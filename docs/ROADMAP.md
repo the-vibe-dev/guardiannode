@@ -1,101 +1,84 @@
-# Roadmap
+# Screenshot and AI review roadmap
 
-## v0.1.0-alpha.3 — current closed-beta candidate
+## Product direction
 
-- ✅ Repo scaffold, license, docs
-- ✅ Shared schemas (JSON Schema + Pydantic)
-- ✅ FastAPI backend with encrypted evidence storage, best-effort filtering where implemented, rules engine, Ollama text classifier, vision classifier, multimodal merge
-- ✅ SQLite with startup schema initialization and idempotent alpha patches
-- ✅ Windows agent (Python source — process/window detection, visible-screen screenshot capture + perceptual-hash dedup, tray, watchdog)
-- ✅ Screenshot-based collection with server-side OCR (replaced the earlier MV3 browser extension, now removed)
-- ✅ Dashboard (React + Vite + Tailwind) — login, dashboard, devices, risk feed, alert detail, settings
-- ✅ Linux server installer: `install.sh` + systemd + Docker Compose
-- ⚠️ Windows server installer (Inno Setup; source-tested, current build needs clean-machine requalification)
-- ⚠️ Windows child-device/all-in-one installer (Inno Setup; source-tested, unsigned, current build needs requalification)
-- ✅ Family-CA HTTPS, short-lived trust bundles, and CA pinning for separated mode
-- ✅ Broker-owned credentials/queue and authenticated per-session capture launch
-- ✅ Versioned parental consent, withdrawal/deletion, guided onboarding, child requests, and metadata-only daily digest
-- ✅ Parent-confirmed bounded Windows commands with audit/status reporting
-- ✅ Responsive alert-first dashboard with automated Chromium/axe journeys
-- ⚠️ Wine-based cross-build for Windows installers on Linux
-- ✅ GitHub release workflow with source archive and public alpha installer artifacts
+GuardianNode is a local-first screenshot and AI review tool for families. The
+product priority is a reliable, understandable capture-to-review workflow.
+Screen-time budgets, schedules, app suspension, website blocking, DNS filtering
+and requests to bypass restrictions are outside the product scope.
 
-## v0.2 — Hardening + real-world alpha testing
+This direction supersedes the earlier enforcement roadmap. Historical release
+notes remain historical evidence, not a list of current capabilities. The
+current source is **2026-11-13-review.3**, an alpha/developer preview based on
+application version **0.1.0-alpha.3**.
 
-- [ ] First wave of family alpha testers (10–20 households)
-- [ ] False-positive / false-negative tracking dashboard
-- [ ] Improved filtering/redaction patterns based on alpha feedback
-- [ ] OCR region tuning for current Roblox, Discord, Minecraft UIs
-- [ ] Better on-screen-text coverage for TikTok, Snapchat web (where possible), Instagram web
-- [ ] SignPath.io OSS code-signing application
-- [ ] Submit to `winget-pkgs` and Chocolatey
+## Current foundation
 
-## v0.3 — Broader Enforcement
+- Visible Windows capture, explicit monitoring consent and capture pause/resume.
+- Primary-display or app-scoped screenshots, change detection and encrypted
+  offline buffering.
+- Parent-owned backend with OCR, deterministic text rules, optional local
+  Ollama vision/text models, and encrypted retained evidence.
+- Capture/review status per device, with model failure and rules-only results
+  distinguished from successful AI processing.
+- Review feed, on-demand screenshot reveal, notes, feedback and optional
+  explicitly approved Guardian Review second opinions.
+- Notification policy, retry state, metadata-only digests, retention, consent
+  withdrawal, export, backup and audit history.
+- Release-only recovery of recorded restrictions from older installations.
 
-- [x] Soft close of an exact process after explicit parent confirmation
-- [x] Hosts-file domain block with explicit parent confirmation and owned-state undo
-- [ ] Pi-hole integration
-- [ ] AdGuard Home integration
-- [ ] Time-of-day policy support
-- [ ] Per-child profile policy overrides
+Code present does not mean that the changed build is qualified on native Windows,
+Docker or every browser. See [release gates](RELEASE_GATES.md).
 
-## v0.4 — Notifications
+## Priority 1: qualify the central workflow
 
-- [ ] Polished SMTP email templates
-- [x] Metadata-only daily digest by severity and family timezone
-- [ ] Optional webhook integration (Discord/Slack/Gotify/ntfy.sh — all parent-controlled endpoints)
-- [ ] Windows toast notifications on parent PC
+1. Build and test the exact Windows server installer and Windows child-device/all-in-one installer on clean machines. Exercise install,
+   pairing, capture, review, privacy pause, withdrawal, upgrade and uninstall.
+2. Qualify monitor selection and DPI/scaling; implement explicit multi-display
+   capture with per-display provenance before claiming all-monitor coverage.
+3. Measure capture acceptance, OCR, local-model completion, queue delay and
+   alert delivery on supported hardware, including sleep, restart and outage.
+4. Sign installers and updates, and qualify a complete backup/rollback path.
 
-## v0.5 — Mobile companion (read-only)
+The repository retains workflows for public alpha installer artifacts. Existing
+published artifacts do not include or qualify this changed source automatically.
 
-- [x] Responsive HTTPS web dashboard for parent-managed phones on the private LAN/VPN
-- [ ] Installable offline-capable PWA shell
-- [ ] Optional push notifications via ntfy.sh self-hosted
+## Priority 2: improve review quality
 
-## Platform roadmap
+1. Build a consented or synthetic representative evaluation set with hard benign
+   examples, visual-only cases, conversation context and multiple languages.
+2. Publish precision/recall and false-positive/negative rates by category, with
+   uncertainty and explicit limits on generalization.
+3. Measure OCR legibility at the actual capture resolution, not only on clean
+   strings or resized synthetic screens.
+4. Improve incident grouping and evidence navigation without hiding escalation
+   or automatically carrying old review decisions onto new evidence.
+5. Make feedback and threshold tuning understandable; never present raw model
+   confidence as validated accuracy.
 
-GuardianNode's child-device coverage is Windows-first during the alpha. The
-planned platform order after Windows hardening is:
+## Priority 3: better capture privacy and operation
 
-1. macOS child-device agent
-2. Android support
-3. iOS support
+1. Add optional excluded-app/region controls and explain resulting blind spots.
+2. Evaluate on-device masking or redaction before upload without silently
+   removing the text needed to assess grooming, threats or scams.
+3. Persist meaningful per-device coverage/drop counters and classify stale,
+   permission-denied, capture-disabled and model-unavailable states separately.
+4. Improve local model installation, diagnostics and bounded recovery.
+5. Add named additional parent accounts and least-privilege review access.
 
-macOS, Android, and iOS are not current features. Mobile operating systems have
-different permission, store, background-processing, and privacy constraints, so
-Android and iOS support will require platform-specific design instead of a
-direct port of the Windows agent.
+## Later platform work
 
-## v1.0 — General availability
+macOS, Android and iOS require distinct capture permission and background-runtime
+designs. Qualify each platform's actual screenshot coverage before promoting it.
+A companion review app can follow once the existing private-network dashboard
+and notifications meet the reliability goals.
 
-- [ ] All MVP definition-of-done items complete (full install/pair/alert/review flow verified on clean machines)
-- [ ] EV code-signing certificate (sponsored or community-funded)
-- [x] First-time-user onboarding checklist in dashboard
-- [ ] Polished parent-facing documentation including printable quickstart card
-- [ ] Translations: Spanish, French, German, Brazilian Portuguese
-- [ ] Security audit (external, public report)
+## Features outside this roadmap
 
-## Post-1.0 ideas (not committed)
+No screen-time budgets or time-of-day device restrictions; no app or website
+blocking; no network-filter integrations; no exception-approval workflow. Visible
+capture, privacy consent and retention controls remain core product requirements.
 
-- Kernel-mode driver for stronger tamper resistance (gated on EV cert)
-- Linux child-side agent (uncommon use case, but feasible)
-- Federated rule/category sharing among consenting deployments (without data sharing)
-- Detection-quality benchmarks against synthetic and academic corpora
-- Plugin SDK for community-built extractors and classifiers
-- Per-platform "trust score" so parents see at a glance how well GuardianNode covers each game/app
-- A "school counselor mode" that ships a heavily restricted dashboard for use *with* (not by) social workers in foster-care contexts — gated on explicit policy framework + legal review
-
-## What we'll never add
-
-- Cloud telemetry on by default
-- Stealth/hidden agent mode
-- System-wide raw keystroke capture
-- CSAM scanning (defer to law enforcement infrastructure)
-- Monitoring of adults without their explicit consent
-- A paid tier that gates safety features
-
-## How to influence the roadmap
-
-- Real-world reports via `safety_concern` issues weight heavily.
-- PRs ship if they meet the criteria in `CONTRIBUTING.md`.
-- For larger features, open a discussion before writing code.
+No hidden monitoring or raw system-wide keystroke capture is planned. External
+processing remains deliberate and explicit. The local core stays open source
+under the existing project license.

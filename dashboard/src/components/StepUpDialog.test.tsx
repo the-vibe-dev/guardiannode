@@ -30,8 +30,10 @@ it("masks the password and resumes concurrent actions only after successful reau
   expect(input.type).toBe("password");
   expect(input.autocomplete).toBe("current-password");
   fireEvent.change(input, { target: { value: "synthetic-password" } });
-  fireEvent.click(screen.getByText("Continue"));
-  await first;
+  await act(async () => {
+    fireEvent.click(screen.getByText("Continue"));
+    await first;
+  });
   await waitFor(() => expect(reauth).toHaveBeenCalledOnce());
   expect(reauth).toHaveBeenCalledWith("synthetic-password");
 });

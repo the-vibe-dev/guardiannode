@@ -41,7 +41,9 @@ async def test_vision_retries_when_context_is_exhausted(monkeypatch):
             raise OllamaContextLengthError("context exhausted")
         return (
             '{"visible_text":"Customer: Alex Example","risk_level":"high","score":80,'
-            '"categories":["custom_watch"],"recommended_action":"alert_parent"}'
+            '"categories":["custom_watch"],"recommended_action":"alert_parent",'
+            '"persons_visible":false,"apparent_minor":false,"summary":"Watch phrase",'
+            '"visual_evidence":["Name"],"confidence":0.9,"false_positive_notes":""}'
         )
 
     monkeypatch.setattr(image_safety.settings, "vision_num_ctx", 4096)

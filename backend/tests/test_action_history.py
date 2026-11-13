@@ -121,3 +121,27 @@ def test_history_requires_parent_and_known_alert(action_history):
     assert action_history.post("/api/settings/notifications/test").status_code == 403
     action_history.cookies.clear()
     assert action_history.get("/api/alerts/action-history-alert/actions").status_code == 401
+
+
+@pytest.mark.parametrize("status", ["failed", "rejected", "expired", "queued", "claimed"])
+def test_unsuccessful_or_overdue_undo_can_be_retried(action_history, status):
+    first = action_history.post("/api/actions/history-054/undo").json()
+    with get_sessionmaker()() as db:
+        previous = db.get(DeviceCommand, first["action_id"])
+        previous.status = status
+        if status in {"queued", "claimed"}:
+            previous.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        db.commit()
+    retry = action_history.post("/api/actions/history-054/undo")
+    assert retry.status_code == 200
+    assert retry.json()["action_id"] != first["action_id"]
+    assert retry.json()["undo_of"] == "history-054"
+    assert action_history.post("/api/actions/history-054/undo").status_code == 409
+
+
+def test_successful_undo_cannot_be_queued_again(action_history):
+    first = action_history.post("/api/actions/history-054/undo").json()
+    with get_sessionmaker()() as db:
+        db.get(DeviceCommand, first["action_id"]).status = "succeeded"
+        db.commit()
+    assert action_history.post("/api/actions/history-054/undo").status_code == 409

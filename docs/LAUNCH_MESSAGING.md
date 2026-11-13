@@ -9,8 +9,8 @@ monitoring devices they own or administer for their own children.
 GuardianNode is now in alpha/developer preview.
 
 It is a local-first AI safety monitor for families: a visible Windows agent,
-parent-owned backend, Ollama OCR/vision/text classification, encrypted local
-evidence storage, and a parent dashboard.
+parent-owned backend, server-side OCR and Ollama vision/text classification,
+encrypted local evidence storage, and a parent review dashboard.
 
 No cloud account. No subscription. No raw keylogging. AGPL-3.0.
 
@@ -44,6 +44,12 @@ keylogger, credential theft tooling, or a public-internet SaaS backend.
 
 It has a visible child-device status/tray UI and is intended for transparent
 family safety deployments.
+
+## Reply: Product focus
+
+Screenshot capture, useful AI assessment and clear evidence review are the
+priorities. GuardianNode does not limit screen time or block websites/apps.
+Capture pause, consent and retention control what is collected and kept.
 
 ## Reply: Roadmap
 

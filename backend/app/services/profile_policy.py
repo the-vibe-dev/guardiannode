@@ -78,6 +78,45 @@ CAPTURE_LEVELS = {
 VALID_MODES = {"alert", "monitor", "allow"}
 
 
+CAPTURE_BOUNDS = {
+    "cadence_seconds": (2, 300),
+    "phash_threshold": (0, 256),
+    "full_screen_change_threshold": (0, 256),
+    "max_capture_interval_seconds": (2, 3600),
+}
+_CAPTURE_KEYS = {"level", "full_screen_capture_enabled", *CAPTURE_BOUNDS}
+
+
+def validate_update(policy: dict) -> None:
+    """Reject malformed new settings; normalize() still tolerates historic data."""
+    if set(policy) - {"min_severity", "capture", "categories"}:
+        raise ValueError("Only capture and alert review settings are supported")
+    if "min_severity" in policy and policy["min_severity"] not in ("none", "low", "medium", "high", "critical"):
+        raise ValueError("Invalid minimum review severity")
+    if "capture" in policy:
+        capture = policy["capture"]
+        if not isinstance(capture, dict) or set(capture) - _CAPTURE_KEYS:
+            raise ValueError("Invalid screenshot capture settings")
+        if "level" in capture and (not isinstance(capture["level"], str) or capture["level"] not in CAPTURE_LEVELS):
+            raise ValueError("Invalid screenshot capture level")
+        if "full_screen_capture_enabled" in capture and type(capture["full_screen_capture_enabled"]) is not bool:
+            raise ValueError("Screenshot scope must be a boolean")
+        for key, (minimum, maximum) in CAPTURE_BOUNDS.items():
+            if key in capture and (type(capture[key]) is not int or not minimum <= capture[key] <= maximum):
+                raise ValueError(f"Invalid screenshot setting: {key}")
+    if "categories" in policy:
+        categories = policy["categories"]
+        if not isinstance(categories, dict) or len(categories) > 64:
+            raise ValueError("Invalid review categories")
+        for key, value in categories.items():
+            if not isinstance(key, str) or len(key) > 128 or not isinstance(value, dict) or set(value) - {"mode", "min_severity"}:
+                raise ValueError("Invalid category settings")
+            if "mode" in value and (not isinstance(value["mode"], str) or value["mode"] not in VALID_MODES):
+                raise ValueError("Category mode must be alert, monitor, or allow")
+            if value.get("min_severity") not in (None, "none", "low", "medium", "high", "critical"):
+                raise ValueError("Invalid category severity")
+
+
 def _cats(pairs: dict[str, tuple[str, str | None]]) -> dict:
     """Helper: {category: (mode, min_severity)} -> policy category dict."""
     return {c: {"mode": m, "min_severity": s} for c, (m, s) in pairs.items()}
@@ -137,15 +176,39 @@ def default_policy_for_age(age_group: str) -> dict:
 def normalize(policy: dict | None, age_group: str = "10_13") -> dict:
     """Fill in a policy from the age default where keys are missing."""
     base = default_policy_for_age(age_group)
-    if not policy:
+    if not isinstance(policy, dict) or not policy:
         return base
     out = dict(base)
-    if policy.get("min_severity") in SEVERITY_ORDER:
-        out["min_severity"] = policy["min_severity"]
+    floor = policy.get("min_severity")
+    if isinstance(floor, str) and floor in SEVERITY_ORDER:
+        out["min_severity"] = floor
     if isinstance(policy.get("capture"), dict):
-        out["capture"] = {**base["capture"], **policy["capture"]}
+        capture = dict(base["capture"])
+        incoming = policy["capture"]
+        level = incoming.get("level")
+        if isinstance(level, str) and level in CAPTURE_LEVELS:
+            capture["level"] = level
+        if type(incoming.get("full_screen_capture_enabled")) is bool:
+            capture["full_screen_capture_enabled"] = incoming["full_screen_capture_enabled"]
+        for key, (minimum, maximum) in CAPTURE_BOUNDS.items():
+            value = incoming.get(key)
+            if type(value) is int and minimum <= value <= maximum:
+                capture[key] = value
+        out["capture"] = capture
     if isinstance(policy.get("categories"), dict):
-        out["categories"] = {**base["categories"], **policy["categories"]}
+        categories = dict(base["categories"])
+        for category, settings in policy["categories"].items():
+            if not isinstance(settings, dict):
+                continue
+            # Historic or imported "block" modes now mean parent review only.
+            mode = settings.get("mode", "alert")
+            mode = mode if isinstance(mode, str) and mode in VALID_MODES else "alert"
+            floor = settings.get("min_severity")
+            categories[category] = {
+                "mode": mode,
+                "min_severity": floor if isinstance(floor, str) and floor in SEVERITY_ORDER else None,
+            }
+        out["categories"] = categories
     return out
 
 
@@ -213,6 +276,7 @@ def capture_settings(policy: dict, age_group: str = "10_13") -> dict:
     ):
         if isinstance(cap.get(k), (int, float)):
             base[k] = int(cap[k])
+    base["max_capture_interval_seconds"] = max(base["cadence_seconds"], base["max_capture_interval_seconds"])
     base["level"] = level
     base["full_screen_capture_enabled"] = bool(cap.get("full_screen_capture_enabled", True))
     return base

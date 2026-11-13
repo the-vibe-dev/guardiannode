@@ -13,7 +13,8 @@ broken model response.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import math
+from typing import Any, TypeGuard
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ CATEGORY_ALIASES: dict[str, str] = {
 ALLOWED_SEVERITIES = ("none", "low", "medium", "high", "critical")
 SEVERITY_ORDER = {lvl: i for i, lvl in enumerate(ALLOWED_SEVERITIES)}
 
-ALLOWED_ACTIONS = ("none", "log", "alert_parent", "pause_app", "block_app", "emergency_review")
+ALLOWED_ACTIONS = ("none", "log", "alert_parent", "emergency_review")
 
 _MAX_CATEGORIES = 8
 _MAX_EVIDENCE_ITEMS = 10
@@ -117,6 +118,8 @@ def normalize_severity(value: Any, default: str = "none") -> str:
 def normalize_action(value: Any, default: str = "none") -> str:
     if isinstance(value, str):
         v = value.strip().lower()
+        if v in {"pause_app", "block_app", "block_domain"}:
+            return "alert_parent"
         if v in ALLOWED_ACTIONS:
             return v
     return default
@@ -170,6 +173,39 @@ def _str_list(values: Any, max_items: int, max_chars: int) -> list[str]:
     if not isinstance(values, (list, tuple)):
         return []
     return [str(v)[:max_chars] for v in values[:max_items] if v]
+
+
+def has_complete_assessment(parsed: Any, *, vision: bool = False) -> TypeGuard[dict[str, Any]]:
+    """A model success needs a complete typed assessment, not parseable JSON.
+
+    Normalizers remain tolerant for reading historic data and bounding untrusted
+    values. They must not convert a broken response into a successful no-risk
+    assessment at the live model boundary.
+    """
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("risk_level") not in ALLOWED_SEVERITIES:
+        return False
+    if type(parsed.get("score")) is not int or not 0 <= parsed["score"] <= 100:
+        return False
+    confidence = parsed.get("confidence")
+    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1 or not math.isfinite(confidence):
+        return False
+    for key in ("summary", "false_positive_notes"):
+        if not isinstance(parsed.get(key), str):
+            return False
+    if parsed.get("recommended_action") not in (*ALLOWED_ACTIONS, "pause_app", "block_app", "block_domain"):
+        return False
+    for key in ("categories", "visual_evidence" if vision else "evidence"):
+        if not isinstance(parsed.get(key), list) or not all(isinstance(item, str) for item in parsed[key]):
+            return False
+    if vision and (
+        not isinstance(parsed.get("visible_text"), str)
+        or type(parsed.get("persons_visible")) is not bool
+        or type(parsed.get("apparent_minor")) is not bool
+    ):
+        return False
+    return True
 
 
 def normalize_model_output(parsed: Any) -> dict[str, Any]:

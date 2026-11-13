@@ -1,4 +1,3 @@
-import { mkdir } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import type { DeviceAction } from "../src/api";
@@ -76,7 +75,7 @@ async function fulfill(route: Route, json: unknown, status = 200) {
 }
 
 async function mockFamilyApi(page: Page) {
-  const pauseAction: DeviceAction = { action_id: "pause-1", alert_id: "alert-1", device_id: device.device_id, action: "pause_app", status: "failed", preview: "Pause C:\\Apps\\Chat.exe for 15 minutes", created_at: now, completed_at: now, expires_at: "2026-08-18T13:30:00Z", undo_of: null, execution: { has_error: true, partial_failure: true, lease_status: "active", lease_expires_at: "2026-08-17T13:45:00Z", failed_processes: 1, suspended_processes: 1 } };
+  const pauseAction: DeviceAction = { action_id: "pause-1", alert_id: "alert-1", device_id: device.device_id, action: "pause_app", status: "failed", preview: "Pause C:\\Apps\\Chat.exe for 15 minutes", created_at: now, completed_at: now, expires_at: "2099-08-18T13:30:00Z", undo_of: null, execution: { has_error: true, partial_failure: true, lease_status: "active", lease_expires_at: "2026-08-17T13:45:00Z", failed_processes: 1, suspended_processes: 1 } };
   let actionHistory = [pauseAction];
   await page.route(/^https?:\/\/[^/]+\/api(?:\/|$)/, async (route) => {
     const request = route.request();
@@ -118,11 +117,13 @@ async function mockFamilyApi(page: Page) {
       waiting_upload_count: 0,
       estimated_wait_seconds: 98,
       last_reviewed_at: now,
+      review_failures_5m: 0,
+      devices: [{ device_id: device.device_id, hostname: device.hostname, connection_status: "online", latest_capture_at: now, last_reviewed_at: now, last_review_status: "rules_only", classifier_status: "rules_only", review_model: "local-rules", pending_review_count: 7, reviewing_count: 1, waiting_upload_count: 0, queue_report_age_seconds: 3 }],
     });
     if (path === "/api/alerts") return fulfill(route, { items: [alert], next_cursor: null, open_count: 1 });
     if (path === "/api/alerts/alert-1") return fulfill(route, {
       alert,
-      event: { event_id: "event-1", source_type: "text", app_name: alert.app_name, window_title: "Example chat", url: null, timestamp: now },
+      event: { event_id: "event-1", source_type: "text", has_screenshot: false, screenshot_status: "not_retained", app_name: alert.app_name, window_title: "Example chat", url: null, timestamp: now },
       risk: { ...alert, risk_level: "high", score: 82, confidence: 0.87, evidence: ["Request to share an account code"], rules_triggered: ["scam_code"], model: "local-rules", recommended_action: "review" },
       redacted_text: "Please send me the code and keep this between us.",
       synthetic: true,
@@ -144,11 +145,6 @@ async function mockFamilyApi(page: Page) {
       modes: ["alert", "monitor", "allow"],
       tunable_categories: [{ key: "scam", label: "Scams" }],
       protected_categories: ["self_harm", "grooming", "threat"],
-    });
-    if (path === "/api/child-requests") return fulfill(route, {
-      items: [{ request_id: "request-1", device_id: device.device_id, profile_id: profile.profile_id, request_type: "more_time", target: "ExampleChat", reason: "I am finishing homework with my group.", status: "open", response_note: null, created_at: now, reviewed_by: null, reviewed_at: null, expires_at: "2026-08-24T13:30:00Z" }],
-      next_cursor: null,
-      open_count: 1,
     });
     if (path === "/api/onboarding/status") return fulfill(route, {
       complete: true,
@@ -192,7 +188,7 @@ test("family home is responsive, keyboard reachable, and accessible", async ({ p
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Good .*Jordan/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible();
-  await expect(page.getByText("Alex-Laptop", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alex-Laptop", exact: true })).toBeVisible();
   await expect(page.getByText(/Captured from Alex-Laptop/)).toBeVisible();
   await expect(page.getByText("7 captured screens in review queue")).toBeVisible();
 
@@ -217,10 +213,10 @@ test("empty capture history never claims monitoring is active", async ({ page })
   await page.route("**/api/dashboard/capture-status", (route) => fulfill(route, {
     latest_capture_at: null, latest_capture_device_id: null, latest_capture_hostname: null,
     pending_review_count: 0, reviewing_count: 0, waiting_upload_count: 0,
-    estimated_wait_seconds: null, last_reviewed_at: null,
+    estimated_wait_seconds: null, last_reviewed_at: null, review_failures_5m: 0, devices: [],
   }));
   await page.goto("/");
-  await expect(page.getByRole("status").filter({ hasText: "Coverage needs checking" })).toBeVisible();
+  await expect(page.getByText("No device review records yet.", { exact: false })).toBeVisible();
   await expect(page.getByText("No captures received yet")).toBeVisible();
   await expect(page.getByText("Local protection active")).toHaveCount(0);
 });
@@ -231,7 +227,6 @@ test("core parent journeys render without runtime errors", async ({ page }) => {
     ["/risks", "Risk feed"],
     ["/profiles", "Child profiles"],
     ["/devices", "Devices"],
-    ["/requests", "Requests"],
     ["/privacy", "Privacy & consent"],
     ["/settings", "Settings"],
     ["/audit", "Audit"],
@@ -271,24 +266,23 @@ test("protected pause uses masked step-up and resumes only after confirmation", 
 
   await page.goto("/devices");
   await expect(page).toHaveTitle(/GuardianNode/);
-  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Pause screenshots", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Confirm your password" })).toBeVisible();
   await expect(dialog.getByLabel("Parent password")).toHaveAttribute("type", "password");
-  await mkdir("/tmp/guardiannode-qa", { recursive: true });
-  await page.screenshot({ path: `/tmp/guardiannode-qa/${testInfo.project.name}-step-up.png`, fullPage: false });
+  await page.screenshot({ path: testInfo.outputPath(`${testInfo.project.name}-step-up.png`), fullPage: false });
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).not.toBeVisible();
   expect(pauseCalls).toBe(1);
 
-  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Pause screenshots", exact: true }).click();
   await dialog.getByLabel("Parent password").fill("incorrect");
   await dialog.getByRole("button", { name: "Continue" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Invalid password");
   expect(pauseCalls).toBe(2);
   await dialog.getByLabel("Parent password").fill("synthetic-browser-password");
   await dialog.getByRole("button", { name: "Continue" }).click();
-  await expect(page.getByText("Monitoring pause recorded.")).toBeVisible();
+  await expect(page.getByText("Screenshot monitoring pause recorded. It takes effect when the device receives the update.")).toBeVisible();
   expect(pauseCalls).toBe(3);
   expect(errors.filter((message) => !/status of (401|403) \(/.test(message))).toEqual([]);
 });

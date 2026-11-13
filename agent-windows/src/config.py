@@ -78,9 +78,6 @@ class AgentConfig:
     durable_queue_max_bytes: int = 256 * 1024 * 1024
     durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
     broker_enabled: bool = True
-    # Parent-confirmed process/domain enforcement needs Windows crash/undo
-    # qualification before it may be enabled for a family installation.
-    enforcement_enabled: bool = False
     # Runtime server consent gate. The production broker supplies the
     # authoritative value; local YAML must not authorize broker collection.
     monitoring_enabled: bool = False

@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { ReactNode, useState } from "react";
 import {
-  Bell, Bot, ClipboardList, Cpu, FileClock, HeartHandshake, Home, Laptop, LogOut,
+  Bell, Bot, Cpu, FileClock, HeartHandshake, Home, Laptop, LogOut,
   Menu, ShieldCheck, UserRound, UsersRound, X,
 } from "lucide-react";
 
@@ -14,16 +14,15 @@ interface Props {
 const coreNav = [
   { to: "/", label: "Home", icon: Home },
   { to: "/risks", label: "Alerts", icon: Bell },
+  { to: "/guardian-reviews", label: "AI review history", icon: ShieldCheck },
   { to: "/profiles", label: "Children", icon: UsersRound },
   { to: "/devices", label: "Devices", icon: Laptop },
-  { to: "/requests", label: "Requests", icon: ClipboardList },
 ];
 
 const advancedNav = [
   { to: "/privacy", label: "Privacy & consent", icon: HeartHandshake },
   { to: "/models", label: "Models", icon: Bot },
   { to: "/audit", label: "Audit", icon: FileClock },
-  { to: "/guardian-reviews", label: "Review history", icon: ShieldCheck },
   { to: "/settings", label: "Diagnostics & settings", icon: Cpu },
 ];
 
@@ -87,7 +86,7 @@ function Brand() {
   return (
     <div className="flex items-center gap-2.5">
       <span className="grid h-9 w-9 place-items-center rounded-lg bg-white/10"><ShieldCheck aria-hidden="true" size={22} /></span>
-      <span><span className="block font-display text-base font-bold tracking-tight">GuardianNode</span><span className="block text-[10px] tracking-wide text-teal-100">Family safety, at home</span></span>
+      <span><span className="block font-display text-base font-bold tracking-tight">GuardianNode</span><span className="block text-[10px] tracking-wide text-teal-100">Screenshots. Insight. Conversation.</span></span>
     </div>
   );
 }

@@ -4,13 +4,12 @@ import { requestStepUp } from "./stepUp";
 
 export type Alert = components["schemas"]["AlertDTO"];
 export type AlertPage = components["schemas"]["AlertPage"];
-export type ChildRequest = components["schemas"]["ChildRequestDTO"];
-export type ChildRequestPage = components["schemas"]["ChildRequestPage"];
 export type Device = components["schemas"]["DeviceDTO"];
 export type Overview = components["schemas"]["Overview"];
 export type Profile = components["schemas"]["ProfileDTO"];
 export type PairStart = components["schemas"]["PairStartResponse"];
 export type CaptureStatus = components["schemas"]["CaptureStatus"];
+export type CaptureDeviceStatus = components["schemas"]["CaptureDeviceStatus"];
 export type AuditEntry = components["schemas"]["AuditDTO"];
 export type AuditPage = components["schemas"]["AuditPageDTO"];
 export type DeviceAction = components["schemas"]["ActionDTO"];
@@ -198,7 +197,7 @@ export const api = {
     request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes }) }),
   feedbackAlert: (id: string, feedback_type: string, notes?: string) =>
     request<any>(`/alerts/${id}/feedback`, { method: "POST", body: JSON.stringify({ feedback_type, notes }) }),
-  confirmedAlertAction: (id: string, body: { action: string; target?: string; duration_seconds?: number; message?: string; confirmed_preview?: string | null }) =>
+  confirmedAlertAction: (id: string, body: { action: "delete_evidence"; confirmed_preview?: string | null }) =>
     request<DeviceAction>(`/alerts/${id}/actions`, { method: "POST", body: JSON.stringify(body) }),
   alertActions: (id: string) => request<DeviceAction[]>(`/alerts/${encodeURIComponent(id)}/actions?limit=50`),
   undoAction: (action_id: string) => request<DeviceAction>(`/actions/${encodeURIComponent(action_id)}/undo`, { method: "POST" }),
@@ -281,13 +280,5 @@ export const api = {
     request<ConsentStatus>("/consent", { method: "POST", body: JSON.stringify({ notice_version, choices }) }),
   withdrawConsent: (evidence_disposition: "retain" | "delete") =>
     request<ConsentWithdrawalResult>("/consent/withdraw", { method: "POST", body: JSON.stringify({ evidence_disposition }) }),
-  childRequests: (params: Record<string, string> = {}) => {
-    const q = new URLSearchParams(params).toString();
-    return request<ChildRequestPage>(`/child-requests${q ? `?${q}` : ""}`);
-  },
-  reviewChildRequest: (request_id: string, status: "approved" | "denied" | "dismissed", response_note?: string) =>
-    request<ChildRequest>(`/child-requests/${request_id}/review`, {
-      method: "POST",
-      body: JSON.stringify({ status, response_note }),
-    }),
+
 };

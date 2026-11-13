@@ -27,21 +27,10 @@ def test_protocol_allows_capture_config_without_payload() -> None:
     assert request.payload == {}
 
 
-def test_child_request_protocol_limits_content_and_profile_authority() -> None:
-    request = parse_request(make_request("child_request_create", {
-        "request_type": "site_exception", "target": "example.test", "reason": "school project",
-    }))
-    assert request.payload["request_type"] == "site_exception"
-    parse_request(make_request("child_request_list"))
-    for payload in (
-        {"request_type": "site_exception", "profile_id": "another-child"},
-        {"request_type": "site_exception", "reason": "x" * 4097},
-        {"request_type": "arbitrary"},
-    ):
-        with pytest.raises(ProtocolError):
-            parse_request(make_request("child_request_create", payload))
-    with pytest.raises(ProtocolError):
-        parse_request(make_request("child_request_list", {"device_id": "another-device"}))
+@pytest.mark.parametrize("action", ["child_request_create", "child_request_list", "pause_app", "block_domain", "show_child_prompt"])
+def test_protocol_rejects_retired_restriction_actions(action) -> None:
+    with pytest.raises(ProtocolError, match="unsupported action"):
+        parse_request(make_request(action, {"request_type": "more_time"}))
 
 
 def test_protocol_rejects_unknown_action() -> None:

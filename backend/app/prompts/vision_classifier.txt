@@ -57,7 +57,7 @@ Required JSON keys (fill them with your real observations of the image — these
                        tabs, address bars, taskbars, search bars, menu bars,
                        app toolbars). Only list things that drove the risk
                        judgment. If risk_level is "none", this MUST be [].
-  recommended_action — one of: none, log, alert_parent, pause_app, block_app, emergency_review
+  recommended_action — one of: none, log, alert_parent, emergency_review
   confidence         — decimal 0.0 to 1.0
   false_positive_notes — your honest doubts, or ""
 
@@ -97,3 +97,5 @@ Context (use this when judging, do not echo it):
 - timestamp: {timestamp}
 
 Now produce the JSON for the attached image:
+
+GuardianNode only captures and reviews visible content. Recommend parent review or a conversation; never recommend automated app suspension, website blocking, screen-time limits, or device restrictions.

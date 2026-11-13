@@ -76,3 +76,24 @@ def test_response_reader_times_out_when_broker_stays_silent(monkeypatch):
     monkeypatch.setattr(broker_client.time, "monotonic", lambda: next(ticks))
     with pytest.raises(BrokerUnavailable, match="deadline"):
         BrokerClient._read_response(object(), "request-1")
+
+
+@pytest.mark.parametrize("result", [{"status": "paused"}, {"status": "monitoring_disabled"}, {}, None])
+def test_capture_sink_does_not_acknowledge_unaccepted_frames(result):
+    from src.broker_client import BrokerScreenshotQueue
+
+    queue = BrokerScreenshotQueue(SimpleNamespace(submit_screenshot=lambda _payload: result))
+    with pytest.raises(BrokerUnavailable, match="did not accept screenshot"):
+        queue.put_nowait({"image_bytes": b"synthetic"})
+
+
+def test_capture_sink_acknowledges_only_queued_frames():
+    from src.broker_client import BrokerScreenshotQueue
+
+    seen = []
+    def submit(payload):
+        seen.append(payload)
+        return {"status": "queued", "queue_depth": 1}
+    queue = BrokerScreenshotQueue(SimpleNamespace(submit_screenshot=submit))
+    queue.put_nowait({"image_bytes": b"synthetic"})
+    assert seen == [{"image_bytes": b"synthetic"}]

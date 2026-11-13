@@ -132,6 +132,20 @@ def pending_count() -> int:
         return 0
 
 
+def pending_counts_by_device() -> dict[str, int]:
+    """Count durable frame pairs without exposing their metadata or contents."""
+    counts: dict[str, int] = {}
+    directory = _pending_dir()
+    for metadata_path in directory.glob("*.json"):
+        if not (directory / f"{metadata_path.stem}.enc").is_file():
+            continue
+        metadata = _load_meta(metadata_path.stem)
+        device_id = metadata.get("device_id") if metadata is not None else None
+        if isinstance(device_id, str):
+            counts[device_id] = counts.get(device_id, 0) + 1
+    return counts
+
+
 def max_pending() -> int:
     return _MAX_PENDING
 

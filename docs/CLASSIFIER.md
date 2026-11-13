@@ -19,7 +19,7 @@ Prompt: `backend/app/prompts/text_classifier.txt`. Returns strict JSON:
   "categories": ["grooming", ...],
   "summary": "...",
   "evidence": ["..."],
-  "recommended_action": "none|log|alert_parent|pause_app|block_app|emergency_review",
+  "recommended_action": "none|log|alert_parent|emergency_review",
   "confidence": 0.0,
   "false_positive_notes": ""
 }
@@ -29,8 +29,10 @@ Invalid JSON triggers one retry with a correction prompt.
 
 ## Model output is untrusted
 
-Everything the model returns passes through strict validation in
-`backend/app/services/taxonomy.py` before it can touch policy or storage:
+Before a model call is considered successful, its JSON must satisfy the required
+assessment shape and field types. Empty objects, arrays, scalars, missing fields
+and wrongly typed values do not count as a completed review. The accepted result
+then passes through normalization in `backend/app/services/taxonomy.py`:
 
 - `risk_level` / `recommended_action` must be in the known enums, else reset
 - `score` / `confidence` clamped to range
@@ -64,7 +66,8 @@ Rules engine has higher weight for the critical tier so high-confidence pattern 
 
 ## Age-group sensitivity
 
-The child's age group goes into the prompt context. Stricter thresholds for younger children.
+The child's age group goes into the prompt context. Configured profile thresholds
+determine alert creation; prompting alone does not establish measured accuracy.
 
 ## Versioning
 
@@ -73,3 +76,18 @@ Each run records `prompt_version`, `rules_version`, `model` — supports reprodu
 ## Adding rules
 
 PRs to `backend/app/services/risk_rules.py`. Each rule needs tests in `backend/tests/test_classifier.py` for both matches and false-positive borderlines.
+
+## Review-only output
+
+Model recommendations describe logging, parent review or urgent review. They
+cannot pause apps, block websites or impose usage limits. Legacy restriction
+recommendations from an older model response are normalized to parent review.
+Scores and confidence values are estimates, not calibrated probabilities or
+measured detection accuracy. Retain model/rules provenance when judging results.
+
+For screenshots, a malformed model result with no stronger deterministic finding
+uses the existing encrypted retry/quarantine queue instead of being discarded as
+a successful no-risk assessment. Retry/age/storage limits still apply. An ordinary
+provider outage remains explicitly degraded and follows the existing severity-based
+evidence retention policy. In full mode, successful vision alone does not establish
+that required text classification completed, or vice versa.

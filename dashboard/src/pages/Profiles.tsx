@@ -243,10 +243,10 @@ const SEV_LABEL: Record<string, string> = {
   low: "Low+", medium: "Medium+", high: "High+", critical: "Critical only",
 };
 const MODE_LABEL: Record<string, string> = {
-  alert: "Alert me", monitor: "Monitor quietly", allow: "Allow (ignore)",
+  alert: "Alert me", monitor: "Monitor quietly", allow: "Ignore this signal",
 };
 const CAPTURE_LABEL: Record<string, string> = {
-  tight: "Tight (more frequent capture)", balanced: "Balanced", leeway: "Leeway (more privacy)",
+  tight: "Frequent screenshots", balanced: "Balanced screenshots", leeway: "Fewer screenshots",
 };
 
 function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any; onSaved: () => void }) {
@@ -270,11 +270,11 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
       const saved = await api.updateProfile(profile.profile_id,
         reset ? { reset_policy_to_age_default: true } : { alert_policy: policy });
       setPolicy(JSON.parse(JSON.stringify(saved.alert_policy || {})));
-      setMsg(reset ? "Reset to age defaults" : "Privacy settings saved");
+      setMsg(reset ? "Reset to age defaults" : "Screenshot & alert settings saved");
       setTimeout(() => setMsg(null), 2500);
       onSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not save privacy settings");
+      setError(reason instanceof Error ? reason.message : "Could not save screenshot & alert settings");
     } finally { setBusy(false); }
   }
 
@@ -282,14 +282,15 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
   return (
     <div className="mt-4 border-t pt-3">
       <button aria-expanded={open} onClick={() => setOpen(!open)} className="text-sm font-medium text-brand-700">
-        {open ? "▾" : "▸"} Privacy & alert settings
+        {open ? "▾" : "▸"} Screenshot & alert settings
       </button>
       {open && (
         <div className="mt-3 space-y-3">
           <p className="text-xs text-gray-500">
-            Give your child privacy while still catching what matters. Self-harm,
-            grooming, threats, and your watch phrases remain enabled in every
-            profile. Detection can still miss or misinterpret content.
+            Choose screenshot frequency and which review signals need an alert. These settings
+            control monitoring and notifications; they do not restrict device use. Self-harm,
+            grooming, threats, and your watch phrases remain enabled for review.
+            Detection can still miss or misinterpret content.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -302,7 +303,7 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
               </select>
             </label>
             <label className="text-sm">
-              <span className="text-xs text-gray-500">How much to capture</span>
+              <span className="text-xs text-gray-500">Screenshot frequency</span>
               <select className="mt-1 w-full border rounded px-2 py-1"
                 value={(policy.capture && policy.capture.level) || "balanced"}
                 onChange={(e) => setPolicy({ ...policy, capture: { ...(policy.capture || {}), level: e.target.value } })}>
@@ -314,7 +315,7 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-xs uppercase text-gray-400 text-left">
-                <tr><th className="py-1">Behavior to watch</th><th className="py-1">What to do</th><th className="py-1">Only when</th></tr>
+                <tr><th className="py-1">Behavior to watch</th><th className="py-1">Alert handling</th><th className="py-1">Only when</th></tr>
               </thead>
               <tbody>
                 {(meta.tunable_categories || []).map((c: any) => {
@@ -344,13 +345,13 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
           </div>
 
           <div className="text-xs text-gray-500">
-            Always alerts (locked): {(meta.protected_categories || []).map((c: string) => c.replace(/_/g, " ")).join(", ")}
+            Protected review signals: {(meta.protected_categories || []).map((c: string) => c.replace(/_/g, " ")).join(", ")}
           </div>
 
           <div className="flex gap-2 items-center">
             <button onClick={() => save(false)} disabled={busy}
               className="bg-brand-500 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-1.5 rounded text-sm">
-              {busy ? "Saving…" : "Save privacy settings"}
+              {busy ? "Saving…" : "Save screenshot settings"}
             </button>
             <button onClick={() => save(true)} disabled={busy}
               className="text-sm text-gray-500 underline">

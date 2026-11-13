@@ -7,7 +7,7 @@ import { formatDateTime } from "../utils/datetime";
 
 vi.mock("../api", () => ({ api: { alertActions: vi.fn(), undoAction: vi.fn() } }));
 const clients: QueryClient[] = [];
-const base: DeviceAction = { action_id: "pause-1", alert_id: "alert-1", device_id: "device-1", action: "pause_app", status: "succeeded", preview: "Pause C:\\Apps\\Chat.exe for 15 minutes", created_at: "2026-11-13T12:00:00Z", completed_at: "2026-11-13T12:00:05Z", expires_at: "2026-11-14T12:00:00Z", undo_of: null, execution: null };
+const base: DeviceAction = { action_id: "pause-1", alert_id: "alert-1", device_id: "device-1", action: "pause_app", status: "succeeded", preview: "Pause C:\\Apps\\Chat.exe for 15 minutes", created_at: "2026-11-13T12:00:00Z", completed_at: "2026-11-13T12:00:05Z", expires_at: "2099-11-14T12:00:00Z", undo_of: null, execution: null };
 function show(alertId = "alert-1") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   clients.push(client);
@@ -52,8 +52,8 @@ describe("last-reported device action history", () => {
     show();
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", expect.stringContaining("processes waiting to resume: 1; processes waiting for recovery: 2"));
     expect(screen.getByText(/1 other pause leases remained active/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Queue undo:/ })).toBeNull();
-    expect(screen.getByText(/An undo request has already been recorded/)).toBeTruthy();
+    expect(undoButton()).toHaveProperty("disabled", false);
+    expect(screen.queryByText(/An active or successful undo is already recorded/)).toBeNull();
     expect(screen.queryByText(/fully restored/i)).toBeNull();
 
     vi.mocked(api.alertActions).mockResolvedValue([{ ...reportedUndo, execution: { ...execution, pending_resume_processes: null } }, base]);
@@ -98,6 +98,22 @@ describe("last-reported device action history", () => {
     expect(await screen.findByText(/Latest undo report: Succeeded/)).toBeTruthy();
     expect(screen.queryByText(/Undo is queued\./)).toBeNull();
     expect(screen.getByText(/other pause leases remained active/)).toBeTruthy();
+  });
+
+  it.each(["failed", "rejected", "expired", "queued"])("allows recovery retry after an unsuccessful or overdue %s undo", async (status) => {
+    const unsuccessful: DeviceAction = { ...base, action_id: "undo-old", action: "undo_action", undo_of: base.action_id, status, preview: `Undo: ${base.preview}`, expires_at: "2000-01-01T00:00:00Z", execution: { has_error: true, pending_domain_blocks: 1 } };
+    vi.mocked(api.alertActions).mockResolvedValue([unsuccessful, base]);
+    const queued: DeviceAction = { ...unsuccessful, action_id: "undo-new", status: "queued", expires_at: "2099-01-01T00:00:00Z" };
+    vi.mocked(api.undoAction).mockResolvedValue(queued);
+    show();
+    await screen.findByText(base.preview);
+    expect(screen.getByRole("alert").textContent).toContain("1 legacy domain blocks still require removal");
+    expect(undoButton()).toHaveProperty("disabled", false);
+    vi.mocked(api.alertActions).mockResolvedValue([queued, unsuccessful, base]);
+    fireEvent.click(undoButton());
+    await screen.findByText(/Undo is queued/);
+    expect(api.undoAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /^Queue undo:/ })).toBeNull();
   });
 
   it("reports an undo request failure and keeps a safe retry available", async () => {

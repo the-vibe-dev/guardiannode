@@ -21,8 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
-import httpx
-
 from src import __version__
 from src.backend_client import BackendClient
 from src.broker_protocol import (
@@ -193,8 +191,6 @@ class BrokerCommandHandler:
         if request.action == "capture_config":
             with self._capture_config_lock:
                 return dict(self._capture_config)
-        if request.action in {"child_request_create", "child_request_list"}:
-            return self._child_request(request.action, request.payload)
         if request.action == "submit_screenshot":
             # One lock spans policy checks, minimization, and insertion so a
             # simultaneous opt-out cannot race an old-context frame into disk.
@@ -207,45 +203,6 @@ class BrokerCommandHandler:
                 self.queue.put_nowait(payload)
                 return {"status": "queued", "queue_depth": self.queue.qsize()}
         raise ProtocolError("unsupported action")
-
-    def _child_request(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Use broker-owned credentials; return only child-request DTO fields."""
-        creds = self._load_credentials()
-        token = str(creds.get("device_token") or "")
-        if not token:
-            raise ProtocolError("device is not paired")
-        client = BackendClient(
-            str(creds.get("backend_url") or ""), token, ca_path=creds.get("ca_path")
-        )
-        try:
-            with httpx.Client(timeout=5.0, verify=client._verify()) as transport:
-                if action == "child_request_create":
-                    response = transport.post(
-                        f"{client.base_url}/api/child-requests",
-                        json=payload,
-                        headers=client._headers(),
-                    )
-                else:
-                    response = transport.get(
-                        f"{client.base_url}/api/child-requests/mine",
-                        headers=client._headers(),
-                    )
-            response.raise_for_status()
-            body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            log.warning("child request backend call failed: %s", type(exc).__name__)
-            raise ProtocolError("child request could not reach the parent server") from exc
-        fields = {
-            "request_id", "device_id", "profile_id", "request_type", "target", "reason",
-            "status", "response_note", "created_at", "reviewed_at", "expires_at",
-        }
-        if action == "child_request_create":
-            if not isinstance(body, dict):
-                raise ProtocolError("invalid child request response")
-            return {key: body[key] for key in fields if key in body}
-        if not isinstance(body, list) or len(body) > 20 or not all(isinstance(item, dict) for item in body):
-            raise ProtocolError("invalid child request list")
-        return {"items": [{key: item[key] for key in fields if key in item} for item in body]}
 
     @staticmethod
     def _sanitize_capture_config(payload: dict[str, Any]) -> dict[str, Any]:
@@ -707,22 +664,22 @@ async def _run_sender(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
 
 async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
     from src.backend_client import BackendClient
-    from src.enforcement import EnforcementStateError, WindowsEnforcer
+    from src.legacy_recovery import LegacyRestrictionRecovery, RecoveryStateError
 
-    enforcer = WindowsEnforcer()
+    recovery_handler = LegacyRestrictionRecovery()
     while True:
         try:
-            recovery = enforcer.reconcile()
+            recovery = recovery_handler.reconcile()
             if recovery and recovery.get("partial_failure"):
                 log.warning(
-                    "endpoint recovery incomplete: failed=%s pending_resume=%s legacy_unverified=%s",
+                    "legacy recovery incomplete: failed=%s pending_resume=%s legacy_unverified=%s pending_domains=%s",
                     recovery.get("failed_processes", 0), recovery.get("pending_resume_processes", 0),
-                    recovery.get("legacy_unverified_processes", 0),
+                    recovery.get("legacy_unverified_processes", 0), recovery.get("pending_domain_blocks", 0),
                 )
         except Exception:
             # An action-state/disk error must not kill the policy/heartbeat
             # task, leaving uploads running with an indefinitely stale policy.
-            log.exception("could not reconcile endpoint actions; continuing policy polling")
+            log.exception("could not finish legacy restriction recovery; continuing capture policy polling")
         creds = handler.ensure_broker_credentials()
         token = str(creds.get("device_token") or "")
         if not token:
@@ -760,14 +717,14 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
             for command in await client.get_commands():
                 command_id = str(command.get("command_id") or "")
                 try:
-                    if command.get("command_type") in {"pause_app", "block_domain"} and not cfg.enforcement_enabled:
-                        raise ValueError("device enforcement is disabled pending Windows qualification")
-                    result = enforcer.execute(command)
+                    if command.get("command_type") != "undo_action":
+                        raise ValueError("restriction commands are unavailable in screenshot review mode")
+                    result = recovery_handler.execute(command)
                     status = "failed" if result.get("partial_failure") else "succeeded"
                     await client.report_command(command_id, status, result)
                 except ValueError as exc:
                     await client.report_command(command_id, "rejected", {"error": str(exc)[:500]})
-                except EnforcementStateError as exc:
+                except RecoveryStateError as exc:
                     log.exception("device command %s has incomplete recovery state", command_id)
                     await client.report_command(command_id, "failed", {**exc.result, "error": str(exc)[:500]})
                 except Exception as exc:

@@ -1,65 +1,52 @@
-# Enforcement
+# Recovery of restrictions from older builds
 
-Enforcement is parent-confirmed, narrow, reversible where possible, and never
-triggered directly by a classifier result.
+GuardianNode now focuses on screenshot capture and AI review. New app pauses,
+website/domain blocks, child prompts and exception requests are retired. There
+is no enforcement switch that restores them in this build.
 
-## Current actions
+This page preserves its old path so existing links lead to the upgrade guidance.
+It describes release-only compatibility, not an active restriction feature.
 
-- Show a calm child-facing prompt.
-- Suspend an exact absolute Windows `.exe` path for 15 minutes, 1 hour, or 24
-  hours, with identity-checked release attempts when its last active pause ends.
-- Add an exact FQDN to a GuardianNode-owned hosts-file block section.
-- Undo only the process/domain state GuardianNode recorded as its own.
-- Delete the current alert's evidence through the durable deletion path.
+## Before upgrading
 
-The dashboard first returns the exact command preview. A parent must confirm the
-same preview before the backend queues it for the SYSTEM broker. The broker
-validates the target again and reports succeeded, failed, or rejected.
+Use the old version to undo active restrictions and confirm that applications
+run and affected domains are accessible. Back up application data, configuration,
+keys and the broker's recorded recovery state. Install matching backend,
+dashboard and Windows endpoint versions together.
 
-App pause records now retain PID, creation time and executable identity before
-suspension. Matching relaunches are checked on subsequent broker polls. Multiple
-parent pauses share ownership; new Undo commands identify one original pause,
-so another active pause can remain in force. Existing external suspensions are
-not adopted. This is a reactive exact-path control, not a daily usage budget,
-process-creation interception, or category filter.
+Older numeric-PID-only journals cannot identify a process safely after PID reuse.
+Those records stay unverified. Do not guess which current process to resume and
+do not delete unresolved state simply to clear an error. A managed restart and
+verified operator recovery may be required.
 
-Known critical OS processes, GuardianNode, the broker/ancestors, and recognized
-service accounts are excluded. A partial failure can leave an active bounded
-lease and some processes paused. Pending release identities survive restart for
-retry; corrupt state is preserved for verified recovery. The exact Windows
-service, process and filesystem behavior remains a native release gate.
+## Recovery-only endpoint
 
-## v0.4+
+`agent-windows/src/legacy_recovery.py` reads older GuardianNode-owned state. It
+releases recorded suspensions only after checking process identity and removes
+only the marked hosts entries previously owned by GuardianNode. The broker
+retries unresolved recovery through its control loop. The new code cannot
+suspend a process, add a blocking hosts entry or display a new child notice.
 
-- Pi-hole DNS block plugin
-- AdGuard Home plugin
-- UniFi/UDM plugin
-- Home Assistant trigger
+Malformed or unreadable journals remain available for recovery instead of being
+silently discarded. Failed release/persistence remains a failure to resolve;
+it does not mean that all old restrictions have disappeared. Native Windows
+process, filesystem and service behavior still needs qualification.
 
-## Policy boundary
+## Backend and history
 
-Profile policy controls capture and alert thresholds. It cannot authorize an
-endpoint command. Every endpoint action begins from an authenticated parent on
-one alert, passes recent-authentication checks, and uses the two-step exact
-preview confirmation.
+The API rejects new restriction commands and retires exception-request mutations.
+Queued legacy restriction commands are rejected rather than delivered as new
+work. Historical action receipts and old request data are retained for audit and
+compatible reads. Undo for an old action is a separate recovery command; queued
+or claimed does not mean recovery has already succeeded.
 
-## Audit
+A stored receipt describes a past execution. It is not continuous live process
+telemetry. Later local recovery may resolve a failure without rewriting an older
+receipt. An offline old agent cannot learn about these changes until it reconnects
+or is upgraded.
 
-Every enforcement action is logged. The alert's **Action history** shows the
-latest commands, stored endpoint receipts, partial outcomes, and Undo. The
-**Audit** page supports action/actor/date filters over retained history. See
-[Audit and action history](AUDIT_AND_ACTION_HISTORY.md) for receipt semantics,
-the API contract, and the legacy journal upgrade procedure.
+## Capture pause is different
 
-## Failure modes
-
-- Missing or ambiguous process path → reject without affecting another process.
-- Invalid domain or hosts-file conflict → reject and report the failure.
-- Child session unavailable → retain/report the command result; do not claim the
-  prompt was shown.
-- Broker restart during a timed pause → reload full identities and active leases;
-  attempt release only after the final matching lease ends.
-- Failed release or state persistence → retain recovery information and report
-  partial results; a failure does not mean no process is paused.
-- Old numeric-PID-only journal → preserve as unverified; undo old active pauses
-  before upgrade instead of guessing whether a PID still belongs to that app.
+Pausing screenshot monitoring controls collection and privacy. It does not lock
+the computer, pause a child's app, restrict browsing or allocate usage time.
+Consent, retention, evidence deletion and processing safeguards remain active.

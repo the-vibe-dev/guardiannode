@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.taxonomy import ALLOWED_ACTIONS, normalize_action
+
 _LEVELS = ["none", "low", "medium", "high", "critical"]
 _ORDER = {lvl: i for i, lvl in enumerate(_LEVELS)}
 
@@ -117,21 +119,10 @@ def merge(
     else:
         confidence = t_conf or v_conf
 
-    # Pick action: prefer the stricter of the two
-    action_priority = [
-        "none",
-        "log",
-        "alert_parent",
-        "pause_app",
-        "block_app",
-        "emergency_review",
-    ]
-    t_action = t.get("recommended_action", "none")
-    v_action = v.get("recommended_action", "none")
-    action = max(
-        (t_action, v_action),
-        key=lambda a: action_priority.index(a) if a in action_priority else 0,
-    )
+    # Model suggestions are review guidance; never propose device restrictions.
+    t_action = normalize_action(t.get("recommended_action", "none"))
+    v_action = normalize_action(v.get("recommended_action", "none"))
+    action = max((t_action, v_action), key=ALLOWED_ACTIONS.index)
 
     if final_level == "critical" and action in ("none", "log"):
         action = "alert_parent"

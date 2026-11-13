@@ -12,7 +12,7 @@
 
 const TZ_MARKER = /(Z|[+-]\d{2}:?\d{2})$/;
 
-function toUtcDate(input: string): Date {
+export function toUtcDate(input: string): Date {
   // If there's already a tz marker, parse as-is.
   if (TZ_MARKER.test(input)) {
     return new Date(input);

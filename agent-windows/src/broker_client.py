@@ -146,7 +146,9 @@ class BrokerScreenshotQueue:
         self.client = client or BrokerClient()
 
     def put_nowait(self, payload: dict[str, Any]) -> None:
-        self.client.submit_screenshot(payload)
+        result = self.client.submit_screenshot(payload)
+        if not isinstance(result, dict) or result.get("status") != "queued":
+            raise BrokerUnavailable("broker did not accept screenshot for review")
 
     def qsize(self) -> int:
         try:

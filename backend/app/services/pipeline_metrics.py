@@ -47,6 +47,8 @@ class CompletedItem:
     latency_ms: int
     severity: str
     tier: str
+    device_id: str | None = None
+    succeeded: bool = True
 
 
 _lock = Lock()
@@ -85,7 +87,7 @@ def set_stage(event_id: str, stage: str) -> None:
             item.stage = stage
 
 
-def finish(event_id: str, *, severity: str) -> None:
+def finish(event_id: str, *, severity: str, succeeded: bool = True) -> None:
     with _lock:
         item = _in_flight.pop(event_id, None)
         if item is None:
@@ -98,6 +100,8 @@ def finish(event_id: str, *, severity: str) -> None:
                 latency_ms=int((now - item.started_at) * 1000),
                 severity=severity,
                 tier=item.tier,
+                device_id=item.device_id,
+                succeeded=succeeded,
             )
         )
 
@@ -117,13 +121,15 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
         recent_ocr = [item for item in _recent_ocr if item[0] >= cutoff]
     items.sort(key=lambda d: d["started_at"])
 
-    latencies = sorted(c.latency_ms for c in recent_completed)
+    completed = [c for c in recent_completed if c.succeeded]
+    failures = [c for c in recent_completed if not c.succeeded]
+    latencies = sorted(c.latency_ms for c in completed)
     n = len(latencies)
     avg = sum(latencies) / n if n else 0
     p50 = latencies[n // 2] if n else 0
     p95 = latencies[int(n * 0.95)] if n else 0
     severity_counts: dict[str, int] = {}
-    for c in recent_completed:
+    for c in completed:
         severity_counts[c.severity] = severity_counts.get(c.severity, 0) + 1
     ocr_status_counts: dict[str, int] = {}
     ocr_error_counts: dict[str, int] = {}
@@ -133,12 +139,13 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
             ocr_error_counts[error_code] = ocr_error_counts.get(error_code, 0) + 1
 
     with _lock:
-        last_finished = max((c.finished_at for c in _recent), default=None)
+        last_finished = max((c.finished_at for c in _recent if c.succeeded), default=None)
 
     return {
         "in_flight_count": len(items),
         "in_flight": items,
         "window_seconds": window_seconds,
+        "failed_frames_in_window": len(failures),
         "last_classified_at": (
             datetime.fromtimestamp(last_finished, tz=UTC).isoformat()
             if last_finished else None

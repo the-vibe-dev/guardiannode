@@ -24,7 +24,7 @@
     },
     "recommended_action": {
       "type": "string",
-      "enum": ["none", "log", "alert_parent", "pause_app", "block_app", "emergency_review"]
+      "enum": ["none", "log", "alert_parent", "emergency_review"]
     },
     "model": {"type": ["string", "null"]},
     "rules_triggered": {

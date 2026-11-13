@@ -63,7 +63,7 @@ async def test_successful_llm_marks_ok(monkeypatch):
     from app.services.ollama_client import OllamaClient
 
     async def good_generate(self, **kwargs):
-        return '{"risk_level": "none", "score": 0, "categories": [], "summary": "fine"}'
+        return '{"risk_level": "none", "score": 0, "categories": [], "summary": "fine", "evidence": [], "recommended_action": "none", "confidence": 0.9, "false_positive_notes": ""}'
 
     monkeypatch.setattr(OllamaClient, "generate", good_generate)
     result = await classifier.classify_text(redacted_text="homework about volcanoes")
@@ -80,7 +80,7 @@ async def test_llm_input_is_bounded_before_local_model_call(monkeypatch):
 
     async def good_generate(self, **kwargs):
         seen["prompt"] = kwargs["prompt"]
-        return '{"risk_level": "none", "score": 0, "categories": [], "summary": "bounded"}'
+        return '{"risk_level": "none", "score": 0, "categories": [], "summary": "bounded", "evidence": [], "recommended_action": "none", "confidence": 0.9, "false_positive_notes": ""}'
 
     monkeypatch.setattr(OllamaClient, "generate", good_generate)
     marker = "END_OF_UNBOUNDED_EVIDENCE"

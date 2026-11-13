@@ -1,3 +1,18 @@
+# Screenshot-focused review edition - 13 November 2026
+
+Review build `2026-11-13-review.3` is based on the supplied source archive and
+preserves the upstream application version `0.1.0-alpha.3`. It is an engineering
+source evaluation, not a newly qualified installer release.
+
+The current change removes device restrictions and exception workflows, adds
+release-only recovery, strengthens screenshot admission and review diagnostics,
+rejects invalid AI assessments, preserves screenshot evidence across source-aware
+grouping, and refocuses the dashboard and documentation on evidence review.
+See [the integration record](docs/release-validation/screenshot-review-2026-11-13.md)
+and [focused roadmap](docs/ROADMAP.md).
+
+---
+
 # Changelog
 
 All notable changes to GuardianNode are documented here.

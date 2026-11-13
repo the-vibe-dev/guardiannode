@@ -117,8 +117,8 @@ export default function PipelineHealth() {
         >
           <div className="font-semibold mb-1">
             {protection.level === "rules_only"
-              ? "Reduced protection — running on safety rules only"
-              : "Reduced protection"}
+              ? "AI review unavailable — safety rules only"
+              : "Review capability needs checking"}
           </div>
           <ul className="list-disc ml-5 space-y-0.5">
             {protection.warnings.map((w, i) => (
@@ -231,7 +231,7 @@ export default function PipelineHealth() {
         <div>
           Text model: <code>{h.ollama.text_model}</code>{" "}
           {h.ollama.text_model_present ? (
-            <span className="text-green-700">✓ loaded</span>
+            <span className="text-green-700">✓ installed</span>
           ) : (
             <span className="text-red-600">✗ missing</span>
           )}
@@ -239,7 +239,7 @@ export default function PipelineHealth() {
         <div>
           Vision model: <code>{h.ollama.vision_model}</code>{" "}
           {h.ollama.vision_model_present ? (
-            <span className="text-green-700">✓ loaded</span>
+            <span className="text-green-700">✓ installed</span>
           ) : (
             <span className="text-red-600">✗ missing</span>
           )}

@@ -13,6 +13,7 @@ from app.db.models import (
     Event,
     NotificationJob,
     RiskResult,
+    User,
 )
 from app.services import event_ingest
 
@@ -282,46 +283,33 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
     finally:
         db.close()
 
-    unsupported = client.post(
-        "/api/alerts/action-alert/action", json={"action": "pause_app"}
-    )
-    assert unsupported.status_code == 409
+    # Restriction creation is retired even when an old environment flag is set.
+    monkeypatch.setenv("GUARDIANNODE_DEVICE_ENFORCEMENT_ENABLED", "true")
+    settings_mod.settings = settings_mod.Settings()
+    for action in ("pause_app", "block_app", "block_domain", "show_child_prompt"):
+        unsupported = client.post("/api/alerts/action-alert/action", json={"action": action})
+        assert unsupported.status_code == 422
+        unsupported = client.post("/api/alerts/action-alert/actions", json={
+            "action": action, "target": r"C:\Games\Chat.exe", "duration_seconds": 900,
+        })
+        assert unsupported.status_code == 422
 
-    gated = client.post(
-        "/api/alerts/action-alert/actions",
-        json={"action": "pause_app", "target": r"C:\Games\Chat.exe", "duration_seconds": 900},
-    )
-    assert gated.status_code == 409
-    assert "not enabled" in gated.json()["detail"]
-    settings_mod.settings.device_enforcement_enabled = True
-
-    preview = client.post(
-        "/api/alerts/action-alert/actions",
-        json={
-            "action": "pause_app",
-            "target": r"C:\Games\Chat.exe",
-            "duration_seconds": 900,
-        },
-    )
-    assert preview.status_code == 409
-    exact = preview.json()["detail"]["preview"]
-    queued = client.post(
-        "/api/alerts/action-alert/actions",
-        json={
-            "action": "pause_app",
-            "target": r"C:\Games\Chat.exe",
-            "duration_seconds": 900,
-            "confirmed_preview": exact,
-        },
-    )
-    assert queued.status_code == 200
-    assert queued.json()["status"] == "queued"
-
-    undone = client.post(f"/api/actions/{queued.json()['action_id']}/undo")
+    # Preserve recovery of commands that an older version already applied.
+    from datetime import timedelta
+    with get_sessionmaker()() as db:
+        db.add(DeviceCommand(
+            command_id="legacy-pause", device_id="action-dev", alert_id="action-alert",
+            command_type="pause_app", status="succeeded", preview="Legacy app pause",
+            created_by=db.query(User.id).scalar(),
+            payload={"target": r"C:\Games\Chat.exe", "duration_seconds": 900},
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        ))
+        db.commit()
+    undone = client.post("/api/actions/legacy-pause/undo")
     assert undone.status_code == 200
     with get_sessionmaker()() as undo_db:
         undo = undo_db.get(DeviceCommand, undone.json()["action_id"])
-        assert undo.payload["original_command_id"] == queued.json()["action_id"]
+        assert undo.payload["original_command_id"] == "legacy-pause"
         assert undo.payload["original_action"] == "pause_app"
 
     notified = client.post(
@@ -343,7 +331,7 @@ def test_alert_actions_are_effective_or_explicitly_unsupported(monkeypatch, tmp_
         assert db.query(NotificationJob).filter_by(alert_id="action-alert", status="queued").count() == 1
         assert db.query(DeviceCommand).filter_by(
             alert_id="action-alert", command_type="pause_app", status="queued"
-        ).count() == 1
+        ).count() == 0
     finally:
         db.close()
 

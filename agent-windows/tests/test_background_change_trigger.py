@@ -121,3 +121,82 @@ async def test_unchanged_screen_resends_after_max_capture_interval(monkeypatch):
         await capture_loop(cfg, q)
 
     assert q.qsize() == 2, "first frame + max-interval refresh must send"
+
+
+@pytest.mark.asyncio
+async def test_failed_queue_admission_does_not_suppress_the_next_identical_frame(monkeypatch):
+    cfg = AgentConfig(monitoring_enabled=True)
+    shot = Screenshot(width=800, height=600, jpeg_bytes=b"same", phash=0, full_phash=0)
+    accepted = []
+    attempts = []
+
+    class FlakySink:
+        def put_nowait(self, payload):
+            attempts.append(payload)
+            if len(attempts) == 1:
+                raise RuntimeError("synthetic broker unavailable")
+            accepted.append(payload)
+
+    monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
+    monkeypatch.setattr("src.main.get_active_process", lambda: None)
+    monkeypatch.setattr("src.main.get_active_window", lambda: None)
+    monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: shot)
+    monkeypatch.setattr("src.main.asyncio.sleep", _stop_after(3))
+    monkeypatch.setattr("src.main.time.time", lambda: 10_000.0)
+    with pytest.raises(StopLoop):
+        await capture_loop(cfg, FlakySink())
+    assert len(attempts) == 2
+    assert len(accepted) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["consent", "pause", "scope"])
+async def test_first_permitted_frame_after_boundary_change_bypasses_old_dedup(monkeypatch, transition):
+    cfg = AgentConfig(monitoring_enabled=True, monitored_apps=["notepad.exe"])
+    queue = asyncio.Queue()
+    state = {"iteration": 0, "paused": False}
+    shot = Screenshot(width=800, height=600, jpeg_bytes=b"same", phash=0, full_phash=0)
+
+    async def sleep(_seconds):
+        state["iteration"] += 1
+        if state["iteration"] >= 3:
+            raise StopLoop()
+        if transition == "consent":
+            cfg.monitoring_enabled = state["iteration"] != 1
+        elif transition == "pause":
+            state["paused"] = state["iteration"] == 1
+        elif state["iteration"] == 1:
+            cfg.full_screen_capture_enabled = False
+
+    monkeypatch.setattr("src.main._is_locally_paused", lambda: state["paused"])
+    monkeypatch.setattr("src.main.get_active_process", lambda: ActiveProcess(pid=1, name="notepad.exe", exe=None))
+    monkeypatch.setattr("src.main.get_active_window", lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200)))
+    monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: shot)
+    monkeypatch.setattr("src.main.capture_active", lambda _rect: shot)
+    monkeypatch.setattr("src.main.asyncio.sleep", sleep)
+    monkeypatch.setattr("src.main.time.time", lambda: 10_000.0)
+    with pytest.raises(StopLoop):
+        await capture_loop(cfg, queue)
+    assert queue.qsize() == 2
+    if transition == "scope":
+        assert queue.get_nowait()["capture_scope"] == "primary_monitor"
+        assert queue.get_nowait()["capture_scope"] == "monitored_app"
+
+
+@pytest.mark.asyncio
+async def test_capture_is_discarded_if_consent_changes_before_queueing(monkeypatch):
+    cfg = AgentConfig(monitoring_enabled=True)
+    queue = asyncio.Queue()
+
+    def capture(active_rect=None):
+        cfg.monitoring_enabled = False
+        return Screenshot(width=800, height=600, jpeg_bytes=b"discard", phash=0, full_phash=0)
+
+    monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
+    monkeypatch.setattr("src.main.get_active_process", lambda: None)
+    monkeypatch.setattr("src.main.get_active_window", lambda: None)
+    monkeypatch.setattr("src.main.capture_full", capture)
+    monkeypatch.setattr("src.main.asyncio.sleep", _stop_after(1))
+    with pytest.raises(StopLoop):
+        await capture_loop(cfg, queue)
+    assert queue.qsize() == 0
