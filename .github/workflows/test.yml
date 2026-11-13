@@ -73,7 +73,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test runner
-        run: python -m pip install --upgrade pip pytest
+        run: python -m pip install --upgrade pip pytest pydantic==2.13.4
       - name: Shell syntax
         run: bash -n installer/server-linux/install.sh
       - name: Run release script tests
