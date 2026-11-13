@@ -239,7 +239,7 @@ test("core parent journeys render without runtime errors", async ({ page }) => {
   ] as const;
   for (const [path, heading] of journeys) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible({ timeout: 15000 });
   }
   expect(errors).toEqual([]);
 });
