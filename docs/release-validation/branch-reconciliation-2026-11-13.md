@@ -40,3 +40,21 @@ consolidated package lock. Validation: frozen npm install, TypeScript check,
 workflow YAML parsing, and an exact `dashboard/dist` to `backend/app/static`
 comparison. These checks do not qualify a native Windows installer or change
 the installed test machines.
+
+## Dependabot follow-up generated during cleanup
+
+Dependabot created a further eight branches while reconciling the first batch.
+Their tips were also recorded as merged, and the following changes were
+applied against the current tree:
+
+| Branch update | Applied result |
+| --- | --- |
+| Docker `python:3.12.16-slim-bookworm` | Updated the backend image within the qualified 3.12 series. |
+| `actions/setup-node` 7.1.0, `actions/setup-python` 7.1.0, `actions/upload-artifact` 7.0.2, `softprops/action-gh-release` 3.0.4 | Updated the pinned workflow revisions wherever used. |
+| `autoprefixer` 10.6.2, `jsdom` 31.0.0, `@testing-library/react` 16.3.3 | Updated dashboard development dependencies and lockfile together. |
+
+The follow-up passed frozen npm install, TypeScript check, 76 component tests,
+16 desktop/mobile Playwright tests, and a production build. Production assets
+matched the already packaged build byte for byte. Workflow YAML parsed. The
+local Docker daemon was unavailable, so the new base image needs the GitHub CI
+Docker build before it is treated as qualified.
