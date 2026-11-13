@@ -6,6 +6,10 @@ tree. The reconciled result records every tip in Git ancestry; older dependency
 proposals were combined against the current lockfile instead of replaying their
 old lockfiles over the reviewed application.
 
+The local `safety/beta-hardening-pre-rebase-20260908` snapshot predates the
+current `6801d48` implementation of the same security work. Its history was
+recorded as merged without replaying its older tree over the later fixes.
+
 | Remote branch | Result |
 | --- | --- |
 | `review/independent-hardening-20261031` | Already included by the November review merge. |
