@@ -64,3 +64,30 @@ def test_per_device_pending_cap_preserves_capacity_for_siblings(monkeypatch):
     accepted_b, _ = screenshot_async.can_accept("child-b", 3)
     assert accepted_a is False
     assert accepted_b is True
+
+
+def test_queue_is_recreated_for_new_event_loop(monkeypatch):
+    monkeypatch.setattr(screenshot_async, "_queue", None)
+
+    async def bind_queue():
+        queue = screenshot_async.get_queue()
+        try:
+            await asyncio.wait_for(queue.get(), timeout=0.01)
+        except TimeoutError:
+            pass
+        return queue
+
+    first = asyncio.run(bind_queue())
+    second = asyncio.run(bind_queue())
+    assert second is not first
+
+
+@pytest.mark.asyncio
+async def test_duplicate_replay_does_not_reclassify_same_frame():
+    token = screenshot_async.store_pending(b"synthetic frame", {"device_id": "dev-1"})
+    queue = screenshot_async.FairDeviceQueue(maxsize=10)
+    queue.put_nowait(token)
+    queue.put_nowait(token)
+    assert queue.qsize() == 1
+    assert await queue.get() == token
+    assert queue.qsize() == 0

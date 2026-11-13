@@ -74,3 +74,16 @@ def test_pending_failure_retries_then_dead_letters(monkeypatch, tmp_path):
     assert not (tmp_path / "pending" / f"{token}.enc").exists()
     assert (tmp_path / "pending_dead_letter" / f"{token}.json").exists()
     assert (tmp_path / "pending_dead_letter" / f"{token}.enc").exists()
+
+
+def test_ready_tokens_quarantines_non_object_metadata(monkeypatch, tmp_path):
+    screenshot_async = _reload_screenshot_async(monkeypatch, tmp_path)
+    pending = tmp_path / "pending"
+    pending.mkdir()
+    (pending / "list-meta.enc").write_bytes(b"ciphertext")
+    (pending / "list-meta.json").write_text("[]", encoding="utf-8")
+    assert screenshot_async._ready_tokens() == []
+    dead = tmp_path / "pending_dead_letter"
+    assert json.loads((dead / "list-meta.json").read_text("utf-8"))["dead_letter_reason"] == (
+        "invalid pending metadata"
+    )

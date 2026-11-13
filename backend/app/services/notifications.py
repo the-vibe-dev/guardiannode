@@ -1,8 +1,8 @@
 """Notification routing.
 
 Channels: dashboard (always recorded), email via SMTP (parent-configured), and a
-generic webhook that is compatible with self-hosted/local push services such as
-ntfy and Gotify (both accept a JSON POST). Every delivery attempt — success or
+generic webhook using the GuardianNode JSON payload. Provider-specific adapters
+are required for services with a different API contract. Every delivery attempt — success or
 failure — is recorded as a NotificationLog row so the Audit page can show a
 delivery trail without leaking credentials.
 """
@@ -15,25 +15,51 @@ import json
 import logging
 import smtplib
 import socket
+import ssl
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from typing import Any
 from urllib.parse import ParseResult, urlparse, urlunparse
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import Alert, NotificationJob, NotificationLog, Setting
-from app.services import encryption
+from app.db.models import Alert, ChildProfile, NotificationJob, NotificationLog, RiskResult, Setting
+from app.services import consent, encryption, profile_policy
 
 log = logging.getLogger(__name__)
 
-SEVERITY_ROUTING = {
-    "critical": {"immediate": True},
-    "high": {"immediate": True},
-    "medium": {"digest": True},
-    "low": {"dashboard_only": True},
-}
+POLICY_SUPPRESSED = "delivery_suppressed_by_current_policy"
+
+
+def immediate_min_severity(session: Session, *, refresh: bool = False) -> str:
+    """Read the routing floor without decrypting transport credentials."""
+    row = session.get(Setting, "notification_settings", populate_existing=refresh)
+    try:
+        config = json.loads(row.value) if row and row.value else {}
+    except (TypeError, ValueError):
+        return "high"
+    value = config.get("immediate_min_severity") if isinstance(config, dict) else None
+    return value if value in ("low", "medium", "high", "critical") else "high"
+
+
+def immediate_delivery_allowed(
+    session: Session, alert: Alert, immediate: bool | None = None, *, refresh: bool = False
+) -> bool:
+    """Recheck current parent policy; a saved queue flag cannot override it."""
+    if immediate is False:
+        return False
+    profile = session.get(ChildProfile, alert.profile_id, populate_existing=refresh) if alert.profile_id else None
+    policy = profile_policy.normalize(profile.alert_policy, profile.age_group) if profile else (
+        profile_policy.default_policy_for_age("10_13")
+    )
+    risk = session.get(RiskResult, alert.risk_id, populate_existing=refresh)
+    decision = profile_policy.decide(
+        policy, alert.severity, risk.categories or [] if risk else [],
+        notification_min_severity=immediate_min_severity(session, refresh=refresh),
+    )
+    return decision.create_alert and decision.notify
 
 _METADATA_HOSTS = {
     "169.254.169.254",
@@ -67,14 +93,16 @@ class _PinnedHTTPSConnection(http_client.HTTPSConnection):
 
 
 def _get_smtp_config(session: Session) -> dict[str, Any] | None:
-    row = session.query(Setting).filter(Setting.key == "notification_settings").first()
+    if not consent.choice_allowed(session, "notifications"):
+        return None
+    row = session.get(Setting, "notification_settings", populate_existing=True)
     if not row or not row.value:
         return None
     try:
         cfg = json.loads(row.value)
     except Exception:
         return None
-    if not cfg.get("enabled"):
+    if not isinstance(cfg, dict) or not cfg.get("enabled"):
         return None
     enc = cfg.get("password_enc")
     if enc:
@@ -85,7 +113,29 @@ def _get_smtp_config(session: Session) -> dict[str, Any] | None:
     return cfg
 
 
+def _transport_error(channel: str, error: Exception) -> str:
+    """Fixed diagnostics: server exception messages can echo credentials/URLs."""
+    if isinstance(error, smtplib.SMTPAuthenticationError):
+        reason = "authentication rejected"
+    elif isinstance(error, (smtplib.SMTPSenderRefused, smtplib.SMTPRecipientsRefused)):
+        reason = "sender or recipient rejected"
+    elif isinstance(error, ssl.SSLCertVerificationError):
+        reason = "TLS certificate verification failed"
+    elif isinstance(error, ssl.SSLError):
+        reason = "TLS negotiation failed"
+    elif isinstance(error, TimeoutError):
+        reason = "connection timed out"
+    elif isinstance(error, socket.gaierror):
+        reason = "host could not be resolved"
+    elif isinstance(error, OSError):
+        reason = "network connection failed"
+    else:
+        reason = "transport request failed"
+    return f"{channel}: {reason}"
+
+
 def _send_email(cfg: dict[str, Any], subject: str, body: str) -> tuple[bool, str]:
+    server = None
     try:
         msg = EmailMessage()
         msg["From"] = cfg.get("from_address", "guardiannode@localhost")
@@ -98,19 +148,26 @@ def _send_email(cfg: dict[str, Any], subject: str, body: str) -> tuple[bool, str
         username = cfg.get("username")
         password = cfg.get("password")
         if tls_mode == "ssl":
-            server = smtplib.SMTP_SSL(host, port, timeout=20)
+            server = smtplib.SMTP_SSL(host, port, timeout=20, context=ssl.create_default_context())
         else:
             server = smtplib.SMTP(host, port, timeout=20)
             if tls_mode == "starttls":
-                server.starttls()
+                server.starttls(context=ssl.create_default_context())
         if username and password:
             server.login(username, password)
         server.send_message(msg)
         server.quit()
         return True, "ok"
-    except Exception as e:  # pragma: no cover - depends on a real SMTP server
-        log.warning("smtp send failed: %s", e)
-        return False, str(e)
+    except Exception as e:
+        detail = _transport_error("SMTP", e)
+        log.warning("%s", detail)
+        return False, detail
+    finally:
+        if server is not None:
+            try:
+                server.close()
+            except OSError:
+                pass
 
 
 def _is_internal_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -127,7 +184,10 @@ def _is_internal_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 def _resolve_webhook_target(url: str, *, allow_private: bool = False) -> tuple[_WebhookTarget | None, str]:
     if len(url) > 2048:
         return None, "webhook URL is too long"
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None, "webhook URL is malformed"
     if parsed.scheme not in {"http", "https"}:
         return None, "webhook URL must start with http:// or https://"
     if parsed.username or parsed.password:
@@ -223,9 +283,9 @@ def _post_webhook(target: _WebhookTarget, body: bytes, *, timeout: float = 20) -
 def _send_webhook(url: str, payload: dict[str, Any], *, allow_private: bool = False) -> tuple[bool, str]:
     """POST a JSON payload to a generic webhook URL.
 
-    The body uses common field names (``title``/``message``/``priority``) so the
-    same call works against ntfy, Gotify, and most generic webhook receivers
-    without per-service adapters. Local-only by design: no third-party SaaS.
+    The receiver must implement the GuardianNode payload contract. Native push
+    services may require an adapter. A parent-configured remote URL sends these
+    fields outside the local network; private targets require explicit opt-in.
     """
     target, detail = _resolve_webhook_target(url, allow_private=allow_private)
     if target is None:
@@ -238,9 +298,10 @@ def _send_webhook(url: str, payload: dict[str, Any], *, allow_private: bool = Fa
         if 300 <= int(status) < 400:
             return False, f"webhook redirects are not followed (HTTP {status})"
         return False, f"webhook returned HTTP {status}"
-    except Exception as e:  # pragma: no cover - needs a live endpoint
-        log.warning("webhook send failed: %s", e)
-        return False, str(e)
+    except Exception as e:
+        detail = _transport_error("Webhook", e)
+        log.warning("%s", detail)
+        return False, detail
 
 
 def send_test_email(cfg: dict[str, Any]) -> tuple[bool, str]:
@@ -276,8 +337,8 @@ def send_test_webhook(cfg: dict[str, Any]) -> tuple[bool, str]:
 def run_test(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     """Send a test to every configured channel. Returns one result row per channel.
 
-    Result detail never includes the SMTP password or any secret — only the
-    transport-level outcome string.
+    Built-in transports return fixed error categories and status codes instead
+    of raw exception messages or server response text.
     """
     results: list[dict[str, Any]] = []
     if cfg.get("host"):
@@ -298,10 +359,11 @@ def dispatch(
     risk_summary: str,
     immediate: bool | None = None,
     include_dashboard: bool = True,
+    skip_channels: set[str] | None = None,
 ) -> list[NotificationLog]:
-    """Dispatch a notification according to severity routing."""
-    routing = SEVERITY_ROUTING.get(alert.severity, {})
-    is_immediate = immediate if immediate is not None else routing.get("immediate", False)
+    """Dispatch according to current severity, profile, and consent settings."""
+    is_immediate = immediate_delivery_allowed(session, alert, immediate, refresh=True)
+    skipped = skip_channels or set()
     logs: list[NotificationLog] = []
 
     # 1) Dashboard — always recorded (the dashboard reads from alerts table)
@@ -318,7 +380,7 @@ def dispatch(
 
     # 2) Email if SMTP configured and severity warrants immediate
     cfg = _get_smtp_config(session)
-    if cfg and is_immediate:
+    if cfg and is_immediate and cfg.get("host") and "email" not in skipped:
         subject = f"[GuardianNode] {alert.severity.upper()} alert"
         body = (
             f"GuardianNode detected a {alert.severity} severity event.\n\n"
@@ -338,8 +400,12 @@ def dispatch(
         session.add(nl)
         logs.append(nl)
 
-    # 3) Webhook (ntfy/Gotify/generic) if configured and severity warrants immediate
-    if cfg and is_immediate and cfg.get("webhook_url"):
+    # 3) Generic GuardianNode JSON webhook if immediate delivery is eligible.
+    # SMTP can block while another parent request changes consent or settings.
+    # Each external channel gets a fresh decision immediately before transport.
+    cfg = _get_smtp_config(session)
+    is_immediate = immediate_delivery_allowed(session, alert, immediate, refresh=True)
+    if cfg and is_immediate and cfg.get("webhook_url") and "webhook" not in skipped:
         ok, detail = _send_webhook(
             cfg["webhook_url"],
             {
@@ -373,8 +439,7 @@ def enqueue(
     immediate: bool | None = None,
 ) -> NotificationJob | None:
     """Record dashboard visibility now and queue external delivery after commit."""
-    routing = SEVERITY_ROUTING.get(alert.severity, {})
-    is_immediate = immediate if immediate is not None else routing.get("immediate", False)
+    is_immediate = immediate_delivery_allowed(session, alert, immediate)
     session.add(
         NotificationLog(
             alert_id=alert.alert_id,
@@ -412,25 +477,34 @@ def _retry_delay_seconds(attempts: int) -> int:
 
 def process_pending(session: Session, *, limit: int = 10, now: datetime | None = None) -> int:
     """Deliver queued notification jobs. Returns the number of jobs processed."""
-    now = now or datetime.now(UTC)
+    now = _as_aware_utc(now) or datetime.now(UTC)
     candidates = (
         session.query(NotificationJob)
-        .filter(NotificationJob.status.in_(["queued", "retry"]))
-        .order_by(NotificationJob.created_at.asc())
+        .filter(
+            NotificationJob.status.in_(["queued", "retry"]),
+            or_(NotificationJob.next_attempt_at.is_(None), NotificationJob.next_attempt_at <= now),
+        )
+        .order_by(NotificationJob.created_at.asc(), NotificationJob.id.asc())
         .limit(limit)
         .all()
     )
     processed = 0
     for job in candidates:
-        due = _as_aware_utc(job.next_attempt_at)
-        if due is not None and due > now:
-            continue
         alert = session.get(Alert, job.alert_id)
         if alert is None:
             job.status = "dead"
             job.last_error = "alert no longer exists"
             job.updated_at = now
             processed += 1
+            session.commit()
+            continue
+        if not immediate_delivery_allowed(session, alert, job.immediate, refresh=True):
+            job.status = "skipped"
+            job.last_error = POLICY_SUPPRESSED
+            job.next_attempt_at = None
+            job.updated_at = now
+            processed += 1
+            session.commit()
             continue
         job.status = "processing"
         job.attempts = int(job.attempts or 0) + 1
@@ -441,7 +515,12 @@ def process_pending(session: Session, *, limit: int = 10, now: datetime | None =
             risk_summary=job.risk_summary or "",
             immediate=job.immediate,
             include_dashboard=False,
+            skip_channels=set(job.delivered_channels or []),
         )
+        job.delivered_channels = sorted({
+            *(job.delivered_channels or []),
+            *(row.channel for row in logs if row.result == "ok"),
+        })
         failures = [row for row in logs if row.channel != "dashboard" and row.result != "ok"]
         if failures:
             detail = "; ".join((row.detail or row.channel)[:200] for row in failures)[:500]
@@ -453,11 +532,12 @@ def process_pending(session: Session, *, limit: int = 10, now: datetime | None =
                 job.status = "retry"
                 job.next_attempt_at = now + timedelta(seconds=_retry_delay_seconds(job.attempts))
         else:
-            job.status = "sent"
+            job.status = "sent" if job.delivered_channels else "skipped"
             job.last_error = None
             job.next_attempt_at = None
         job.updated_at = now
         processed += 1
-    if processed:
+        # Persist each outcome independently: a later job failure must not roll
+        # back all successful deliveries in this worker batch.
         session.commit()
     return processed

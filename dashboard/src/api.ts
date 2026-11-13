@@ -10,6 +10,10 @@ export type Overview = components["schemas"]["Overview"];
 export type Profile = components["schemas"]["ProfileDTO"];
 export type PairStart = components["schemas"]["PairStartResponse"];
 export type CaptureStatus = components["schemas"]["CaptureStatus"];
+export type AuditEntry = components["schemas"]["AuditDTO"];
+export type AuditPage = components["schemas"]["AuditPageDTO"];
+export type DeviceAction = components["schemas"]["ActionDTO"];
+export type ActionExecution = components["schemas"]["ActionExecutionDTO"];
 
 export interface OnboardingStatus {
   complete: boolean;
@@ -23,6 +27,41 @@ export interface ConsentStatus {
   active: boolean;
   record: null | { consent_id: string; notice_version: string; status: string; choices: Record<string, unknown>; created_at: string };
 }
+
+export interface ConsentWithdrawalResult extends ConsentStatus {
+  deletion: null | {
+    events?: number;
+    risk_results?: number;
+    alerts?: number;
+    blobs?: number;
+    guardian_reviews?: number;
+    remaining_events?: number;
+    remaining_blobs?: number;
+    pending_captures?: { deleted: number; failed: number };
+  };
+}
+
+export interface NotificationStatus {
+  enabled: boolean;
+  consent_allowed: boolean;
+  worker_enabled: boolean;
+  routing?: { immediate_min_severity: string; protected_safety_floor: "high"; rechecks_current_policy: boolean; historical_backfill: boolean };
+  channels: Record<"email" | "webhook", { configured: boolean; last_success_at: string | null }>;
+  counts: Record<"queued" | "retry" | "processing" | "sent" | "dead" | "skipped", number>;
+  recent_jobs: Array<{ id: string | number; alert_id: string; severity: string; status: string; attempts: number; next_attempt_at: string | null; created_at: string; updated_at: string; delivered_channels: string[]; skip_reason?: "current_policy" | null }>;
+  recent_attempts: Array<{ id: string | number; alert_id: string; channel: string; severity: string; result: string; created_at: string }>;
+  last_digest: { local_date: string; timezone: string; status: string; total_alerts: number; completed_at: string | null } | null;
+}
+
+export interface NotificationTestResult {
+  ok: boolean;
+  detail: string;
+  results: Array<{ channel: string; ok: boolean; detail: string }>;
+}
+
+export type CaptureQueuePolicy = components["schemas"]["CaptureQueuePolicy"];
+export type CaptureQueueInventory = components["schemas"]["CaptureQueueInventory"];
+export type CaptureQueueStatus = components["schemas"]["CaptureQueueStatus"];
 
 const API_BASE = "/api";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -168,8 +207,9 @@ export const api = {
   feedbackAlert: (id: string, feedback_type: string, notes?: string) =>
     request<any>(`/alerts/${id}/feedback`, { method: "POST", body: JSON.stringify({ feedback_type, notes }) }),
   confirmedAlertAction: (id: string, body: { action: string; target?: string; duration_seconds?: number; message?: string; confirmed_preview?: string | null }) =>
-    request<any>(`/alerts/${id}/actions`, { method: "POST", body: JSON.stringify(body) }),
-  undoAction: (action_id: string) => request<any>(`/actions/${action_id}/undo`, { method: "POST" }),
+    request<DeviceAction>(`/alerts/${id}/actions`, { method: "POST", body: JSON.stringify(body) }),
+  alertActions: (id: string) => request<DeviceAction[]>(`/alerts/${encodeURIComponent(id)}/actions?limit=50`),
+  undoAction: (action_id: string) => request<DeviceAction>(`/actions/${encodeURIComponent(action_id)}/undo`, { method: "POST" }),
   modelStatus: () => request<any>("/models/status"),
   testModel: (text: string) => request<any>("/models/test", { method: "POST", body: JSON.stringify({ text }) }),
   profiles: () => request<Profile[]>("/profiles"),
@@ -200,10 +240,11 @@ export const api = {
     }),
   policyMeta: () => request<any>("/profiles/policy/meta"),
   notificationSettings: () => request<any>("/settings/notifications"),
+  notificationStatus: () => request<NotificationStatus>("/settings/notifications/status"),
   updateNotificationSettings: (body: any) =>
     request<any>("/settings/notifications", { method: "PATCH", body: JSON.stringify(body) }),
   testNotificationSettings: () =>
-    request<any>("/settings/notifications/test", { method: "POST" }),
+    request<NotificationTestResult>("/settings/notifications/test", { method: "POST" }),
   familyLocale: () => request<{ timezone: string }>("/settings/family-locale"),
   updateFamilyLocale: (timezone: string) =>
     request<{ timezone: string }>("/settings/family-locale", { method: "PATCH", body: JSON.stringify({ timezone }) }),
@@ -218,6 +259,10 @@ export const api = {
   runCompleteBackup: () =>
     request<any>("/settings/backups/run", { method: "POST" }),
   storage: () => request<any>("/storage"),
+  captureQueue: () => request<CaptureQueueStatus>("/storage/capture-queue"),
+  updateCaptureQueuePolicy: (body: Partial<CaptureQueuePolicy>) =>
+    request<CaptureQueueStatus>("/storage/capture-queue", { method: "PATCH", body: JSON.stringify(body) }),
+  runCaptureQueueCleanup: () => request<CaptureQueueStatus>("/storage/capture-queue/cleanup", { method: "POST" }),
   exports: () => request<any[]>("/storage/exports"),
   exportStorage: () => request<any>("/storage/export", { method: "POST" }),
   deleteExport: (export_id: string) =>
@@ -226,7 +271,11 @@ export const api = {
     request<any>("/storage/wipe", { method: "POST", body: JSON.stringify(body) }),
   audit: (params: Record<string, string> = {}) => {
     const q = new URLSearchParams(params).toString();
-    return request<any[]>(`/audit${q ? `?${q}` : ""}`);
+    return request<AuditEntry[]>(`/audit${q ? `?${q}` : ""}`);
+  },
+  auditPage: (params: Record<string, string> = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request<AuditPage>(`/audit/page${q ? `?${q}` : ""}`);
   },
   effectivePolicy: (profile_id: string) => request<any>(`/policies/${profile_id}/effective`),
   updateEffectivePolicy: (profile_id: string, config: any) =>
@@ -239,7 +288,7 @@ export const api = {
   grantConsent: (notice_version: string, choices: components["schemas"]["ConsentChoices"]) =>
     request<ConsentStatus>("/consent", { method: "POST", body: JSON.stringify({ notice_version, choices }) }),
   withdrawConsent: (evidence_disposition: "retain" | "delete") =>
-    request<ConsentStatus>("/consent/withdraw", { method: "POST", body: JSON.stringify({ evidence_disposition }) }),
+    request<ConsentWithdrawalResult>("/consent/withdraw", { method: "POST", body: JSON.stringify({ evidence_disposition }) }),
   childRequests: (params: Record<string, string> = {}) => {
     const q = new URLSearchParams(params).toString();
     return request<ChildRequestPage>(`/child-requests${q ? `?${q}` : ""}`);

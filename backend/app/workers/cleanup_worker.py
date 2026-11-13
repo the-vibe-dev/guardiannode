@@ -5,10 +5,10 @@ import asyncio
 import json
 import logging
 
+from app import settings as settings_mod
 from app.db.models import Setting
 from app.db.session import get_sessionmaker
 from app.services import retention
-from app.settings import settings
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +37,13 @@ def run_once() -> dict[str, int]:
 
 
 async def loop() -> None:
-    interval = max(60, int(settings.retention_cleanup_interval_seconds))
+    interval = max(60, int(settings_mod.settings.retention_cleanup_interval_seconds))
     while True:
-        await asyncio.sleep(interval)
         try:
             await asyncio.to_thread(run_once)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.warning("retention cleanup failed: %s", e)
+        # Retry durable deletion on startup, then keep the normal bounded cadence.
+        await asyncio.sleep(interval)

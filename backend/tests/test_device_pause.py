@@ -51,6 +51,24 @@ def _pair(client: TestClient) -> tuple[str, str]:
         },
     )
     assert r.status_code == 200
+    # Collection now requires a real family account and current privacy grant;
+    # device bootstrap alone must not activate capture before onboarding.
+    from app.services import consent
+    from app.services.setup_token import ensure_setup_token
+    created = client.post("/api/auth/setup", json={
+        "display_name": "Parent", "password": "correct-horse-battery",
+        "recovery_code": "alpha bravo gamma delta", "setup_token": ensure_setup_token(),
+    })
+    assert created.status_code == 200
+    client.headers["X-CSRF-Token"] = client.get("/api/auth/csrf").json()["csrf_token"]
+    granted = client.post("/api/consent", json={
+        "notice_version": consent.NOTICE_VERSION,
+        "choices": {
+            "screenshots": True, "apps_and_urls": True, "retention": True,
+            "notifications": False, "external_ai": False, "child_notice_acknowledged": True,
+        },
+    })
+    assert granted.status_code == 200
     return r.json()["device_id"], r.json()["device_token"]
 
 
@@ -270,19 +288,7 @@ def test_device_list_clears_stale_paused_badge(monkeypatch, tmp_path):
     device_id, _token = _pair(client)
     _set_paused_until(device_id, datetime.now(UTC) - timedelta(minutes=2))
 
-    # Log in as parent (first-run setup) to list devices.
-    from app.services.setup_token import ensure_setup_token
-    setup_token = ensure_setup_token()
-    r = client.post(
-        "/api/auth/setup",
-        json={
-            "display_name": "Parent",
-            "password": "correct-horse-battery",
-            "recovery_code": "alpha bravo gamma delta",
-            "setup_token": setup_token,
-        },
-    )
-    assert r.status_code == 200, r.text
+    # _pair completed parent setup and explicit collection consent above.
     r = client.get("/api/devices")
     assert r.status_code == 200
     dev = next(d for d in r.json() if d["device_id"] == device_id)

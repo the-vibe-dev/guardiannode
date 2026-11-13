@@ -77,6 +77,10 @@ class AgentConfig:
     durable_queue_max_bytes: int = 256 * 1024 * 1024
     durable_queue_max_age_seconds: int = 7 * 24 * 60 * 60
     broker_enabled: bool = True
+    # Runtime server consent gate. The production broker supplies the
+    # authoritative value; local YAML must not authorize broker collection.
+    monitoring_enabled: bool = False
+    apps_and_urls_enabled: bool = False
 
     def __post_init__(self) -> None:
         # PyYAML treats unquoted values like 10_13 as numeric 1013. Normalize

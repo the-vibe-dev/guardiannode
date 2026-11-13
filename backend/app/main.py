@@ -114,6 +114,9 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.url.path.startswith("/api/"):
+            # Parent API responses include evidence and private family metadata.
+            response.headers.setdefault("Cache-Control", "no-store, private")
         if settings_mod.settings.tls_enabled:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         response.headers.setdefault(
@@ -129,8 +132,9 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
             return False
         if request.url.path in _CSRF_EXEMPT_API_PATHS:
             return False
-        if request.headers.get("authorization", "").lower().startswith("bearer "):
-            return False
+        # Parent routes authenticate the browser cookie. An unvalidated bearer
+        # header cannot change that boundary or opt the request out of CSRF.
+        # Device-only routes have their explicit exemption above.
         return bool(request.session.get("user_id"))
 
 

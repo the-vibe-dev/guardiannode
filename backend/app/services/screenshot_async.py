@@ -29,7 +29,7 @@ from typing import Any
 from ulid import ULID
 
 from app import settings as settings_mod
-from app.services import encryption, screenshot_ingest
+from app.services import capture_queue, encryption, screenshot_ingest
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +48,14 @@ class FairDeviceQueue:
 
     def __init__(self, maxsize: int) -> None:
         self.maxsize = maxsize
+        self._loop: asyncio.AbstractEventLoop | None
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         self._ready_devices: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
         self._by_device: dict[str, deque[str]] = defaultdict(deque)
+        self._tokens: set[str] = set()
         self._size = 0
 
     def qsize(self) -> int:
@@ -59,6 +65,8 @@ class FairDeviceQueue:
         return self._size >= self.maxsize
 
     def put_nowait(self, token: str) -> None:
+        if token in self._tokens:
+            return
         if self.full():
             raise asyncio.QueueFull
         meta = _load_meta(token) or {}
@@ -67,13 +75,17 @@ class FairDeviceQueue:
         if not device_queue:
             self._ready_devices.put_nowait(device_id)
         device_queue.append(token)
+        self._tokens.add(token)
         self._size += 1
 
     async def get(self) -> str:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
         device_id = await self._ready_devices.get()
         self._ready_devices.task_done()
         device_queue = self._by_device[device_id]
         token = device_queue.popleft()
+        self._tokens.remove(token)
         self._size -= 1
         if device_queue:
             self._ready_devices.put_nowait(device_id)
@@ -88,15 +100,11 @@ class FairDeviceQueue:
 
 
 def _pending_dir() -> Path:
-    p = settings_mod.settings.data_dir / "pending"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return capture_queue.capture_directory("pending", create=True)
 
 
 def _dead_letter_dir() -> Path:
-    p = settings_mod.settings.data_dir / "pending_dead_letter"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return capture_queue.capture_directory("pending_dead_letter", create=True)
 
 
 def get_queue() -> FairDeviceQueue:
@@ -228,6 +236,7 @@ def _is_stale(meta: dict[str, Any], *, now: datetime | None = None) -> bool:
     return ((now or datetime.now(UTC)) - stored_at).total_seconds() > max_age
 
 
+@capture_queue.serialized
 def store_pending(image_bytes: bytes, meta: dict[str, Any]) -> str:
     """Persist a frame (encrypted) + its metadata, return its token. Fast."""
     token = str(ULID())
@@ -258,19 +267,33 @@ def enqueue_nowait(token: str) -> bool:
 
 def _load_meta(token: str) -> dict[str, Any] | None:
     try:
-        return json.loads((_pending_dir() / f"{token}.json").read_text("utf-8"))
+        path = _pending_dir() / f"{token}.json"
+        if path.is_symlink() or path.resolve().parent != _pending_dir():
+            return None
+        value = json.loads(path.read_text("utf-8"))
+        return value if isinstance(value, dict) else None
     except Exception:
         return None
 
 
+@capture_queue.serialized
 def _write_meta(token: str, meta: dict[str, Any]) -> None:
-    _atomic_write_json(_pending_dir() / f"{token}.json", meta)
+    directory = _pending_dir()
+    path = directory / f"{token}.json"
+    if path.is_symlink() or path.resolve().parent != directory:
+        raise OSError("unsafe pending metadata path")
+    _atomic_write_json(path, meta)
 
 
+@capture_queue.serialized
 def _discard(token: str) -> None:
     for suffix in (".enc", ".json"):
         try:
-            (_pending_dir() / f"{token}{suffix}").unlink(missing_ok=True)
+            directory = _pending_dir()
+            path = directory / f"{token}{suffix}"
+            if path.is_symlink() or path.resolve().parent != directory:
+                continue
+            path.unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -279,7 +302,27 @@ def discard(token: str) -> None:
     _discard(token)
 
 
+def purge_pending_capture_files(*, limit: int = 10_000) -> dict[str, int]:
+    """Delete generated capture files after the parent requests evidence deletion.
+
+    Call only after committing device revocation/consent withdrawal so new
+    workers observe it. This deliberately visits only the two known immediate
+    directories, accepts only our ULID capture filenames, never follows links,
+    and reports unlinks that failed or exceeded the bounded work budget.
+    """
+    return capture_queue.purge_capture_files(limit=limit)
+
+
+@capture_queue.serialized
 def _quarantine(token: str, reason: str) -> None:
+    pending = _pending_dir()
+    sources = [pending / f"{token}{suffix}" for suffix in (".enc", ".json")]
+    if any(src.is_symlink() or src.resolve().parent != pending for src in sources):
+        return
+    if not any(src.is_file() for src in sources):
+        # Cleanup may have consumed the token after a worker loaded it. Never
+        # manufacture a replacement metadata file after an evidence deletion.
+        return
     dead = _dead_letter_dir()
     meta = _load_meta(token) or {"token": token}
     meta["dead_letter_reason"] = reason
@@ -304,6 +347,7 @@ def _quarantine(token: str, reason: str) -> None:
     _fsync_dir(dead)
 
 
+@capture_queue.serialized
 def _record_failure(token: str, exc: Exception) -> None:
     meta = _load_meta(token)
     if meta is None:
@@ -324,18 +368,19 @@ def _record_failure(token: str, exc: Exception) -> None:
     _write_meta(token, meta)
 
 
+@capture_queue.serialized
 def _reconcile_pending_files() -> None:
     d = _pending_dir()
     for tmp in sorted(d.glob("*.tmp")) + sorted(d.glob(".*.tmp")):
-        if not tmp.is_file():
+        if tmp.is_symlink() or not tmp.is_file():
             continue
         try:
             tmp.replace(_dead_letter_dir() / tmp.name)
         except OSError:
             log.warning("could not dead-letter abandoned pending temp file %s", tmp)
 
-    enc_tokens = {p.stem for p in d.glob("*.enc") if p.is_file()}
-    json_tokens = {p.stem for p in d.glob("*.json") if p.is_file()}
+    enc_tokens = {p.stem for p in d.glob("*.enc") if not p.is_symlink() and p.is_file()}
+    json_tokens = {p.stem for p in d.glob("*.json") if not p.is_symlink() and p.is_file()}
     for token in sorted(enc_tokens - json_tokens):
         _quarantine(token, "missing pending metadata")
     for token in sorted(json_tokens - enc_tokens):
@@ -394,29 +439,38 @@ def requeue_pending(q: Any | None = None) -> int:
 
 
 async def _classify_token(token: str) -> None:
+    from app.db.models import Device
     from app.db.session import get_sessionmaker
 
     meta = _load_meta(token)
     if meta is None:
+        if not (_pending_dir() / f"{token}.enc").exists():
+            # Evidence deletion or a duplicate queue item already consumed the
+            # files. Do not recreate a dead-letter record after a parent wipe.
+            return
         _quarantine(token, "missing pending metadata")
         return
     if _is_stale(meta):
         log.info("pending frame %s is stale; discarding before classification", token)
         _discard(token)
         return
-    try:
-        image_bytes = encryption.decrypt_blob_from_disk(
-            _pending_dir() / f"{token}.enc", aad=token.encode("ascii")
-        )
-    except Exception as e:
-        log.warning("pending frame %s unreadable (%s); quarantining", token, e)
-        _record_failure(token, e)
-        return
-
     timestamp = _parse_timestamp(meta.get("timestamp")) or datetime.now(UTC)
 
     session = get_sessionmaker()()
     try:
+        device = session.get(Device, meta.get("device_id"))
+        if not screenshot_ingest._monitoring_active(session, device):
+            _discard(token)
+            session.commit()
+            return
+        try:
+            image_bytes = encryption.decrypt_blob_from_disk(
+                _pending_dir() / f"{token}.enc", aad=token.encode("ascii")
+            )
+        except Exception as e:
+            log.warning("pending frame %s unreadable (%s); quarantining", token, e)
+            _record_failure(token, e)
+            return
         await screenshot_ingest.ingest_screenshot(
             session,
             image_bytes=image_bytes,

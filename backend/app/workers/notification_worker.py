@@ -25,7 +25,10 @@ def run_once(*, limit: int = 10) -> int:
 async def loop() -> None:
     while True:
         try:
-            processed = run_once()
+            # SMTP and the stdlib webhook client are synchronous. Keep their
+            # network timeouts off the ASGI event loop so heartbeats, uploads,
+            # the parent dashboard, and health probes remain responsive.
+            processed = await asyncio.to_thread(run_once)
             if processed:
                 log.info("processed %d notification job(s)", processed)
         except Exception as e:  # pragma: no cover

@@ -11,6 +11,13 @@
 
 # GuardianNode Alpha / Developer Preview
 
+> **Reviewed source bundle — 13 November 2026, review.2.** This copy includes engineering,
+> privacy, reliability, recovery, dashboard and dependency improvements. See
+> [START_HERE.md](START_HERE.md) for the current report, verification evidence,
+> upgrade guidance and remaining release gates. Historical records below describe
+> earlier builds; this bundle remains an alpha source evaluation, not a newly
+> qualified signed Windows release.
+
 **Local-first AI safety monitoring for families.**
 
 [Documentation](https://the-vibe-dev.github.io/guardiannode/) ·

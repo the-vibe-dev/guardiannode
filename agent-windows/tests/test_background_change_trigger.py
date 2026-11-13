@@ -30,7 +30,7 @@ def _stop_after(iterations: int):
 @pytest.mark.asyncio
 async def test_background_change_sends_despite_identical_foreground(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
-    cfg = AgentConfig(full_screen_capture_enabled=True)
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True, full_screen_capture_enabled=True)
 
     # Foreground (Notepad) hash never changes; the whole-screen hash flips
     # 32 of 256 bits on the second frame (browser loading behind it).
@@ -70,7 +70,7 @@ async def test_background_change_sends_despite_identical_foreground(monkeypatch)
 @pytest.mark.asyncio
 async def test_unchanged_screen_does_not_resend(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
-    cfg = AgentConfig(full_screen_capture_enabled=True)
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True, full_screen_capture_enabled=True)
 
     shot = Screenshot(width=800, height=600, jpeg_bytes=b"same", phash=0, full_phash=0)
 
@@ -95,7 +95,7 @@ async def test_unchanged_screen_does_not_resend(monkeypatch):
 @pytest.mark.asyncio
 async def test_unchanged_screen_resends_after_max_capture_interval(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
-    cfg = AgentConfig(
+    cfg = AgentConfig(monitoring_enabled=True, apps_and_urls_enabled=True, 
         full_screen_capture_enabled=True,
         ocr_cadence_seconds=5,
         max_capture_interval_seconds=60,

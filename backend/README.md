@@ -8,12 +8,15 @@ See [`../docs/BACKEND_SETUP.md`](../docs/BACKEND_SETUP.md) for setup instruction
 ## Run
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload
+cd backend
+uv sync --frozen --extra dev
+uv run guardiannode-backend
 ```
 
-Then open `http://127.0.0.1:8787/setup`.
+Then follow the setup instructions at `https://127.0.0.1:8787/setup`, including
+trusting the generated family CA and obtaining the local one-time setup token.
+The linked setup guide also documents an explicit loopback-only HTTP development
+command.
 
 ## Layout
 
@@ -28,9 +31,12 @@ Then open `http://127.0.0.1:8787/setup`.
 
 ## Database Schema
 
-The current alpha initializes SQLite with SQLAlchemy `Base.metadata.create_all()`
-and idempotent startup schema patches. Formal Alembic migrations are planned
-before stable release; do not run `alembic upgrade head` in this checkout.
+The backend applies the bundled Alembic migration chain during normal startup.
+This reviewed source includes revision `0008_notification_delivery`. Migration
+tests cover existing schema/data upgrades; preserve a verified complete backup
+before an upgrade. In-place downgrade is unsupported: restore a compatible
+backup together with its matching application/configuration. See
+[`../START_HERE.md`](../START_HERE.md) for this review build's upgrade guidance.
 
 ## Database Maintenance
 

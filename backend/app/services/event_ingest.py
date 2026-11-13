@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app.db.models import Alert, Device, Event, RiskResult
-from app.services import classifier, encryption, redaction
+from app.services import classifier, consent, encryption, redaction
+from app.services.device_state import is_device_paused
 from app.services.input_bounds import sanitize_metadata
 from app.services.profile_resolution import resolve_profile
 
@@ -31,6 +32,15 @@ async def ingest_event(
 
     Returns a small dict with event_id, risk_id (if classified), and severity.
     """
+    if not consent.processing_allowed(session):
+        raise PermissionError("Monitoring is disabled by the current privacy choices")
+    payload = dict(payload)
+    if not consent.choice_allowed(session, "apps_and_urls"):
+        for key in ("app_name", "window_title", "url"):
+            payload[key] = None
+        payload["metadata"] = {}
+    if not consent.choice_allowed(session, "screenshots"):
+        payload["screenshot_blob_id"] = payload["image_blob_id"] = None
     requested_event_id = payload.get("event_id")
     if requested_event_id:
         existing = session.get(Event, requested_event_id)
@@ -110,13 +120,6 @@ async def ingest_event(
         received_at=datetime.now(UTC),
         key_version=encryption.current_key_version(),
     )
-    session.add(event)
-
-    # Update device last_seen
-    if device is not None:
-        device.last_seen = datetime.now(UTC)
-        device.status = "online"
-
     # Classify
     cls_result = await classifier.classify_text(
         redacted_text=text,
@@ -127,6 +130,25 @@ async def ingest_event(
         url=payload.get("url"),
         custom_phrases=resolved.custom_phrases,
     )
+
+    # A parent can withdraw consent or revoke this device during local model
+    # inference. Check again before the first evidence write, not only at upload.
+    if device is not None:
+        session.refresh(device)
+    if (device is not None and (not device.paired or is_device_paused(device))) or not consent.processing_allowed(session):
+        raise PermissionError("Monitoring permission changed while classifying this event")
+    if not consent.choice_allowed(session, "apps_and_urls"):
+        event.app_name = event.window_title = event.url = None
+        event.event_metadata = {
+            key: value for key, value in metadata.items()
+            if key in {"capture_scope", "policy_id", "policy_version", "collector_version", "redaction", "redaction_summary"}
+        }
+    if not consent.choice_allowed(session, "screenshots"):
+        event.screenshot_blob_id = event.image_blob_id = None
+    session.add(event)
+    if device is not None:
+        device.last_seen = datetime.now(UTC)
+        device.status = "online"
 
     risk_id = _ulid()
     rr = RiskResult(
@@ -152,12 +174,15 @@ async def ingest_event(
 
     severity = cls_result["risk_level"]
     alert_id: str | None = None
-    from app.services import profile_policy
+    from app.services import notifications, profile_policy
     if resolved.profile is not None:
         pol = profile_policy.normalize(resolved.profile.alert_policy or {}, resolved.age_group)
     else:
         pol = profile_policy.default_policy_for_age(resolved.age_group)
-    decision = profile_policy.decide(pol, severity, cls_result["categories"]) if severity != "none" else profile_policy.Decision(False, False, "no_risk")
+    decision = profile_policy.decide(
+        pol, severity, cls_result["categories"],
+        notification_min_severity=notifications.immediate_min_severity(session),
+    ) if severity != "none" else profile_policy.Decision(False, False, "no_risk")
     if decision.create_alert:
         from app.services.alert_dedup import upsert_alert
         alert_id, _created = upsert_alert(

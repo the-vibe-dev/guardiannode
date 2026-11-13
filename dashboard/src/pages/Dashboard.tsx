@@ -6,10 +6,10 @@ import { formatDateTime } from "../utils/datetime";
 
 export default function Dashboard() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview, refetchInterval: 15_000 });
-  const alerts = useQuery({ queryKey: ["alerts", "home"], queryFn: () => api.alerts({ limit: "5" }) });
-  const devices = useQuery({ queryKey: ["devices"], queryFn: api.devices });
+  const alerts = useQuery({ queryKey: ["alerts", "home"], queryFn: () => api.alerts({ limit: "5" }), refetchInterval: 15_000 });
+  const devices = useQuery({ queryKey: ["devices"], queryFn: api.devices, refetchInterval: 15_000 });
   const profiles = useQuery({ queryKey: ["profiles"], queryFn: api.profiles });
-  const requests = useQuery({ queryKey: ["child-requests", "open"], queryFn: () => api.childRequests({ status: "open", limit: "5" }) });
+  const requests = useQuery({ queryKey: ["child-requests", "open"], queryFn: () => api.childRequests({ status: "open", limit: "5" }), refetchInterval: 15_000 });
   const onboarding = useQuery({ queryKey: ["onboarding"], queryFn: api.onboardingStatus });
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const capture = useQuery({
@@ -41,7 +41,7 @@ export default function Dashboard() {
           <p className="mt-2 max-w-2xl text-sm text-slate-600">A calm summary of what needs you, what is covered, and whether protection is working.</p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800" role="status">
-          <span className="h-2 w-2 rounded-full bg-emerald-600" /> Local protection active
+          <span className="h-2 w-2 rounded-full bg-emerald-600" /> Local dashboard connected
         </div>
       </header>
 

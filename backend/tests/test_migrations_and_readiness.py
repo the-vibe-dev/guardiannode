@@ -51,7 +51,7 @@ def test_empty_database_migrates_to_snapshotted_schema(monkeypatch, tmp_path: Pa
             "guardian_reviews",
         ]
     )
-    assert schema_revisions(engine)[0] == "0007_family_beta_workflows"
+    assert schema_revisions(engine)[0] == "0008_notification_delivery"
 
 
 def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_path: Path):
@@ -65,7 +65,7 @@ def test_migration_upgrades_alpha_schema_and_creates_backup(monkeypatch, tmp_pat
     engine = get_engine()
     result = upgrade_schema(engine)
     current, head = schema_revisions(engine)
-    assert current == head == "0007_family_beta_workflows"
+    assert current == head == "0008_notification_delivery"
     assert result["backup"] is not None
     assert Path(result["backup"]).is_file()
     assert "session_revoked_at" in {col["name"] for col in inspect(engine).get_columns("users")}
@@ -90,11 +90,41 @@ def test_interrupted_unstamped_migration_recovers_without_losing_evidence(monkey
             "'2026-01-01', NULL)"
         )
     result = upgrade_schema(engine)
-    assert result["current_revision"] == "0007_family_beta_workflows"
+    assert result["current_revision"] == "0008_notification_delivery"
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT encrypted_path FROM evidence_blobs WHERE blob_id='blob-1'"
         ).scalar_one() == "evidence/blob-1.enc"
+
+
+def test_notification_migration_preserves_existing_digest_and_initializes_retry_state(monkeypatch, tmp_path):
+    from alembic import command
+
+    _configure_database(monkeypatch, tmp_path)
+    from app.db.migrations import alembic_config, upgrade_schema
+    from app.db.session import get_engine
+
+    engine = get_engine()
+    cfg = alembic_config()
+    with engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "0007_family_beta_workflows")
+        connection.exec_driver_sql(
+            "INSERT INTO digest_runs "
+            "(digest_id, local_date, timezone, status, summary, created_at, completed_at) "
+            "VALUES ('existing-digest', '2026-11-01', 'UTC', 'sent', "
+            "'{\"total\": 3}', '2026-11-02 08:00:00', '2026-11-02 08:00:01')"
+        )
+    result = upgrade_schema(engine)
+    assert result["previous_revision"] == "0007_family_beta_workflows"
+    assert result["current_revision"] == "0008_notification_delivery"
+    assert Path(result["backup"]).is_file()
+    with engine.connect() as connection:
+        row = connection.exec_driver_sql(
+            "SELECT status, summary, attempts, delivered_channels, next_attempt_at, last_error "
+            "FROM digest_runs WHERE digest_id='existing-digest'"
+        ).one()
+    assert tuple(row) == ("sent", '{"total": 3}', 0, "[]", None, None)
 
 
 def test_readiness_checks_workers_schema_storage_and_encryption(monkeypatch, tmp_path: Path):

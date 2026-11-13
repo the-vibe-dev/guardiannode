@@ -9,9 +9,22 @@ high-confidence floor for known-bad patterns the LLM might miss or soften.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
-RULES_VERSION = "0.1.0-alpha.3"
+RULES_VERSION = "0.1.0-alpha.3-review.1"
+
+_TEXT_TRANSLATION = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u02bc": "'",
+    "\u200b": None, "\u2060": None, "\ufeff": None,
+})
+
+
+def _normalize_text(text: str) -> str:
+    # Normalize common typography and invisible separators without expanding
+    # semantic rules or guessing at arbitrary obfuscation. Preserve language
+    # joiners (ZWJ/ZWNJ); they can be meaningful in non-English watch phrases.
+    return unicodedata.normalize("NFKC", text).translate(_TEXT_TRANSLATION)
 
 
 @dataclass
@@ -45,8 +58,8 @@ _RULES: list[Rule] = [
         category="self_harm",
         severity="critical",
         patterns=_compile([
-            r"\bi\s+(?:want|am going|'m going)\s+to\s+(?:kill|hurt|harm)\s+myself\b",
-            r"\bi\s+(?:want|am going|'m going)\s+to\s+(?:end|take)\s+(?:my\s+life|it\s+all)\b",
+            r"\bi(?:\s+(?:want|am\s+going)|'m\s+going)\s+to\s+(?:kill|hurt|harm)\s+myself\b",
+            r"\bi(?:\s+(?:want|am\s+going)|'m\s+going)\s+to\s+(?:end|take)\s+(?:my\s+life|it\s+all)\b",
             r"\b(?:tonight|today)\s+(?:is|i'?m)\s+(?:my\s+last|going\s+to\s+kill)\b",
             r"\bsuicide\s+(?:plan|tonight|method)\b",
         ]),
@@ -156,7 +169,7 @@ _RULES: list[Rule] = [
         category="self_harm",
         severity="high",
         patterns=_compile([
-            r"\bi\s+(?:hate|cant\s+stand)\s+(?:my\s+)?life\b",
+            r"\bi\s+(?:hate|can'?t\s+stand)\s+(?:my\s+)?life\b",
             r"\bi\s+want\s+to\s+(?:disappear(?!\s+into\b)|not\s+exist)\b",
             r"\beveryone\s+(?:would\s+be\s+better|hates\s+me)\b",
             r"\bcutting\s+(?:myself|again)\b",
@@ -225,7 +238,7 @@ def _compile_custom(phrases: list[str]) -> list[tuple[str, re.Pattern[str]]]:
     """
     compiled: list[tuple[str, re.Pattern[str]]] = []
     for raw in phrases:
-        phrase = (raw or "").strip()
+        phrase = _normalize_text(raw or "").strip()
         if not phrase or len(phrase) > 200:
             continue
         # Whole-word match for tokens; substring for multi-word phrases.
@@ -246,6 +259,7 @@ def evaluate(text: str, custom_phrases: list[str] | None = None) -> list[RuleMat
     """
     if not text:
         return []
+    text = _normalize_text(text)
     matches: list[RuleMatch] = []
     for rule in _RULES:
         for pattern in rule.patterns:

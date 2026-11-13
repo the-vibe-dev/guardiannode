@@ -42,7 +42,7 @@ The dashboard shows the right hint for whichever provider you pick.
 ## 4. Test it
 
 Click **Send test**. A test message is sent and the result is recorded on the
-**Audit** page (success or the exact error — your password is never logged).
+**Audit** page (success or a fixed failure category; raw server exception text is excluded).
 If it fails, the most common cause is using your normal password instead of an
 app password.
 
@@ -53,8 +53,19 @@ and "monitored" items stay in the dashboard without pinging you. You control
 which categories alert vs. monitor per child in
 [Privacy & alert settings](privacy-and-alert-settings.md).
 
+The **Immediate minimum severity** setting changes which eligible alerts send
+email or a webhook. Lowering it affects new alerts, without sending historical
+alerts. Monitor and Allow categories stay quiet. High/Critical protected safety
+categories retain their existing exception even if you select Critical; the
+notifications switch and notification consent still control automatic alert and
+digest sends. The explicit parent-triggered synthetic test is a separate operation.
+Queued alerts are checked against current settings again before delivery.
+
 ## Prefer push instead of email?
 
-There's also a **Webhook URL** field that works with self-hosted push services
-like [ntfy](https://ntfy.sh) or Gotify — paste your topic URL and immediate
-alerts are POSTed there as JSON. Nothing leaves your network if you self-host it.
+The **Webhook URL** sends the GuardianNode JSON payload to a compatible receiver
+you operate or select. Native ntfy/Gotify adapters are not included; those
+services need a matching adapter or receiver. Use a LAN endpoint with the
+private/internal opt-in to keep this transport local. A remote receiver receives
+the alert summary outside your network. See [Notifications](../NOTIFICATIONS.md)
+for the payload and delivery contract.

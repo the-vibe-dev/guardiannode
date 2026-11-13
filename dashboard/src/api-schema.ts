@@ -935,7 +935,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Alert Actions
+         * @description Latest reported outcomes; a command receipt is not continuous telemetry.
+         */
+        get: operations["list_alert_actions_api_alerts__alert_id__actions_get"];
         put?: never;
         /** Create Confirmed Action */
         post: operations["create_confirmed_action_api_alerts__alert_id__actions_post"];
@@ -1278,6 +1282,23 @@ export interface paths {
         patch: operations["update_notifications_api_settings_notifications_patch"];
         trace?: never;
     };
+    "/api/settings/notifications/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Notification Status */
+        get: operations["get_notification_status_api_settings_notifications_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/family-locale": {
         parameters: {
             query?: never;
@@ -1400,6 +1421,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/storage/capture-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Capture Queue */
+        get: operations["get_capture_queue_api_storage_capture_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Capture Queue */
+        patch: operations["update_capture_queue_api_storage_capture_queue_patch"];
+        trace?: never;
+    };
+    "/api/storage/capture-queue/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clean Capture Queue */
+        post: operations["clean_capture_queue_api_storage_capture_queue_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/storage": {
         parameters: {
             query?: never;
@@ -1499,6 +1555,29 @@ export interface paths {
         put?: never;
         /** Wipe Storage */
         post: operations["wipe_storage_api_storage_wipe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Page Audit
+         * @description Browse retained history with stable keyset pagination and metadata search.
+         *
+         *     The lower time bound is inclusive and the upper bound is exclusive. Search
+         *     deliberately excludes event details, which may contain sensitive evidence.
+         */
+        get: operations["page_audit_api_audit_page_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1616,6 +1695,71 @@ export interface components {
             expires_at: string;
             /** Undo Of */
             undo_of?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Completed At */
+            completed_at?: string | null;
+            execution?: components["schemas"]["ActionExecutionDTO"] | null;
+        };
+        /**
+         * ActionExecutionDTO
+         * @description Allowlisted endpoint diagnostics; no arbitrary agent-provided text.
+         */
+        ActionExecutionDTO: {
+            /** Lease Status */
+            lease_status?: string | null;
+            /** Lease Expires At */
+            lease_expires_at?: string | null;
+            /** Partial Failure */
+            partial_failure?: boolean | null;
+            /** Retryable */
+            retryable?: boolean | null;
+            /** Scan Complete */
+            scan_complete?: boolean | null;
+            /** Persistence Failed */
+            persistence_failed?: boolean | null;
+            /** Rollback Succeeded */
+            rollback_succeeded?: boolean | null;
+            /** Idempotent Replay */
+            idempotent_replay?: boolean | null;
+            /** Blocked */
+            blocked?: boolean | null;
+            /**
+             * Has Error
+             * @default false
+             */
+            has_error: boolean;
+            /** Matched Processes */
+            matched_processes?: number | null;
+            /** Active Pause Leases */
+            active_pause_leases?: number | null;
+            /** Suspended Processes */
+            suspended_processes?: number | null;
+            /** Newly Suspended Processes */
+            newly_suspended_processes?: number | null;
+            /** Resumed Processes */
+            resumed_processes?: number | null;
+            /** Failed Processes */
+            failed_processes?: number | null;
+            /** Skipped Protected Processes */
+            skipped_protected_processes?: number | null;
+            /** Already Suspended Elsewhere */
+            already_suspended_elsewhere?: number | null;
+            /** Uninspectable Processes */
+            uninspectable_processes?: number | null;
+            /** Stale Process Records */
+            stale_process_records?: number | null;
+            /** Pending Resume Processes */
+            pending_resume_processes?: number | null;
+            /** Pending Recovery Processes */
+            pending_recovery_processes?: number | null;
+            /** Legacy Unverified Processes */
+            legacy_unverified_processes?: number | null;
+            /** Undone */
+            undone?: number | null;
         };
         /** ActionRequest */
         ActionRequest: {
@@ -1727,6 +1871,15 @@ export interface components {
              */
             created_at: string;
         };
+        /** AuditPageDTO */
+        AuditPageDTO: {
+            /** Items */
+            items: components["schemas"]["AuditDTO"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Total */
+            total: number;
+        };
         /** BackupSettings */
         BackupSettings: {
             /**
@@ -1789,6 +1942,108 @@ export interface components {
             timestamp?: string | null;
             /** Idempotency Key */
             idempotency_key?: string | null;
+        };
+        /** CaptureQueueCleanup */
+        CaptureQueueCleanup: {
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Deleted Files */
+            deleted_files: number;
+            /** Deleted Bytes */
+            deleted_bytes: number;
+            /** Expired Files */
+            expired_files: number;
+            /** Quota Files */
+            quota_files: number;
+            /** Failed Files */
+            failed_files: number;
+            /** Budget Exhausted */
+            budget_exhausted: boolean;
+            /** Scan Truncated */
+            scan_truncated: boolean;
+        };
+        /** CaptureQueueInventory */
+        CaptureQueueInventory: {
+            /** Files */
+            files: number;
+            /** Frames */
+            frames: number;
+            /** Bytes */
+            bytes: number;
+            /** Oldest At */
+            oldest_at: string | null;
+            /** Orphan Files */
+            orphan_files: number;
+            /** Unsafe Files */
+            unsafe_files: number;
+            /** Scan Truncated */
+            scan_truncated: boolean;
+        };
+        /** CaptureQueuePolicy */
+        CaptureQueuePolicy: {
+            /**
+             * Dead Letter Retention Days
+             * @default 7
+             */
+            dead_letter_retention_days: number;
+            /**
+             * Dead Letter Max Bytes
+             * @default 268435456
+             */
+            dead_letter_max_bytes: number;
+            /**
+             * Cleanup Batch Files
+             * @default 256
+             */
+            cleanup_batch_files: number;
+        };
+        /** CaptureQueuePolicyPatch */
+        CaptureQueuePolicyPatch: {
+            /** Dead Letter Retention Days */
+            dead_letter_retention_days?: number | null;
+            /** Dead Letter Max Bytes */
+            dead_letter_max_bytes?: number | null;
+            /** Cleanup Batch Files */
+            cleanup_batch_files?: number | null;
+        };
+        /** CaptureQueueStatus */
+        CaptureQueueStatus: {
+            policy: components["schemas"]["CaptureQueuePolicy"];
+            worker: components["schemas"]["CaptureQueueWorker"];
+            pending: components["schemas"]["CaptureQueueInventory"];
+            dead_letter: components["schemas"]["CaptureQueueInventory"];
+            cleanup: components["schemas"]["CaptureQueueCleanup"];
+            withdrawal_cleanup: components["schemas"]["CaptureQueueWithdrawal"];
+        };
+        /** CaptureQueueWithdrawal */
+        CaptureQueueWithdrawal: {
+            /** Pending */
+            pending: boolean;
+            /** Requested At */
+            requested_at: string | null;
+            /** Last Attempt At */
+            last_attempt_at: string | null;
+            /** Attempts */
+            attempts: number;
+            /** Remaining Files */
+            remaining_files: number;
+            /** Remaining Events */
+            remaining_events: number;
+            /** Remaining Blobs */
+            remaining_blobs: number;
+            /** Inventory Incomplete */
+            inventory_incomplete: boolean;
+            /** Last Deleted Files */
+            last_deleted_files: number;
+            /** Last Failed Files */
+            last_failed_files: number;
+        };
+        /** CaptureQueueWorker */
+        CaptureQueueWorker: {
+            /** Enabled */
+            enabled: boolean;
+            /** Interval Seconds */
+            interval_seconds: number;
         };
         /**
          * CaptureStatus
@@ -4515,6 +4770,9 @@ export interface operations {
                 status?: string | null;
                 device_id?: string | null;
                 profile_id?: string | null;
+                q?: string | null;
+                since?: string | null;
+                until?: string | null;
                 cursor?: string | null;
                 limit?: number;
             };
@@ -4667,6 +4925,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AlertDTO"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_alert_actions_api_alerts__alert_id__actions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                alert_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionDTO"][];
                 };
             };
             /** @description Validation Error */
@@ -5355,6 +5646,26 @@ export interface operations {
             };
         };
     };
+    get_notification_status_api_settings_notifications_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     get_family_locale_api_settings_family_locale_get: {
         parameters: {
             query?: never;
@@ -5605,6 +5916,79 @@ export interface operations {
             };
         };
     };
+    get_capture_queue_api_storage_capture_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureQueueStatus"];
+                };
+            };
+        };
+    };
+    update_capture_queue_api_storage_capture_queue_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptureQueuePolicyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureQueueStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clean_capture_queue_api_storage_capture_queue_cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureQueueStatus"];
+                };
+            };
+        };
+    };
     storage_overview_api_storage_get: {
         parameters: {
             query?: never;
@@ -5747,6 +6131,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    page_audit_api_audit_page_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                action?: string | null;
+                actor?: string | null;
+                q?: string | null;
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPageDTO"];
                 };
             };
             /** @description Validation Error */

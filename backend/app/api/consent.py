@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep, require_recent_auth
-from app.db.models import ChildProfile, ConsentRecord, Device, Event, Setting, User
-from app.services import consent, purge
+from app.api.deps import current_user, get_db_dep, parent_user, require_recent_auth
+from app.db.models import ChildProfile, ConsentRecord, Device, Event, EvidenceBlob, Setting, User
+from app.services import capture_queue, consent, purge
 from app.services.audit import log_action
 
 router = APIRouter(tags=["consent"])
@@ -63,7 +64,7 @@ def grant_consent(
     req: ConsentGrantRequest,
     request: Request,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
     if req.notice_version != consent.NOTICE_VERSION:
@@ -94,11 +95,12 @@ def grant_consent(
 
 
 @router.post("/consent/withdraw")
+@capture_queue.serialized
 def withdraw_consent(
     req: ConsentWithdrawalRequest,
     request: Request,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
     if req.evidence_disposition not in {"retain", "delete"}:
@@ -117,9 +119,13 @@ def withdraw_consent(
         device.paired = False
         device.token_hash = None
         device.status = "consent_withdrawn"
-    deletion = None
+    deletion: dict[str, Any] | None = None
     if req.evidence_disposition == "delete":
         deletion = purge.delete_events(db, [item[0] for item in db.query(Event.event_id).all()])
+        deletion["blobs"] += purge.delete_orphaned_blob_files(db)
+        db.flush()
+        deletion["remaining_events"] = db.query(Event).count()
+        deletion["remaining_blobs"] = db.query(EvidenceBlob).count()
     log_action(
         db,
         actor=str(user.id),
@@ -128,7 +134,21 @@ def withdraw_consent(
         details={"evidence_disposition": req.evidence_disposition, "deletion": deletion},
         source_ip=request.client.host if request.client else None,
     )
-    db.commit()
+    with capture_queue.file_lock:
+        if req.evidence_disposition == "delete":
+            # The durable file-deletion request and device revocation must
+            # survive a crash before any queued capture is unlinked.
+            capture_queue.request_withdrawal_cleanup(db, row.consent_id)
+        db.commit()
+        if req.evidence_disposition == "delete":
+            pending = capture_queue.retry_withdrawal_cleanup(db)
+            deletion = {**(deletion or {}), "pending_captures": pending}
+            log_action(
+                db, actor=str(user.id), action="consent.pending_evidence_purge",
+                target=row.consent_id, details=pending,
+                source_ip=request.client.host if request.client else None,
+            )
+            db.commit()
     return {**_public(row), "deletion": deletion}
 
 

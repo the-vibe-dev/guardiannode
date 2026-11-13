@@ -11,6 +11,7 @@ from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
@@ -167,6 +168,7 @@ class DurableScreenshotQueue:
                     "CREATE INDEX IF NOT EXISTS ix_screenshot_queue_ready "
                     "ON screenshot_queue(next_attempt_at, lease_until, created_at)"
                 )
+                self._enforce_limits(conn)
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, name: str, ddl: str) -> None:
@@ -212,6 +214,7 @@ class DurableScreenshotQueue:
         with closing(self._connect()) as conn:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
+                self._prune_expired(conn, now=now)
                 row = conn.execute(
                     """
                     SELECT item_id
@@ -318,18 +321,59 @@ class DurableScreenshotQueue:
 
     def qsize(self) -> int:
         with closing(self._connect()) as conn:
-            return int(conn.execute("SELECT count(*) FROM screenshot_queue").fetchone()[0])
+            with conn:
+                self._prune_expired(conn)
+                return int(conn.execute("SELECT count(*) FROM screenshot_queue").fetchone()[0])
 
     def full(self) -> bool:
         return self.qsize() >= self.max_items
 
+    def purge(self) -> None:
+        """Remove pending evidence when the server withdraws capture permission."""
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute("DELETE FROM screenshot_queue")
+
+    def redact_context(self) -> None:
+        """Remove separately collected application/URL context from queued frames."""
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                for item_id, nonce, ciphertext in conn.execute(
+                    "SELECT item_id, payload_nonce, payload_ciphertext FROM screenshot_queue"
+                ).fetchall():
+                    try:
+                        payload = _decode_payload(AESGCM(self._key).decrypt(
+                            nonce, ciphertext, item_id.encode("ascii"),
+                        ))
+                        for key in ("app_name", "window_title", "url", "metadata"):
+                            payload.pop(key, None)
+                        plain = _encode_payload(payload)
+                    except (InvalidTag, ValueError, TypeError, KeyError):
+                        # Unreadable evidence cannot be reliably minimized or
+                        # delivered; discard it without logging its contents.
+                        conn.execute("DELETE FROM screenshot_queue WHERE item_id = ?", (item_id,))
+                        continue
+                    fresh_nonce = os.urandom(12)
+                    redacted = AESGCM(self._key).encrypt(fresh_nonce, plain, item_id.encode("ascii"))
+                    conn.execute(
+                        "UPDATE screenshot_queue SET payload_nonce = ?, payload_ciphertext = ?, "
+                        "payload_size = ? WHERE item_id = ?",
+                        (fresh_nonce, redacted, len(plain), item_id),
+                    )
+
     def task_done(self) -> None:
         return None
 
-    def _enforce_limits(self, conn: sqlite3.Connection) -> None:
-        cutoff = time.time() - self.max_age_seconds if self.max_age_seconds > 0 else 0
-        if cutoff:
+    def _prune_expired(self, conn: sqlite3.Connection, *, now: float | None = None) -> None:
+        # Enforce retention even when capture is paused or the machine was off.
+        # Pruning only on insertion allowed old evidence to upload on restart.
+        if self.max_age_seconds > 0:
+            cutoff = (time.time() if now is None else now) - self.max_age_seconds
             conn.execute("DELETE FROM screenshot_queue WHERE created_at < ?", (cutoff,))
+
+    def _enforce_limits(self, conn: sqlite3.Connection) -> None:
+        self._prune_expired(conn)
         while True:
             count, total = conn.execute(
                 "SELECT count(*), coalesce(sum(payload_size), 0) FROM screenshot_queue"

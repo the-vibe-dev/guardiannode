@@ -4,14 +4,15 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import PureWindowsPath
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, or_
+from sqlalchemy import String, and_, cast, or_
 from sqlalchemy.orm import Session
 from ulid import ULID
 
-from app.api.deps import current_user, get_db_dep, require_recent_auth
+from app.api.deps import current_user, get_db_dep, parent_user, require_recent_auth
 from app.db.models import Alert, DeviceCommand, Event, RiskResult, User
 from app.services import encryption, purge
 from app.services.audit import log_action
@@ -74,29 +75,57 @@ def list_alerts(
     status: str | None = None,
     device_id: str | None = None,
     profile_id: str | None = None,
+    q: str | None = Query(default=None, max_length=200),
+    since: datetime | None = None,
+    until: datetime | None = None,
     cursor: str | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db_dep),
     _: User = Depends(current_user),
 ):
-    q = db.query(Alert)
+    for name, value in (("since", since), ("until", until)):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise HTTPException(422, f"{name} must include a timezone offset")
+    if since is not None:
+        since = since.astimezone(UTC)
+    if until is not None:
+        until = until.astimezone(UTC)
+    if since is not None and until is not None and since >= until:
+        raise HTTPException(422, "since must be earlier than until")
+
+    query = db.query(Alert)
     if severity:
-        q = q.filter(Alert.severity == severity)
+        query = query.filter(Alert.severity == severity)
     if status:
-        q = q.filter(Alert.status == status)
+        query = query.filter(Alert.status == status)
     if device_id:
-        q = q.filter(Alert.device_id == device_id)
+        query = query.filter(Alert.device_id == device_id)
     if profile_id:
-        q = q.filter(Alert.profile_id == profile_id)
+        query = query.filter(Alert.profile_id == profile_id)
+    if since is not None:
+        query = query.filter(Alert.created_at >= since)
+    if until is not None:
+        query = query.filter(Alert.created_at < until)
+    search = (q or "").strip()
+    if search:
+        # Search the complete retained feed before pagination. Do not decrypt or
+        # search screenshot/OCR evidence just to populate the overview.
+        query = query.outerjoin(RiskResult, Alert.risk_id == RiskResult.risk_id).outerjoin(
+            Event, RiskResult.event_id == Event.event_id
+        ).filter(or_(
+            RiskResult.summary.icontains(search, autoescape=True),
+            Event.app_name.icontains(search, autoescape=True),
+            cast(RiskResult.categories, String).icontains(search, autoescape=True),
+        ))
     if cursor:
         anchor = db.get(Alert, cursor)
         if anchor is None:
             raise HTTPException(400, "Invalid alert cursor")
-        q = q.filter(or_(
+        query = query.filter(or_(
             Alert.created_at < anchor.created_at,
             and_(Alert.created_at == anchor.created_at, Alert.alert_id < anchor.alert_id),
         ))
-    rows_with_extra = q.order_by(
+    rows_with_extra = query.order_by(
         Alert.created_at.desc(), Alert.alert_id.desc()
     ).limit(limit + 1).all()
     rows = rows_with_extra[:limit]
@@ -262,7 +291,7 @@ def take_action(
     alert_id: str,
     req: ActionRequest,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
 ):
     a = db.get(Alert, alert_id)
     if a is None:
@@ -279,12 +308,16 @@ def take_action(
     if req.action == "notify":
         from app.services import notifications
 
-        notifications.enqueue(
+        job = notifications.enqueue(
             db,
             alert=a,
             risk_summary=risk.summary if risk is not None else "",
             immediate=True,
         )
+        if job is None:
+            raise HTTPException(
+                409, "This alert does not qualify for immediate delivery under the current notification and profile settings"
+            )
     elif req.action == "escalate":
         a.status = "escalated"
         a.reviewed_by = str(user.id)
@@ -313,6 +346,35 @@ class ConfirmedActionRequest(BaseModel):
     confirmed_preview: str | None = Field(default=None, max_length=2048)
 
 
+class ActionExecutionDTO(BaseModel):
+    """Allowlisted endpoint diagnostics; no arbitrary agent-provided text."""
+
+    lease_status: str | None = None
+    lease_expires_at: datetime | None = None
+    partial_failure: bool | None = None
+    retryable: bool | None = None
+    scan_complete: bool | None = None
+    persistence_failed: bool | None = None
+    rollback_succeeded: bool | None = None
+    idempotent_replay: bool | None = None
+    blocked: bool | None = None
+    has_error: bool = False
+    matched_processes: int | None = None
+    active_pause_leases: int | None = None
+    suspended_processes: int | None = None
+    newly_suspended_processes: int | None = None
+    resumed_processes: int | None = None
+    failed_processes: int | None = None
+    skipped_protected_processes: int | None = None
+    already_suspended_elsewhere: int | None = None
+    uninspectable_processes: int | None = None
+    stale_process_records: int | None = None
+    pending_resume_processes: int | None = None
+    pending_recovery_processes: int | None = None
+    legacy_unverified_processes: int | None = None
+    undone: int | None = None
+
+
 class ActionDTO(BaseModel):
     action_id: str
     alert_id: str | None
@@ -322,6 +384,9 @@ class ActionDTO(BaseModel):
     preview: str
     expires_at: datetime
     undo_of: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+    execution: ActionExecutionDTO | None = None
 
 
 def _canonical_executable(value: str | None) -> str:
@@ -364,6 +429,35 @@ def _action_payload(req: ConfirmedActionRequest) -> tuple[dict, str]:
 
 
 def _command_dto(command: DeviceCommand) -> ActionDTO:
+    execution = None
+    result = command.result
+    if isinstance(result, dict) and result:
+        clean: dict[str, Any] = {"has_error": bool(result.get("error"))}
+        for field in (
+            "partial_failure", "retryable", "scan_complete", "persistence_failed",
+            "rollback_succeeded", "idempotent_replay", "blocked",
+        ):
+            if type(result.get(field)) is bool:
+                clean[field] = result[field]
+        for field in (
+            "matched_processes", "active_pause_leases", "suspended_processes", "newly_suspended_processes",
+            "resumed_processes", "failed_processes", "skipped_protected_processes",
+            "already_suspended_elsewhere", "uninspectable_processes", "stale_process_records",
+            "pending_resume_processes", "pending_recovery_processes", "legacy_unverified_processes", "undone",
+        ):
+            value = result.get(field)
+            if type(value) is int and 0 <= value <= 10_000_000:
+                clean[field] = value
+        lease_status = result.get("lease_status")
+        if isinstance(lease_status, str) and lease_status in {"active", "expired", "undone", "legacy_unverified"}:
+            clean["lease_status"] = lease_status
+        deadline = result.get("expires_at")
+        if isinstance(deadline, (int, float)) and not isinstance(deadline, bool):
+            try:
+                clean["lease_expires_at"] = datetime.fromtimestamp(deadline, UTC)
+            except (ValueError, OverflowError, OSError):
+                pass
+        execution = ActionExecutionDTO(**clean)
     return ActionDTO(
         action_id=command.command_id,
         alert_id=command.alert_id,
@@ -373,7 +467,26 @@ def _command_dto(command: DeviceCommand) -> ActionDTO:
         preview=command.preview,
         expires_at=command.expires_at,
         undo_of=command.undo_of,
+        created_at=command.created_at,
+        completed_at=command.completed_at,
+        execution=execution,
     )
+
+
+@router.get("/{alert_id}/actions", response_model=list[ActionDTO])
+def list_alert_actions(
+    alert_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db_dep),
+    _: User = Depends(parent_user),
+):
+    """Latest reported outcomes; a command receipt is not continuous telemetry."""
+    if db.get(Alert, alert_id) is None:
+        raise HTTPException(404, "Alert not found")
+    commands = db.query(DeviceCommand).filter(DeviceCommand.alert_id == alert_id).order_by(
+        DeviceCommand.created_at.desc(), DeviceCommand.command_id.desc(),
+    ).limit(limit).all()
+    return [_command_dto(command) for command in commands]
 
 
 @router.post("/{alert_id}/actions", response_model=ActionDTO)
@@ -382,7 +495,7 @@ def create_confirmed_action(
     req: ConfirmedActionRequest,
     request: Request,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
     alert = db.get(Alert, alert_id)
@@ -431,7 +544,7 @@ def undo_action(
     action_id: str,
     request: Request,
     db: Session = Depends(get_db_dep),
-    user: User = Depends(current_user),
+    user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
     original = db.get(DeviceCommand, action_id)
@@ -444,7 +557,11 @@ def undo_action(
         device_id=original.device_id,
         alert_id=original.alert_id,
         command_type="undo_action",
-        payload={"original_action": original.command_type, **(original.payload or {})},
+        payload={
+            **(original.payload or {}),
+            "original_action": original.command_type,
+            "original_command_id": original.command_id,
+        },
         preview=f"Undo: {original.preview}",
         status="queued",
         created_by=user.id,

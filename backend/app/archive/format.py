@@ -25,7 +25,13 @@ from app import __version__
 from app import settings as settings_mod
 from app.archive import crypto
 from app.archive.identity import identity_path, load_or_create
-from app.db.maintenance import backup_database, database_schema_revision, sqlite_path_from_url
+from app.db.maintenance import (
+    DatabaseMaintenanceError,
+    backup_database,
+    database_schema_revision,
+    sqlite_path_from_url,
+    validate_database_schema,
+)
 from app.services import encryption
 
 FORMAT = "guardiannode-archive-v2"
@@ -592,6 +598,12 @@ def restore_archive(
         if manifest.get("export_mode") != "portable":
             raise ArchiveError("clean-host restore requires a portable archive")
         database = extracted / "database.sqlite3"
+        try:
+            embedded_revision = validate_database_schema(database)
+        except DatabaseMaintenanceError as exc:
+            raise ArchiveError(str(exc)) from exc
+        if manifest.get("schema_version") != embedded_revision:
+            raise ArchiveError("archive schema revision does not match its database")
         with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
             integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
         if integrity != ["ok"]:

@@ -78,6 +78,10 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             PHASH_THRESHOLD = int(getattr(cfg, "phash_threshold", 0) or 2)
             FULL_CHANGE_THRESHOLD = int(getattr(cfg, "full_screen_change_threshold", 0) or 10)
 
+            if not cfg.monitoring_enabled and not cfg.dry_run:
+                await asyncio.sleep(cfg.ocr_cadence_seconds)
+                continue
+
             if _is_locally_paused():
                 log.debug("monitoring paused locally; skipping capture")
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
@@ -86,6 +90,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             active = get_active_process()
             win = get_active_window()
             app_name = active.name if active else None
+            log_app_name = app_name if cfg.apps_and_urls_enabled else None
             win_title = win.title if win else None
             active_rect = win.rect if win else None
             # Full-screen mode means the visible desktop is the monitoring
@@ -96,7 +101,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             )
 
             if not in_monitored and not cfg.full_screen_capture_enabled:
-                log.debug("active app is not monitored; skipping capture: %s", app_name)
+                log.debug("active app is not monitored; skipping capture: %s", log_app_name)
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
 
@@ -136,7 +141,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
             if cfg.dry_run:
                 log.info(
                     "dry-run: app=%s monitored=%s phash_dist=%d full_phash_dist=%d send=%s bytes=%d",
-                    app_name, in_monitored, dist, full_dist, send, len(shot.jpeg_bytes),
+                    log_app_name, in_monitored, dist, full_dist, send, len(shot.jpeg_bytes),
                 )
 
             if send:
@@ -146,8 +151,8 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 sent_count += 1
                 payload = {
                     "image_bytes": shot.jpeg_bytes,
-                    "app_name": app_name,
-                    "window_title": win_title,
+                    "app_name": app_name if cfg.apps_and_urls_enabled else None,
+                    "window_title": win_title if cfg.apps_and_urls_enabled else None,
                     "profile_id": cfg.profile_id,
                     "age_group": cfg.age_group,
                     "capture_scope": capture_scope,
@@ -178,7 +183,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                                 break
                     log.info(
                         "queued frame: app=%s monitored=%s phash_dist=%d full_phash_dist=%d bytes=%d%s",
-                        app_name, in_monitored, dist, full_dist, len(shot.jpeg_bytes),
+                        log_app_name, in_monitored, dist, full_dist, len(shot.jpeg_bytes),
                         f" (dropped {dropped} stale)" if dropped else "",
                     )
             else:
@@ -199,21 +204,34 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
         await asyncio.sleep(cfg.ocr_cadence_seconds)
 
 
-async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asyncio.Queue) -> None:
+async def screenshot_sender_loop(
+    client: BackendClient,
+    screenshot_queue: asyncio.Queue,
+    *,
+    monitoring_config: AgentConfig | None = None,
+) -> None:
     """Drains the screenshot queue, posts each frame to /api/events/screenshot.
     Retries on transient failure with bounded backoff.
     """
     backoff = 1.0
     while True:
+        if monitoring_config is not None and not monitoring_config.monitoring_enabled:
+            await asyncio.sleep(2)
+            continue
         payload = None
         try:
             payload = await screenshot_queue.get()
             handled = False
             try:
+                if monitoring_config is not None and not monitoring_config.monitoring_enabled:
+                    _drop_payload(screenshot_queue, payload, reason="monitoring disabled")
+                    handled = True
+                    continue
                 result = await client.send_screenshot(
                     image_bytes=payload["image_bytes"],
-                    app_name=payload.get("app_name"),
-                    window_title=payload.get("window_title"),
+                    app_name=payload.get("app_name") if monitoring_config is None or monitoring_config.apps_and_urls_enabled else None,
+                    window_title=payload.get("window_title") if monitoring_config is None or monitoring_config.apps_and_urls_enabled else None,
+                    url=payload.get("url") if monitoring_config is None or monitoring_config.apps_and_urls_enabled else None,
                     profile_id=payload.get("profile_id"),
                     age_group=payload.get("age_group", "10_13"),
                     capture_scope=payload.get("capture_scope", "monitored_app"),
@@ -226,8 +244,7 @@ async def screenshot_sender_loop(client: BackendClient, screenshot_queue: asynci
                 # The backend stores the frame and classifies it in the
                 # background, so this returns immediately with a queued ack.
                 log.info(
-                    "ship app=%s bytes=%d → %s",
-                    payload.get("app_name"),
+                    "ship bytes=%d → %s",
                     len(payload["image_bytes"]),
                     result.get("status", "ok"),
                 )
@@ -381,6 +398,8 @@ async def heartbeat_loop(client: BackendClient, screenshot_queue: asyncio.Queue)
 
 
 def _apply_capture_config(cfg: AgentConfig, cc: dict) -> None:
+    cfg.monitoring_enabled = cc.get("monitoring_enabled") is True
+    cfg.apps_and_urls_enabled = cc.get("apps_and_urls_enabled") is True
     if isinstance(cc.get("cadence_seconds"), (int, float)):
         cfg.ocr_cadence_seconds = max(2, int(cc["cadence_seconds"]))
     if isinstance(cc.get("phash_threshold"), (int, float)):
@@ -401,13 +420,27 @@ def _apply_capture_config(cfg: AgentConfig, cc: dict) -> None:
     )
 
 
-async def capture_config_loop(client: BackendClient, cfg: AgentConfig) -> None:
+async def capture_config_loop(
+    client: BackendClient, cfg: AgentConfig, screenshot_queue: asyncio.Queue | None = None,
+) -> None:
     """Poll the backend for the parent's capture policy and apply it live."""
     while True:
         try:
             cc = await client.get_capture_config()
             if cc:
                 _apply_capture_config(cfg, cc)
+                if not cfg.monitoring_enabled and screenshot_queue is not None:
+                    purge = getattr(screenshot_queue, "purge", None)
+                    if callable(purge):
+                        purge()
+                    else:
+                        while not screenshot_queue.empty():
+                            screenshot_queue.get_nowait()
+                            screenshot_queue.task_done()
+                elif not cfg.apps_and_urls_enabled and screenshot_queue is not None:
+                    redact = getattr(screenshot_queue, "redact_context", None)
+                    if callable(redact):
+                        redact()
         except Exception as e:
             log.debug("capture-config poll error: %s", e)
         await asyncio.sleep(120)
@@ -426,6 +459,22 @@ async def broker_capture_config_loop(cfg: AgentConfig) -> None:
         except Exception as e:
             log.debug("broker capture-config poll error: %s", e)
         await asyncio.sleep(10)
+
+
+async def _initial_broker_capture_config(cfg: AgentConfig) -> None:
+    """Apply the broker's current policy before capturing the first frame."""
+    from src.broker_client import BrokerClient
+
+    client = BrokerClient()
+    while True:
+        try:
+            cc = await asyncio.to_thread(client.capture_config)
+            if cc:
+                _apply_capture_config(cfg, cc)
+                return
+        except Exception as exc:
+            log.warning("waiting for broker capture policy: %s", exc)
+        await asyncio.sleep(2)
 
 
 async def refresh_pairing_credentials(
@@ -478,6 +527,7 @@ async def main_async(cfg: AgentConfig, *, broker_capture_authorized: bool = True
         from src.broker_client import BrokerScreenshotQueue
 
         screenshot_queue = BrokerScreenshotQueue()
+        await _initial_broker_capture_config(cfg)
         log.info(
             "agent started in broker mode: cadence=%ds monitored_apps=%d",
             cfg.ocr_cadence_seconds,
@@ -498,7 +548,7 @@ async def main_async(cfg: AgentConfig, *, broker_capture_authorized: bool = True
     backend_url = creds.get("backend_url", cfg.backend_url)
     token = creds.get("device_token", cfg.device_token)
     if not token and not cfg.dry_run:
-        log.warning("no device token — agent will only queue events locally until paired")
+        log.warning("no device token — monitoring waits for enrollment and server permission")
 
     if cfg.durable_queue_enabled:
         screenshot_queue = DurableScreenshotQueue(
@@ -517,9 +567,9 @@ async def main_async(cfg: AgentConfig, *, broker_capture_authorized: bool = True
 
     await asyncio.gather(
         capture_loop(cfg, screenshot_queue),
-        screenshot_sender_loop(client, screenshot_queue),
+        screenshot_sender_loop(client, screenshot_queue, monitoring_config=cfg),
         heartbeat_loop(client, screenshot_queue),
-        capture_config_loop(client, cfg),
+        capture_config_loop(client, cfg, screenshot_queue),
         pairing_monitor_loop(client, cfg),
     )
 

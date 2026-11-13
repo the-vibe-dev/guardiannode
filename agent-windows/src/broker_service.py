@@ -17,10 +17,12 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
 from src import __version__
+from src.backend_client import BackendClient
 from src.broker_protocol import (
     PIPE_NAME,
     PIPE_SECURITY_SDDL,
@@ -70,6 +72,8 @@ def broker_bootstrap_token_path() -> Path:
 class QueueLike(Protocol):
     def put_nowait(self, payload: dict[str, Any]) -> None: ...
     def qsize(self) -> int: ...
+    def purge(self) -> None: ...
+    def redact_context(self) -> None: ...
 
 
 @dataclass
@@ -106,15 +110,34 @@ class BrokerCommandHandler:
         legacy_credential_path: Path | None = None,
         replay_cache: RequestReplayCache | None = None,
         capture_config: dict[str, Any] | None = None,
+        capture_config_path: Path | None = None,
     ):
         self.queue = queue
         self.pause_path = pause_path or broker_pause_path()
         self.credential_path = credential_path or broker_device_path()
         self.legacy_credential_path = legacy_credential_path or default_device_path()
         self.replay_cache = replay_cache or RequestReplayCache()
-        self._capture_config_lock = threading.Lock()
-        self._capture_config: dict[str, Any] = {}
-        self.set_capture_config(capture_config or {})
+        self._capture_config_lock = threading.RLock()
+        self.capture_config_path = capture_config_path or self.pause_path.with_name("capture_config.json")
+        self._capture_config = self._sanitize_capture_config(capture_config or {})
+        self._capture_config_persisted = False
+        self._privacy_cleanup_pending = False
+        try:
+            cached = json.loads(self.capture_config_path.read_text("utf-8"))
+            if not isinstance(cached, dict):
+                raise ValueError("capture policy must be an object")
+            self._capture_config.update(self._sanitize_capture_config(cached))
+            self._capture_config_persisted = True
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError):
+            # An unreadable previously configured policy must not silently
+            # expand the capture boundary back to the whole desktop.
+            self._capture_config["full_screen_capture_enabled"] = False
+            self._capture_config["monitoring_enabled"] = False
+            log.warning("could not load cached capture policy; restricting capture to monitored apps")
+        if not self.apps_and_urls_enabled:
+            self.queue.redact_context()
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -146,6 +169,7 @@ class BrokerCommandHandler:
                 "device_id": creds.get("device_id") or "",
                 "backend_url": creds.get("backend_url") or "",
                 "queue_depth": self.queue.qsize(),
+                "monitoring_enabled": self.monitoring_enabled,
                 "paused": pause.paused,
                 "paused_until": pause.paused_until,
             }
@@ -153,14 +177,25 @@ class BrokerCommandHandler:
             with self._capture_config_lock:
                 return dict(self._capture_config)
         if request.action == "submit_screenshot":
-            payload = self._screenshot_payload(request.payload)
-            self.queue.put_nowait(payload)
-            return {"status": "queued", "queue_depth": self.queue.qsize()}
+            # One lock spans policy checks, minimization, and insertion so a
+            # simultaneous opt-out cannot race an old-context frame into disk.
+            with self._capture_config_lock:
+                if not self.monitoring_enabled:
+                    return {"status": "monitoring_disabled", "queue_depth": self.queue.qsize()}
+                if self._load_pause().paused:
+                    return {"status": "paused", "queue_depth": self.queue.qsize()}
+                payload = self._screenshot_payload(request.payload)
+                self.queue.put_nowait(payload)
+                return {"status": "queued", "queue_depth": self.queue.qsize()}
         raise ProtocolError("unsupported action")
 
-    def set_capture_config(self, payload: dict[str, Any]) -> None:
-        """Cache only bounded, non-secret capture controls for session agents."""
-        clean: dict[str, Any] = {}
+    @staticmethod
+    def _sanitize_capture_config(payload: dict[str, Any]) -> dict[str, Any]:
+        """Keep only bounded, non-secret capture controls for session agents."""
+        clean: dict[str, Any] = {
+            "monitoring_enabled": payload.get("monitoring_enabled") is True,
+            "apps_and_urls_enabled": payload.get("apps_and_urls_enabled") is True,
+        }
         level = payload.get("level")
         if level in {"tight", "balanced", "leeway", "local"}:
             clean["level"] = level
@@ -177,8 +212,67 @@ class BrokerCommandHandler:
         full_screen = payload.get("full_screen_capture_enabled")
         if isinstance(full_screen, bool):
             clean["full_screen_capture_enabled"] = full_screen
+        if "paused_until" in payload:
+            paused_until = payload["paused_until"]
+            if paused_until is None:
+                clean["paused_until"] = None
+            elif isinstance(paused_until, str):
+                # SQLite-backed API timestamps may be naive; its pause
+                # contract treats those as UTC, never the child's local time.
+                until = datetime.fromisoformat(paused_until)
+                if until.tzinfo is None:
+                    until = until.replace(tzinfo=timezone.utc)
+                clean["paused_until"] = until.astimezone(timezone.utc).isoformat()
+            else:
+                raise ValueError("paused_until must be an ISO timestamp or null")
+        return clean
+
+    def set_capture_config(self, payload: dict[str, Any]) -> None:
+        clean = self._sanitize_capture_config(payload)
         with self._capture_config_lock:
+            if (
+                clean == self._capture_config
+                and self._capture_config_persisted
+                and not self._privacy_cleanup_pending
+                and self.capture_config_path.exists()
+            ):
+                return
+            # Collection must stop even when the disk cannot save the new
+            # choice. Apply memory state first; persistence is not permission.
             self._capture_config = clean
+            try:
+                self.capture_config_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = self.capture_config_path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(clean, sort_keys=True), encoding="utf-8")
+                if os.name != "nt":
+                    os.chmod(temporary, 0o600)
+                temporary.replace(self.capture_config_path)
+                self._capture_config_persisted = True
+            except OSError:
+                self._capture_config_persisted = False
+                log.warning("could not persist capture policy; applying current server choices in memory")
+                # Avoid loading an older permissive cache after restart when
+                # replacing it failed (for example, after disk exhaustion).
+                try:
+                    self.capture_config_path.unlink(missing_ok=True)
+                except OSError:
+                    log.error("could not remove stale capture policy cache")
+            self._privacy_cleanup_pending = True
+            if not clean["monitoring_enabled"]:
+                self.queue.purge()
+            elif not clean["apps_and_urls_enabled"]:
+                self.queue.redact_context()
+            self._privacy_cleanup_pending = False
+
+    @property
+    def monitoring_enabled(self) -> bool:
+        with self._capture_config_lock:
+            return self._capture_config.get("monitoring_enabled") is True
+
+    @property
+    def apps_and_urls_enabled(self) -> bool:
+        with self._capture_config_lock:
+            return self._capture_config.get("apps_and_urls_enabled") is True
 
     def ensure_broker_credentials(self) -> dict[str, Any]:
         creds = load_credentials(self.credential_path)
@@ -217,9 +311,19 @@ class BrokerCommandHandler:
             value = payload.get(key)
             if value:
                 out[key] = value
+        if not self.apps_and_urls_enabled:
+            for key in ("app_name", "window_title", "url"):
+                out.pop(key, None)
         return out
 
     def _load_pause(self) -> PauseState:
+        with self._capture_config_lock:
+            if "paused_until" in self._capture_config:
+                until = self._capture_config["paused_until"]
+                return PauseState(
+                    paused_until=int(datetime.fromisoformat(until).timestamp()) if until else 0,
+                    actor="parent",
+                )
         try:
             data = json.loads(self.pause_path.read_text("utf-8"))
             return PauseState(
@@ -473,29 +577,80 @@ class WindowsNamedPipeServer:
                 pass
 
 
+class BrokerBackendClient(BackendClient):
+    """Reload the broker-owned enrollment before each upload attempt."""
+
+    def __init__(self, handler: BrokerCommandHandler, cfg: AgentConfig):
+        super().__init__(cfg.backend_url, "")
+        self.handler = handler
+
+    async def send_screenshot(self, **kwargs) -> dict:
+        if not self.handler.monitoring_enabled:
+            raise RuntimeError("monitoring is disabled by the server policy")
+        if not self.handler.apps_and_urls_enabled:
+            for key in ("app_name", "window_title", "url"):
+                kwargs[key] = None
+        creds = self.handler.ensure_broker_credentials()
+        if not creds.get("device_token"):
+            raise RuntimeError("device enrollment is pending")
+        self.base_url = str(creds["backend_url"]).rstrip("/")
+        self.token = str(creds["device_token"])
+        self.ca_path = str(creds.get("ca_path") or "") or None
+        return await super().send_screenshot(**kwargs)
+
+
+async def _run_pairing_monitor(handler: BrokerCommandHandler) -> None:
+    """Recover a transient installation-time outage without restarting Windows."""
+    while True:
+        try:
+            if not handler.ensure_broker_credentials().get("device_token"):
+                await asyncio.to_thread(
+                    bootstrap_pairing,
+                    socket.gethostname(),
+                    __version__,
+                    pending_path=pending_pairing_path(),
+                    device_path=handler.credential_path,
+                    bootstrap_token_path=broker_bootstrap_token_path(),
+                    attempts=1,
+                    retry_delay=0.0,
+                )
+        except Exception as exc:
+            log.warning("broker pairing retry failed: %s", exc)
+        await asyncio.sleep(30)
+
+
 async def _run_sender(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
-    from src.backend_client import BackendClient
 
     while True:
         creds = handler.ensure_broker_credentials()
         token = str(creds.get("device_token") or "")
-        backend_url = str(creds.get("backend_url") or cfg.backend_url)
-        if not token:
+        if not token or not handler.monitoring_enabled:
             await asyncio.sleep(10)
             continue
         await screenshot_sender_loop(
-            BackendClient(backend_url, token, ca_path=creds.get("ca_path")),
+            BrokerBackendClient(handler, cfg),
             handler.queue,
         )  # type: ignore[arg-type]
 
 
 async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -> None:
     from src.backend_client import BackendClient
-    from src.enforcement import WindowsEnforcer
+    from src.enforcement import EnforcementStateError, WindowsEnforcer
 
     enforcer = WindowsEnforcer()
     while True:
-        enforcer.reconcile()
+        try:
+            recovery = enforcer.reconcile()
+            if recovery and recovery.get("partial_failure"):
+                log.warning(
+                    "endpoint recovery incomplete: failed=%s pending_resume=%s legacy_unverified=%s",
+                    recovery.get("failed_processes", 0), recovery.get("pending_resume_processes", 0),
+                    recovery.get("legacy_unverified_processes", 0),
+                )
+        except Exception:
+            # An action-state/disk error must not kill the policy/heartbeat
+            # task, leaving uploads running with an indefinitely stale policy.
+            log.exception("could not reconcile endpoint actions; continuing policy polling")
         creds = handler.ensure_broker_credentials()
         token = str(creds.get("device_token") or "")
         if not token:
@@ -515,9 +670,13 @@ async def _run_device_control(handler: BrokerCommandHandler, cfg: AgentConfig) -
                 command_id = str(command.get("command_id") or "")
                 try:
                     result = enforcer.execute(command)
-                    await client.report_command(command_id, "succeeded", result)
+                    status = "failed" if result.get("partial_failure") else "succeeded"
+                    await client.report_command(command_id, status, result)
                 except ValueError as exc:
                     await client.report_command(command_id, "rejected", {"error": str(exc)[:500]})
+                except EnforcementStateError as exc:
+                    log.exception("device command %s has incomplete recovery state", command_id)
+                    await client.report_command(command_id, "failed", {**exc.result, "error": str(exc)[:500]})
                 except Exception as exc:
                     log.exception("device command %s failed", command_id)
                     await client.report_command(command_id, "failed", {"error": str(exc)[:500]})
@@ -605,6 +764,7 @@ def cli() -> None:
         raise SystemExit("GuardianNode endpoint broker service currently runs only on Windows")
 
     loop = asyncio.new_event_loop()
+    loop.create_task(_run_pairing_monitor(handler))
     loop.create_task(_run_sender(handler, cfg))
     loop.create_task(_run_device_control(handler, cfg))
     threading.Thread(target=loop.run_forever, name="GuardianNodeBrokerSender", daemon=True).start()

@@ -4,8 +4,8 @@ GuardianNode bundles or directly depends on the following third-party
 components. Each component retains its original license.
 
 <!-- third-party-notices:acknowledged
-backend: fastapi, uvicorn, pydantic, pydantic-settings, sqlalchemy, alembic, cryptography, argon2-cffi, httpx, python-multipart, pyyaml, zeroconf, qrcode, pillow, pytesseract, python-ulid, itsdangerous, jinja2
-agent: httpx, pyyaml, psutil, mss, pillow, pydantic, argon2-cffi, cryptography, python-ulid, zeroconf, pywin32, pystray, opencv-python, pytesseract
+backend: fastapi, uvicorn, pydantic, pydantic-settings, sqlalchemy, alembic, cryptography, argon2-cffi, httpx, certifi, python-multipart, pyyaml, zeroconf, qrcode, pillow, pytesseract, python-ulid, itsdangerous, jinja2
+agent: httpx, certifi, pyyaml, psutil, mss, pillow, pydantic, argon2-cffi, cryptography, python-ulid, zeroconf, pywin32, pystray, opencv-python, pytesseract
 dashboard: @fontsource/inter, @fontsource/sora, @tailwindcss/postcss, @tanstack/react-query, lucide-react, react, react-dom, react-router-dom
 other: inno setup, winsw, pyinstaller, ollama
 -->
@@ -23,6 +23,7 @@ other: inno setup, winsw, pyinstaller, ollama
 | cryptography | Apache-2.0 / BSD-3-Clause | https://github.com/pyca/cryptography |
 | argon2-cffi | MIT | https://github.com/hynek/argon2-cffi |
 | httpx | BSD-3-Clause | https://github.com/encode/httpx |
+| certifi | MPL-2.0 | https://github.com/certifi/python-certifi |
 | python-multipart | Apache-2.0 | https://github.com/Kludex/python-multipart |
 | PyYAML | MIT | https://github.com/yaml/pyyaml |
 | zeroconf | LGPL-2.1 | https://github.com/python-zeroconf/python-zeroconf |
@@ -42,6 +43,7 @@ deployment if their compliance requirements demand it.
 | Component | License | Project |
 |---|---|---|
 | httpx | BSD-3-Clause | https://github.com/encode/httpx |
+| certifi | MPL-2.0 | https://github.com/certifi/python-certifi |
 | PyYAML | MIT | https://github.com/yaml/pyyaml |
 | psutil | BSD-3-Clause | https://github.com/giampaolo/psutil |
 | mss | MIT | https://github.com/BoboTiG/python-mss |

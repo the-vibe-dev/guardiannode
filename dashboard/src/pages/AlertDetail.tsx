@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api";
 import SeverityBadge from "../components/SeverityBadge";
 import GuardianReviewPanel from "../components/GuardianReviewPanel";
+import ActionHistory from "../components/ActionHistory";
 import { formatDateTime } from "../utils/datetime";
 
 export default function AlertDetail() {
   const { id } = useParams();
+  // Route changes must discard all incident-specific state, including notes,
+  // action targets and an in-flight response for the previous alert.
+  return <AlertIncident key={id} id={id} />;
+}
+
+function AlertIncident({ id }: { id: string | undefined }) {
+  const queryClient = useQueryClient();
   const [detail, setDetail] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
@@ -19,7 +28,13 @@ export default function AlertDetail() {
   const [enforcementDuration, setEnforcementDuration] = useState(900);
 
   useEffect(() => {
-    if (id) api.alert(id).then(setDetail).catch((e) => setError(e.message));
+    let disposed = false;
+    if (id) {
+      api.alert(id)
+        .then((response) => { if (!disposed) setDetail(response); })
+        .catch((reason: Error) => { if (!disposed) setError(reason.message); });
+    }
+    return () => { disposed = true; };
   }, [id]);
 
   async function review(status: string) {
@@ -76,7 +91,9 @@ export default function AlertDetail() {
       ...(enforcementAction === "show_child_prompt" ? { message: enforcementMessage } : {}),
     };
     try {
-      await api.confirmedAlertAction(id, body);
+      const result = await api.confirmedAlertAction(id, body);
+      setActionMsg(`Parent-confirmed action recorded (${result.status}). Check Action history for the latest report.`);
+      void queryClient.invalidateQueries({ queryKey: ["alert-actions", id] });
     } catch (error) {
       const preview = error instanceof ApiError ? error.body?.detail?.preview : null;
       if (!preview) {
@@ -90,7 +107,8 @@ export default function AlertDetail() {
       }
       try {
         const result = await api.confirmedAlertAction(id, { ...body, confirmed_preview: preview });
-        setActionMsg(`✓ Parent-confirmed action queued (${result.status})`);
+        setActionMsg(`Parent-confirmed action recorded (${result.status}). Check Action history for the latest report.`);
+        void queryClient.invalidateQueries({ queryKey: ["alert-actions", id] });
       } catch (secondError) {
         setError(`Action failed: ${(secondError as Error).message}`);
       }
@@ -99,8 +117,8 @@ export default function AlertDetail() {
     }
   }
 
-  if (error && !detail) return <div className="text-red-700 p-4">{error}</div>;
-  if (!detail) return <div className="text-gray-500 p-4">Loading…</div>;
+  if (error && !detail) return <div role="alert" className="text-red-700 p-4">{error}</div>;
+  if (!detail) return <div role="status" className="text-gray-500 p-4">Loading…</div>;
 
   const eventId = detail.event?.event_id;
   const hasScreenshot = eventId && detail.alert?.severity && ["medium", "high", "critical"].includes(detail.alert.severity);
@@ -190,6 +208,8 @@ export default function AlertDetail() {
         </div>
         <button onClick={confirmedAction} disabled={busy} className={`mt-4 min-h-11 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${enforcementAction === "delete_evidence" ? "bg-red-700 hover:bg-red-800" : "bg-[#0d3b4a] hover:bg-[#164f60]"}`}>Preview exact action…</button>
       </section>
+
+      <ActionHistory alertId={id!} />
 
       {/* Event + Classification */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

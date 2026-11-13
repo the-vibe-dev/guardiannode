@@ -49,14 +49,13 @@ class ChildRequestPage(BaseModel):
 
 def _expire_open(db: Session) -> int:
     now = datetime.now(UTC)
-    rows = db.query(ChildRequest).filter(
+    # Persist the state transition inside the current transaction before a
+    # subsequent count/list. The session intentionally has autoflush disabled.
+    return db.query(ChildRequest).filter(
         ChildRequest.status == "open",
         ChildRequest.expires_at.isnot(None),
         ChildRequest.expires_at <= now,
-    ).all()
-    for row in rows:
-        row.status = "expired"
-    return len(rows)
+    ).update({ChildRequest.status: "expired"}, synchronize_session="fetch")
 
 
 @router.post("", response_model=ChildRequestDTO)
@@ -164,13 +163,26 @@ def review_child_request(
     db: Session = Depends(get_db_dep),
     user: User = Depends(current_user),
 ):
+    now = datetime.now(UTC)
+    _expire_open(db)
+    # Compare-and-set preserves the first parent's decision when two open
+    # dashboards act at once; stale clients cannot overwrite a final response.
+    updated = db.query(ChildRequest).filter(
+        ChildRequest.request_id == request_id,
+        ChildRequest.status == "open",
+        or_(ChildRequest.expires_at.is_(None), ChildRequest.expires_at > now),
+    ).update({
+        ChildRequest.status: req.status,
+        ChildRequest.response_note: req.response_note,
+        ChildRequest.reviewed_by: str(user.id),
+        ChildRequest.reviewed_at: now,
+    }, synchronize_session="fetch")
     row = db.get(ChildRequest, request_id)
-    if row is None:
-        raise HTTPException(404, "Request not found")
-    row.status = req.status
-    row.response_note = req.response_note
-    row.reviewed_by = str(user.id)
-    row.reviewed_at = datetime.now(UTC)
+    if updated != 1:
+        db.commit()  # retain automatic expiration even when review is refused
+        if row is None:
+            raise HTTPException(404, "Request not found")
+        raise HTTPException(409, "This request is no longer open. Refresh to see its response.")
     log_action(
         db,
         actor=str(user.id),

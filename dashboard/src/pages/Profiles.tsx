@@ -19,6 +19,7 @@ export default function Profiles() {
   const [age, setAge] = useState("10_13");
   const [initialPhrases, setInitialPhrases] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   function reload() {
     api.profiles().then(setProfiles).catch((e) => setErr(e.message));
@@ -31,6 +32,7 @@ export default function Profiles() {
   async function create() {
     setErr(null);
     if (!name.trim()) return;
+    setCreating(true);
     const phrases = initialPhrases
       .split(/[,\n]/)
       .map((s) => s.trim())
@@ -42,6 +44,8 @@ export default function Profiles() {
       reload();
     } catch (e: any) {
       setErr(e.message || String(e));
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -50,7 +54,7 @@ export default function Profiles() {
       <h1 className="text-2xl font-bold">Child profiles</h1>
 
       {err && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{err}</div>
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{err}</div>
       )}
 
       <div className="bg-white shadow rounded p-4 space-y-3">
@@ -78,9 +82,10 @@ export default function Profiles() {
           </label>
           <button
             onClick={create}
+            disabled={creating || !name.trim()}
             className="bg-brand-500 hover:bg-brand-700 text-white px-3 py-2 rounded"
           >
-            Add
+            {creating ? "Adding…" : "Add"}
           </button>
         </div>
         <label className="block">
@@ -143,7 +148,8 @@ function ProfileCard({ profile, meta, onSaved }: { profile: Profile; meta: any; 
     setErr(null);
     setMsg(null);
     try {
-      await api.updateProfile(profile.profile_id, { custom_watch_phrases: phrases });
+      const saved = await api.updateProfile(profile.profile_id, { custom_watch_phrases: phrases });
+      setPhrases(saved.custom_watch_phrases || []);
       setMsg("Saved");
       setTimeout(() => setMsg(null), 2000);
       onSaved();
@@ -198,6 +204,7 @@ function ProfileCard({ profile, meta, onSaved }: { profile: Profile; meta: any; 
         </div>
         <div className="flex gap-2">
           <input
+            aria-label={`Add a watch phrase for ${profile.display_name}`}
             className="flex-1 border rounded px-2 py-1 text-sm"
             placeholder="Add a phrase and press Enter"
             value={draft}
@@ -224,7 +231,7 @@ function ProfileCard({ profile, meta, onSaved }: { profile: Profile; meta: any; 
           </button>
         </div>
         {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
-        {err && <div className="text-xs text-red-700 mt-1">{err}</div>}
+        {err && <div role="alert" className="text-xs text-red-700 mt-1">{err}</div>}
       </div>
 
       {meta && <PolicyEditor profile={profile} meta={meta} onSaved={onSaved} />}
@@ -239,7 +246,7 @@ const MODE_LABEL: Record<string, string> = {
   alert: "Alert me", monitor: "Monitor quietly", allow: "Allow (ignore)",
 };
 const CAPTURE_LABEL: Record<string, string> = {
-  tight: "Tight (catch everything)", balanced: "Balanced", leeway: "Leeway (more privacy)",
+  tight: "Tight (more frequent capture)", balanced: "Balanced", leeway: "Leeway (more privacy)",
 };
 
 function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any; onSaved: () => void }) {
@@ -247,6 +254,7 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
   const [policy, setPolicy] = useState<any>(() => JSON.parse(JSON.stringify(profile.alert_policy || {})));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { setPolicy(JSON.parse(JSON.stringify(profile.alert_policy || {}))); }, [profile.profile_id]);
 
@@ -257,28 +265,31 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
   }
 
   async function save(reset = false) {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setError(null);
     try {
-      await api.updateProfile(profile.profile_id,
+      const saved = await api.updateProfile(profile.profile_id,
         reset ? { reset_policy_to_age_default: true } : { alert_policy: policy });
+      setPolicy(JSON.parse(JSON.stringify(saved.alert_policy || {})));
       setMsg(reset ? "Reset to age defaults" : "Privacy settings saved");
       setTimeout(() => setMsg(null), 2500);
       onSaved();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save privacy settings");
     } finally { setBusy(false); }
   }
 
   const cats = policy.categories || {};
   return (
     <div className="mt-4 border-t pt-3">
-      <button onClick={() => setOpen(!open)} className="text-sm font-medium text-brand-700">
+      <button aria-expanded={open} onClick={() => setOpen(!open)} className="text-sm font-medium text-brand-700">
         {open ? "▾" : "▸"} Privacy & alert settings
       </button>
       {open && (
         <div className="mt-3 space-y-3">
           <p className="text-xs text-gray-500">
             Give your child privacy while still catching what matters. Self-harm,
-            grooming, threats, and your watch phrases <strong>always alert</strong> —
-            you can't turn those off.
+            grooming, threats, and your watch phrases remain enabled in every
+            profile. Detection can still miss or misinterpret content.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -312,13 +323,13 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
                     <tr key={c.key} className="border-t">
                       <td className="py-1.5 pr-2">{c.label}</td>
                       <td className="py-1.5 pr-2">
-                        <select className="border rounded px-1.5 py-0.5"
+                        <select aria-label={`${c.label}: what to do`} className="border rounded px-1.5 py-0.5"
                           value={cur.mode || "alert"} onChange={(e) => setCat(c.key, "mode", e.target.value)}>
                           {(meta.modes || []).map((m: string) => <option key={m} value={m}>{MODE_LABEL[m] || m}</option>)}
                         </select>
                       </td>
                       <td className="py-1.5">
-                        <select className="border rounded px-1.5 py-0.5 disabled:opacity-40"
+                        <select aria-label={`${c.label}: minimum severity`} className="border rounded px-1.5 py-0.5 disabled:opacity-40"
                           disabled={cur.mode === "allow"}
                           value={cur.min_severity || policy.min_severity || "medium"}
                           onChange={(e) => setCat(c.key, "min_severity", e.target.value)}>
@@ -347,6 +358,7 @@ function PolicyEditor({ profile, meta, onSaved }: { profile: Profile; meta: any;
             </button>
             {msg && <span className="text-xs text-green-700">{msg}</span>}
           </div>
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         </div>
       )}
     </div>

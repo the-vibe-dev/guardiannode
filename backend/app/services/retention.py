@@ -32,7 +32,7 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
     alert → evidence blob row + file) via :mod:`app.services.purge` so cleanup
     never strands orphans.
     """
-    from app.services import purge
+    from app.services import capture_queue, purge
 
     r = {**DEFAULT_RETENTION_DAYS, **(retention or {})}
     deleted = {"alerts": 0, "risk_results": 0, "events": 0, "blobs": 0, "audit": 0}
@@ -56,11 +56,13 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
         # Defensive: also expire alert rows of this severity whose chain is
         # already gone (e.g. rows from before cascade deletion existed).
         sev_levels = [sev_group]
-        deleted["alerts"] += (
-            session.query(Alert)
-            .filter(Alert.severity.in_(sev_levels), Alert.created_at < cutoff)
-            .delete(synchronize_session=False)
-        )
+        orphan_alert_ids = [
+            row[0] for row in session.query(Alert.alert_id).filter(
+                Alert.severity.in_(sev_levels), Alert.created_at < cutoff,
+                ~session.query(RiskResult).filter(RiskResult.risk_id == Alert.risk_id).exists(),
+            ).all()
+        ]
+        deleted["alerts"] += purge.delete_alerts(session, orphan_alert_ids)["alerts"]
 
     # 2) Events that never got a risk result (ingest interrupted mid-pipeline).
     cutoff = _cutoff(max(r["low"], 1))
@@ -85,10 +87,6 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
             session.query(EvidenceBlob).filter(EvidenceBlob.created_at < blob_cutoff).all()
         ):
             if purge.delete_blob(session, blob):
-                for ev in session.query(Event).filter(Event.screenshot_blob_id == blob.blob_id).all():
-                    ev.screenshot_blob_id = None
-                for ev in session.query(Event).filter(Event.image_blob_id == blob.blob_id).all():
-                    ev.image_blob_id = None
                 deleted["blobs"] += 1
 
     # 4) Defensive sweep: blob rows whose event vanished some other way.
@@ -102,5 +100,12 @@ def run_cleanup(session: Session, retention: dict[str, int] | None = None) -> di
     audit_q = session.query(AuditLog).filter(AuditLog.created_at < audit_cutoff)
     deleted["audit"] += audit_q.delete(synchronize_session=False)
 
+    session.commit()
+    # File queues have an independent quarantine policy. Live pending frames
+    # are only touched by an explicitly persisted withdrawal deletion request.
+    queue_result = capture_queue.run_cleanup(session)
+    deleted["queue_files"] = queue_result["deleted_files"]
+    deleted["queue_bytes"] = queue_result["deleted_bytes"]
+    deleted["queue_failed_files"] = queue_result["failed_files"]
     session.commit()
     return deleted

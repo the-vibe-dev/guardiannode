@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app import settings as settings_mod
 from app.db.models import GuardianReview, GuardianReviewFeedback, GuardianReviewPreview, User
+from app.db.session import begin_immediate_if_sqlite
 from app.guardian_review_models import (
     PROMPT_VERSION,
     REDACTION_VERSION,
@@ -287,6 +288,9 @@ def submit_review(
         raise WorkflowError("not_found", status_code=404)
     if preview.provider != _settings().guardian_review_provider.strip().lower():
         raise WorkflowError("preview_stale", status_code=409)
+    from app.services import consent
+    if preview.provider != "mock" and not consent.choice_allowed(db, "external_ai"):
+        raise WorkflowError("external_ai_consent_required", status_code=403)
     _ensure_provider_ready(preview.provider)
     if preview.review_id:
         existing = db.get(GuardianReview, preview.review_id)
@@ -638,13 +642,36 @@ def _error_message(code: str) -> str:
         "payload_too_large": "The minimized incident is still too large to send safely.",
         "feedback_unavailable": "Feedback is available after a completed Guardian Review.",
         "database_busy": "GuardianNode is busy saving another update. Your incident is safe; try again shortly.",
+        "external_ai_consent_required": "Enable optional external AI review in Privacy & consent before sending this request.",
     }.get(code, "Guardian Review failed safely.")
+
+
+def _live_running_review(db: Session, review_id: str) -> GuardianReview | None:
+    """Reload after a provider await; a purge or consent change takes precedence.
+
+    Every caller has already committed its previous state. Ending that read
+    transaction also clears stale ORM objects. Serialize the short check/write
+    section on SQLite; no write lock is kept during provider calls or backoff.
+    """
+    from app.services import consent
+
+    db.rollback()
+    begin_immediate_if_sqlite(db)
+    row = db.get(GuardianReview, review_id, populate_existing=True)
+    if row is None or row.status != "running":
+        db.rollback()
+        return None
+    if row.provider != "mock" and not consent.choice_allowed(db, "external_ai"):
+        _fail(db, row, "external_ai_consent_required")
+        return None
+    return row
 
 
 async def process_one(db: Session, *, provider_override=None, sleep=asyncio.sleep) -> bool:
     row = db.query(GuardianReview).filter(GuardianReview.status == "queued").order_by(GuardianReview.created_at).first()
     if row is None:
         return False
+    review_id = row.review_id
     row.status = "running"
     row.started_at = _now()
     row.error_code = None
@@ -679,11 +706,17 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
         status="sent",
     )
     for attempt in range(1, max_attempts + 1):
+        row = _live_running_review(db, review_id)
+        if row is None:
+            return True
         row.attempts = attempt
         log_action(db, actor="system", action="guardian_review.sent", target=row.review_id, details={**audit_base, "attempt": attempt})
         db.commit()
         try:
             result = await provider.assess(payload=payload, prompt=_prompt(row.prompt_version), model=row.model_requested, timeout=float(_settings().guardian_review_timeout_seconds))
+            row = _live_running_review(db, review_id)
+            if row is None:
+                return True
             row.assessment_enc = encryption.encrypt_bytes(result.assessment.model_dump_json().encode(), aad=_review_aad(row.review_id))
             row.model_returned = result.model_returned
             row.provider_response_id = result.response_id
@@ -700,12 +733,18 @@ async def process_one(db: Session, *, provider_override=None, sleep=asyncio.slee
             db.commit()
             return True
         except ProviderError as exc:
+            row = _live_running_review(db, review_id)
+            if row is None:
+                return True
             if not exc.retryable or attempt >= max_attempts:
                 _fail(db, row, exc.code)
                 return True
+            db.rollback()
             await sleep(exc.retry_after if exc.retry_after is not None else random.uniform(1.0, 3.0))
         except Exception:
-            _fail(db, row, "upstream_unavailable")
+            row = _live_running_review(db, review_id)
+            if row is not None:
+                _fail(db, row, "upstream_unavailable")
             return True
     return True
 

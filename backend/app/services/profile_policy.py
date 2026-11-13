@@ -156,14 +156,20 @@ class Decision:
     reason: str
 
 
-def decide(policy: dict, severity: str, categories: list[str]) -> Decision:
+def decide(
+    policy: dict, severity: str, categories: list[str], *, notification_min_severity: str = "high"
+) -> Decision:
     """Apply the policy to one classification result."""
     sev = SEVERITY_ORDER.get(severity, 0)
     cats = categories or []
+    notification_floor = SEVERITY_ORDER.get(notification_min_severity, 3)
+    qualifies_for_notification = sev >= max(1, notification_floor)
 
-    # Protected categories always alert + notify at their detected severity.
+    # Preserve the safety floor: High/Critical protected alerts qualify even
+    # when the ordinary immediate threshold is Critical. Global notification
+    # consent and enablement still gate every automatic external transport.
     if any(c in PROTECTED_CATEGORIES for c in cats):
-        return Decision(True, severity in ("high", "critical"), "protected_category")
+        return Decision(True, qualifies_for_notification or severity in ("high", "critical"), "protected_category")
 
     cat_settings = policy.get("categories", {})
     global_floor = SEVERITY_ORDER.get(policy.get("min_severity", "medium"), 2)
@@ -186,7 +192,7 @@ def decide(policy: dict, severity: str, categories: list[str]) -> Decision:
             want_alert = True
 
     if want_alert:
-        return Decision(True, severity in ("high", "critical"), "category_alert")
+        return Decision(True, qualifies_for_notification, "category_alert")
     if want_monitor:
         return Decision(True, False, "monitored")
     return Decision(False, False, "below_policy")

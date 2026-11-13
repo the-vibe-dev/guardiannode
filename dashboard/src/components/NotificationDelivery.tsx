@@ -1,0 +1,27 @@
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { RefreshCw } from "lucide-react";
+import { api } from "../api";
+import { formatDateTime } from "../utils/datetime";
+
+const STATUS_LABELS = { queued: "Queued", retry: "Waiting to retry", processing: "Sending", sent: "Sent", dead: "Needs attention", skipped: "Skipped" } as const;
+
+export default function NotificationDelivery() {
+  const status = useQuery({ queryKey: ["notification-status"], queryFn: api.notificationStatus, refetchInterval: 30_000 });
+  const data = status.data;
+  return <section aria-labelledby="notification-delivery-heading" className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="notification-delivery-heading" className="font-semibold">Notification delivery</h2><button onClick={() => void status.refetch()} disabled={status.isFetching} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-semibold disabled:opacity-50"><RefreshCw aria-hidden="true" size={15} />Refresh delivery status</button></div>
+    <p className="text-sm text-slate-600">See whether alert notifications are queued, retrying, or accepted by a channel. Sent means the transport accepted the message; it does not confirm that someone read it.</p>
+    {status.isPending && <p role="status" className="text-sm text-slate-500">Loading delivery status…</p>}
+    {status.isError && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Delivery status is unavailable: {status.error.message}. <button className="font-semibold underline" onClick={() => void status.refetch()}>Retry delivery status</button></p>}
+    {data && <>
+      {data.routing && <p className="text-xs text-slate-600">Saved immediate alert threshold: <strong className="capitalize">{data.routing.immediate_min_severity}</strong>. Protected safety categories retain their High/Critical exception. Jobs are checked against current policy before sending.</p>}
+      {(!data.worker_enabled || !data.enabled) && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{!data.consent_allowed ? "Parent notifications are turned off in Privacy & consent. Automatic notifications will remain stopped until you enable that choice." : !data.worker_enabled ? "The notification worker is disabled. Queued alerts will not be sent until it is enabled." : "Notifications are disabled. Enable a delivery channel above to receive alerts."}</p>}
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">{(Object.keys(STATUS_LABELS) as Array<keyof typeof STATUS_LABELS>).map((key) => <div key={key} className={`rounded-lg p-3 ${key === "dead" && data.counts[key] > 0 ? "bg-red-50 text-red-900" : "bg-slate-50 text-slate-700"}`}><dt className="text-xs">{STATUS_LABELS[key]}</dt><dd className="mt-1 text-xl font-semibold">{data.counts[key]}</dd></div>)}</dl>
+      {data.counts.dead > 0 && <p role="status" className="text-sm text-red-800">Some notifications exhausted their retries. Check the channel settings and send a test. Historical failures remain in this list.</p>}
+      <div className="grid gap-2 sm:grid-cols-2">{(["email", "webhook"] as const).map((channel) => <div key={channel} className="rounded-lg border border-slate-200 p-3 text-sm"><h3 className="font-semibold capitalize">{channel}</h3><p>{data.channels[channel].configured ? "Configured" : "Not configured"}</p><p className="mt-1 text-xs text-slate-500">Last accepted: {formatDateTime(data.channels[channel].last_success_at)}</p></div>)}</div>
+      {data.last_digest && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">Last digest: <strong>{data.last_digest.local_date}</strong> ({data.last_digest.timezone}) · {data.last_digest.status} · {data.last_digest.total_alerts} alerts{data.last_digest.completed_at ? ` · ${formatDateTime(data.last_digest.completed_at)}` : ""}</p>}
+      <details className="rounded-lg border border-slate-200"><summary className="cursor-pointer px-3 py-3 text-sm font-semibold">Recent delivery jobs ({data.recent_jobs.length})</summary>{data.recent_jobs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-xs"><caption className="sr-only">Recent notification jobs and their retry state</caption><thead className="bg-slate-50"><tr><th scope="col" className="p-3">Alert</th><th scope="col" className="p-3">Status</th><th scope="col" className="p-3">Attempts</th><th scope="col" className="p-3">Accepted channels</th><th scope="col" className="p-3">Next attempt</th></tr></thead><tbody>{data.recent_jobs.map((job) => <tr key={job.id} className="border-t border-slate-100"><td className="p-3"><Link className="text-brand-700 underline" to={`/alerts/${encodeURIComponent(job.alert_id)}`}>{job.severity} alert</Link></td><td className="p-3">{STATUS_LABELS[job.status as keyof typeof STATUS_LABELS] || job.status}{job.skip_reason === "current_policy" && <p className="mt-1 text-slate-600">No longer eligible under the current policy or threshold.</p>}</td><td className="p-3">{job.attempts}</td><td className="p-3">{job.delivered_channels.join(", ") || "—"}</td><td className="p-3">{["queued", "retry"].includes(job.status) ? formatDateTime(job.next_attempt_at) : "—"}</td></tr>)}</tbody></table></div> : <p className="px-3 pb-3 text-sm text-slate-500">No delivery jobs have been recorded.</p>}</details>
+    </>}
+  </section>;
+}
