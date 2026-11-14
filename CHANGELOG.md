@@ -1,3 +1,12 @@
+# Maintenance - 14 November 2026
+
+- A paired child installer repair can now use `/SERVERURL` to move to a restored
+  server in the same family. The installer verifies the new HTTPS endpoint
+  against the enrolled family CA before stopping the existing child service,
+  then preserves the device identity, token, and CA pin while updating its URL.
+- The separate Linux server guide now supplies the required advertised URL in
+  its LAN installation example.
+
 # Screenshot-focused review edition - 13 November 2026
 
 ## Review.4
