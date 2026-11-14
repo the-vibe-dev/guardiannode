@@ -17,7 +17,7 @@ class StopLoop(BaseException):
 async def test_disabled_monitoring_does_not_capture_or_enqueue(monkeypatch):
     q: asyncio.Queue = asyncio.Queue(maxsize=2)
     cfg = AgentConfig(monitoring_enabled=False, full_screen_capture_enabled=True)
-    monkeypatch.setattr("src.main.get_active_process", lambda: pytest.fail("capture attempted"))
+    monkeypatch.setattr("src.main.get_active_window", lambda: pytest.fail("capture attempted"))
     monkeypatch.setattr("src.main.capture_full", lambda **_kwargs: pytest.fail("screenshot attempted"))
     monkeypatch.setattr("src.main.asyncio.sleep", _stop_sleep)
     with pytest.raises(StopLoop):
@@ -47,12 +47,8 @@ async def test_unmonitored_app_does_not_enqueue_screenshot(monkeypatch):
 
     monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
     monkeypatch.setattr(
-        "src.main.get_active_process",
-        lambda: ActiveProcess(pid=1, name="notepad.exe", exe=None),
-    )
-    monkeypatch.setattr(
         "src.main.get_active_window",
-        lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200)),
+        lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200), process=ActiveProcess(pid=1, name="notepad.exe", exe=None)),
     )
     monkeypatch.setattr("src.main.capture_active", lambda _rect: pytest.fail("capture_active called"))
     monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: pytest.fail("capture_full called"))
@@ -77,12 +73,8 @@ async def test_monitored_app_enqueues_window_scoped_metadata(monkeypatch):
 
     monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
     monkeypatch.setattr(
-        "src.main.get_active_process",
-        lambda: ActiveProcess(pid=1, name="Roblox.exe", exe=None),
-    )
-    monkeypatch.setattr(
         "src.main.get_active_window",
-        lambda: WindowInfo(title="Roblox", rect=(0, 0, 300, 200)),
+        lambda: WindowInfo(title="Roblox", rect=(0, 0, 300, 200), process=ActiveProcess(pid=1, name="Roblox.exe", exe=None)),
     )
     monkeypatch.setattr(
         "src.main.capture_active",
@@ -121,12 +113,8 @@ async def test_full_screen_mode_keeps_monitored_app_region_change(monkeypatch):
 
     monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
     monkeypatch.setattr(
-        "src.main.get_active_process",
-        lambda: ActiveProcess(pid=1, name="notepad.exe", exe=None),
-    )
-    monkeypatch.setattr(
         "src.main.get_active_window",
-        lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200)),
+        lambda: WindowInfo(title="notes", rect=(0, 0, 300, 200), process=ActiveProcess(pid=1, name="notepad.exe", exe=None)),
     )
     monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: next(shots))
     monkeypatch.setattr("src.main.capture_active", lambda _rect: pytest.fail("capture_active called"))
@@ -154,12 +142,8 @@ async def test_full_screen_mode_treats_every_foreground_app_as_monitored(monkeyp
 
     monkeypatch.setattr("src.main._is_locally_paused", lambda: False)
     monkeypatch.setattr(
-        "src.main.get_active_process",
-        lambda: ActiveProcess(pid=1, name="putty.exe", exe=None),
-    )
-    monkeypatch.setattr(
         "src.main.get_active_window",
-        lambda: WindowInfo(title="terminal", rect=(0, 0, 300, 200)),
+        lambda: WindowInfo(title="terminal", rect=(0, 0, 300, 200), process=ActiveProcess(pid=1, name="putty.exe", exe=None)),
     )
     monkeypatch.setattr("src.main.capture_full", lambda active_rect=None: next(shots))
     monkeypatch.setattr("src.main.asyncio.sleep", _stop_after(2))

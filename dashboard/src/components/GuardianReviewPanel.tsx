@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { ApiError, api } from "../api";
+import { useGuardianReviewSelection } from "../hooks/useGuardianReviewSelection";
 import { formatDateTime } from "../utils/datetime";
 
-type Props = { alertId: string; detail: any };
+type Props = { alertId: string; detail: any; onEvidenceChanged?: () => Promise<void> };
 type EvidenceOption = { id: string; label: string; text: string; defaultIncluded: boolean };
 
-export default function GuardianReviewPanel({ alertId, detail }: Props) {
+export default function GuardianReviewPanel({ alertId, detail, onEvidenceChanged }: Props) {
   const [provider, setProvider] = useState<any>(null);
   const [relationship, setRelationship] = useState(detail.demo_context?.relationship_context || "unknown");
   const [repeated, setRepeated] = useState(detail.demo_context?.repeated_behavior || "unknown");
@@ -21,11 +22,17 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
   );
   const [preview, setPreview] = useState<any>(null);
   const [consent, setConsent] = useState(false);
-  const [result, setResult] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [providerError, setProviderError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pollTimer = useRef<number | null>(null);
+  const historyVersion = useRef(0);
+  const providerVersion = useRef(0);
+  const deletedIds = useRef(new Set<string>());
+  const selection = useGuardianReviewSelection();
+  const viewReview = selection.view;
 
   const evidenceOptions = useMemo<EvidenceOption[]>(() => {
     const riskItems = (detail.risk.evidence || []).map((text: string, index: number) => ({
@@ -45,30 +52,47 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
     return riskItems;
   }, [detail]);
 
-  async function loadHistory() {
-    setHistory(await api.guardianReviewHistory({ alert_id: alertId, limit: "25" }));
-  }
+  const loadHistory = useCallback(async (resumeActive = false) => {
+    const current = ++historyVersion.current;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const rows = await api.guardianReviewHistory({ alert_id: alertId, limit: "25" });
+      if (current !== historyVersion.current) return;
+      setHistory(rows.map((row) => deletedIds.current.has(row.review_id) ? { ...row, status: "deleted" } : row));
+      const active = resumeActive && rows.find((row: any) => ["queued", "running"].includes(row.status));
+      if (active) void viewReview(active.review_id);
+    } catch (reason) {
+      if (current === historyVersion.current) setHistoryError(reason instanceof Error ? reason.message : "Review history is unavailable.");
+    } finally {
+      if (current === historyVersion.current) setHistoryLoading(false);
+    }
+  }, [alertId, viewReview]);
+
+  const loadProvider = useCallback(async () => {
+    const current = ++providerVersion.current;
+    setProviderError(null);
+    try {
+      const next = await api.guardianReviewProviders();
+      if (current === providerVersion.current) setProvider(next);
+    } catch (reason) {
+      if (current === providerVersion.current) setProviderError(reason instanceof Error ? reason.message : "Provider status is unavailable.");
+    }
+  }, []);
 
   useEffect(() => {
-    Promise.all([api.guardianReviewProviders(), api.guardianReviewHistory({ alert_id: alertId, limit: "25" })])
-      .then(([status, rows]) => {
-        setProvider(status);
-        setHistory(rows);
-        const active = rows.find((row: any) => ["queued", "running"].includes(row.status));
-        if (active) pollReview(active.review_id).catch((e) => setError(e.message));
-      })
-      .catch((e) => setError(e.message));
-    return () => {
-      if (pollTimer.current !== null) window.clearTimeout(pollTimer.current);
-    };
-  }, [alertId]);
+    void loadProvider();
+    void loadHistory(true);
+    return () => { historyVersion.current += 1; providerVersion.current += 1; };
+  }, [loadHistory, loadProvider]);
 
   async function makePreview() {
     setBusy("preview");
     setError(null);
-    setResult(null);
+    selection.clear();
     try {
       const next = await api.guardianReviewPreview(alertId, {
+        expected_risk_id: detail.alert?.risk_id || detail.risk.risk_id,
         relationship_context: relationship,
         repeated_behavior: repeated,
         parent_believes_immediate_danger: immediateDanger,
@@ -82,7 +106,10 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
       setPreview(next);
       setConsent(false);
     } catch (e: any) {
-      setError(e.message || String(e));
+      if (e instanceof ApiError && e.status === 409 && (e.body?.error?.code || e.body?.detail?.code) === "evidence_changed") {
+        setError("This alert has newer evidence. Reload the alert and review it before creating a preview.");
+        await onEvidenceChanged?.();
+      } else setError(e.message || String(e));
     } finally {
       setBusy(null);
     }
@@ -111,22 +138,12 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
       const accepted = await api.submitGuardianReview(alertId, preview.preview_id, preview.preview_digest);
       setPreview(null);
       setConsent(false);
-      await pollReview(accepted.review_id);
+      await selection.view(accepted.review_id);
       await loadHistory();
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
       setBusy(null);
-    }
-  }
-
-  async function pollReview(reviewId: string) {
-    const next = await api.guardianReview(reviewId);
-    setResult(next);
-    if (["queued", "running"].includes(next.status)) {
-      pollTimer.current = window.setTimeout(() => {
-        pollReview(reviewId).catch((e) => setError(e.message));
-      }, 1500);
     }
   }
 
@@ -136,7 +153,9 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
     setError(null);
     try {
       await api.deleteGuardianReview(reviewId);
-      if (result?.review_id === reviewId) setResult(await api.guardianReview(reviewId));
+      deletedIds.current.add(reviewId);
+      selection.recordDeletion(reviewId);
+      setHistory((current) => current.map((row) => row.review_id === reviewId ? { ...row, status: "deleted" } : row));
       await loadHistory();
     } catch (e: any) {
       setError(e.message || String(e));
@@ -161,12 +180,13 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
           <p className="text-sm text-gray-600">A parent-controlled second opinion with conversation guidance.</p>
         </div>
         <span className={`text-xs font-semibold rounded-full px-2 py-1 ${provider?.ready ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-700"}`}>
-          {provider?.ready ? `${provider.model} ready` : "Not configured"}
+          {provider?.ready ? `${provider.model} ready` : provider ? "Not configured" : providerError ? "Status unavailable" : "Checking status"}
         </span>
       </div>
 
       {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>}
-      {!provider && <p className="text-sm text-gray-500">Checking Guardian Review status…</p>}
+      {providerError && <p role="alert" className="text-sm text-red-700">Could not load provider status: {providerError} <button className="font-semibold underline" onClick={() => void loadProvider()}>Retry provider status</button></p>}
+      {!provider && !providerError && <p role="status" className="text-sm text-gray-500">Checking Guardian Review status…</p>}
       {provider && !provider.ready && (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           Guardian Review stays disabled until the selected provider is enabled and connected. Open <Link to="/settings" className="underline">Settings</Link> to finish setup.
@@ -258,18 +278,23 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
         </div>
       )}
 
-      {result && <AssessmentResult result={result} />}
+      {selection.loading && <p role="status" className="text-sm text-slate-600">Loading selected assessment…</p>}
+      {selection.error && <p role="alert" className="text-sm text-red-700">Could not load selected assessment: {selection.error} <button className="font-semibold underline" onClick={selection.retry}>Retry assessment</button></p>}
+      {selection.result && <AssessmentResult key={selection.result.review_id} result={selection.result} />}
 
       <div className="border-t pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-medium">Review history for this alert</h3>
           <Link className="text-sm text-brand-700 underline" to="/guardian-reviews">View all Guardian Reviews</Link>
         </div>
-        {history.length === 0 ? <p className="mt-2 text-sm text-gray-500">No Guardian Reviews yet.</p> : (
+        {historyLoading && <p role="status" className="mt-2 text-sm text-gray-500">Loading review history…</p>}
+        {historyError && <p role="alert" className="mt-2 text-sm text-red-700">Could not load review history: {historyError} <button className="font-semibold underline" onClick={() => void loadHistory()}>Retry history</button></p>}
+        {!historyLoading && !historyError && history.length === 0 && <p className="mt-2 text-sm text-gray-500">No Guardian Reviews yet.</p>}
+        {history.length > 0 && (
           <ul className="mt-2 divide-y rounded border">
             {history.map((item) => (
               <li key={item.review_id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
-                <button className="text-left" onClick={() => pollReview(item.review_id)}>
+                <button className="text-left disabled:opacity-50" disabled={busy !== null} aria-label={`View review ${item.review_id}`} onClick={() => void selection.view(item.review_id)}>
                   <span className="font-medium capitalize">{item.status.replace("_", " ")}</span>
                   <span className="block text-xs text-gray-500">{formatDateTime(item.created_at)} · {item.model_requested} · {item.redaction_version}</span>
                 </button>
@@ -286,22 +311,34 @@ export default function GuardianReviewPanel({ alertId, detail }: Props) {
 }
 
 export function AssessmentResult({ result }: { result: any }) {
+  return <AssessmentContent key={`${result.review_id}:${result.status}`} result={result} />;
+}
+
+function AssessmentContent({ result }: { result: any }) {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [feedback, setFeedback] = useState<Set<string>>(new Set());
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
   const [savingFeedback, setSavingFeedback] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState(true);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackLoadVersion, setFeedbackLoadVersion] = useState(0);
 
   useEffect(() => {
+    let disposed = false;
     if (result.status === "completed") {
       headingRef.current?.focus();
+      setFeedbackLoading(true);
+      setFeedbackError(null);
       api.guardianReviewFeedback(result.review_id)
-        .then((row) => { if (row?.labels) setFeedback(new Set(row.labels)); })
-        .catch(() => undefined);
+        .then((row) => { if (!disposed) setFeedback(new Set(row?.labels ?? [])); })
+        .catch(() => { if (!disposed) setFeedbackError("Existing feedback could not load. Retry before changing it."); })
+        .finally(() => { if (!disposed) setFeedbackLoading(false); });
     }
-  }, [result.review_id, result.status]);
+    return () => { disposed = true; };
+  }, [result.review_id, result.status, feedbackLoadVersion]);
 
   async function saveFeedback() {
-    if (feedback.size === 0) return;
+    if (feedback.size === 0 || feedbackLoading || feedbackError || savingFeedback) return;
     setSavingFeedback(true);
     setFeedbackStatus(null);
     try {
@@ -367,9 +404,11 @@ export function AssessmentResult({ result }: { result: any }) {
       <fieldset className="rounded border bg-white p-4">
         <legend className="px-1 font-medium">Was this Guardian Review useful?</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {feedbackOptions.map(([key, label]) => <label key={key} className="flex items-center gap-2 rounded border p-2 text-sm focus-within:ring-2 focus-within:ring-brand-500"><input type="checkbox" checked={feedback.has(key)} onChange={() => toggleFeedback(key)} />{label}</label>)}
+          {feedbackOptions.map(([key, label]) => <label key={key} className="flex items-center gap-2 rounded border p-2 text-sm focus-within:ring-2 focus-within:ring-brand-500"><input type="checkbox" checked={feedback.has(key)} disabled={feedbackLoading || Boolean(feedbackError) || savingFeedback} onChange={() => toggleFeedback(key)} />{label}</label>)}
         </div>
-        <button type="button" onClick={saveFeedback} disabled={savingFeedback || feedback.size === 0} className="mt-3 rounded bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2">{savingFeedback ? "Saving locally…" : "Save feedback"}</button>
+        {feedbackLoading && <p role="status" className="mt-2 text-xs text-gray-600">Loading existing feedback…</p>}
+        {feedbackError && <p role="alert" className="mt-2 text-xs text-red-700">{feedbackError} <button className="font-semibold underline" onClick={() => setFeedbackLoadVersion((current) => current + 1)}>Retry feedback</button></p>}
+        <button type="button" onClick={saveFeedback} disabled={savingFeedback || feedbackLoading || Boolean(feedbackError) || feedback.size === 0} className="mt-3 rounded bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2">{savingFeedback ? "Saving locally…" : "Save feedback"}</button>
         {feedbackStatus && <p role="status" className="mt-2 text-xs text-gray-700">{feedbackStatus}</p>}
       </fieldset>
 

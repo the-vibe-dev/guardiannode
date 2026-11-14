@@ -30,9 +30,9 @@ from src.pairing_client import (
     pair_with_server,
     save_credentials,
 )
-from src.process_watcher import get_active_process, is_monitored
+from src.process_watcher import is_monitored
 from src.screenshot_capture import capture_active, capture_full, hamming
-from src.window_tracker import get_active_window
+from src.window_tracker import get_active_window, window_is_current
 
 log = logging.getLogger("guardiannode.agent")
 
@@ -55,6 +55,14 @@ def _is_locally_paused() -> bool:
         return False
 
 
+def _capture_is_paused(cfg: AgentConfig) -> bool:
+    if cfg.server_paused and (
+        cfg.server_paused_until is None or time.time() < cfg.server_paused_until
+    ):
+        return True
+    return _is_locally_paused()
+
+
 async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> None:
     """Screenshot loop. Captures active monitored window, perceptual-hash dedups,
     queues JPEG bytes for the sender to ship to the backend.
@@ -68,9 +76,10 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
     last_full_phash: int | None = None
     sent_count = 0
     skipped_count = 0
-    last_log_summary = time.time()
+    last_log_summary = time.monotonic()
     last_sent_at = 0.0
     last_capture_policy: tuple | None = None
+    last_capture_source: tuple | None = None
 
     def capture_policy() -> tuple:
         return (
@@ -82,15 +91,15 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
         try:
             # Re-read each iteration so a parent's policy change (pushed via the
             # capture-config poller) takes effect without restarting the agent.
-            PHASH_THRESHOLD = int(getattr(cfg, "phash_threshold", 0) or 2)
-            FULL_CHANGE_THRESHOLD = int(getattr(cfg, "full_screen_change_threshold", 0) or 10)
+            PHASH_THRESHOLD = cfg.phash_threshold
+            FULL_CHANGE_THRESHOLD = cfg.full_screen_change_threshold
 
             if not cfg.monitoring_enabled and not cfg.dry_run:
                 last_phash = last_full_phash = None
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
 
-            if _is_locally_paused():
+            if _capture_is_paused(cfg):
                 last_phash = last_full_phash = None
                 log.debug("monitoring paused locally; skipping capture")
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
@@ -101,8 +110,8 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 last_phash = last_full_phash = None
                 last_capture_policy = policy
 
-            active = get_active_process()
             win = get_active_window()
+            active = win.process if win else None
             app_name = active.name if active else None
             log_app_name = app_name if cfg.apps_and_urls_enabled else None
             win_title = win.title if win else None
@@ -130,14 +139,41 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 await asyncio.sleep(cfg.ocr_cadence_seconds)
                 continue
 
+            # Window identity, process, title and bounds are sampled together.
+            # A changed foreground can expose a different app in these pixels.
+            # Discard app-scoped frames in that case; primary-display capture
+            # remains eligible but must not carry stale foreground metadata.
+            if win is not None and not window_is_current(win):
+                if not cfg.full_screen_capture_enabled:
+                    last_phash = last_full_phash = None
+                    await asyncio.sleep(cfg.ocr_cadence_seconds)
+                    continue
+                win = None
+                app_name = win_title = log_app_name = None
+            if cfg.full_screen_capture_enabled and shot.active_region_included is False:
+                win = None
+                app_name = win_title = log_app_name = None
+
+            source = (
+                shot.display_id, shot.capture_bounds,
+                (win.hwnd, win.pid, win.rect) if win is not None else None,
+            )
+            if source != last_capture_source:
+                last_phash = last_full_phash = None
+            frame_phash = (
+                shot.full_phash
+                if cfg.full_screen_capture_enabled and win is None and shot.full_phash is not None
+                else shot.phash
+            )
+
             # Perceptual diff: only ship if the scene actually changed.
-            # First frame always sends (dist=64 sentinel forces it).
-            dist = 64 if last_phash is None else hamming(last_phash, shot.phash)
-            full_dist = 64
+            # First permitted frame always sends, even at the maximum threshold.
+            dist = 256 if last_phash is None else hamming(last_phash, frame_phash)
+            full_dist = 256
             full_known = shot.full_phash is not None and last_full_phash is not None
             if full_known:
                 full_dist = hamming(last_full_phash, shot.full_phash)
-            send = dist >= PHASH_THRESHOLD
+            send = last_phash is None or dist >= PHASH_THRESHOLD
 
             # Whole-screen trigger: catches background windows changing content
             # while the foreground window (and its hash) stays identical.
@@ -150,7 +186,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                 cfg.ocr_cadence_seconds,
                 int(getattr(cfg, "max_capture_interval_seconds", 15) or 15),
             )
-            if not send and time.time() - last_sent_at >= max_interval:
+            if not send and time.monotonic() - last_sent_at >= max_interval:
                 send = True
 
             if cfg.dry_run:
@@ -161,7 +197,7 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
 
             if send:
                 if (
-                    _is_locally_paused()
+                    _capture_is_paused(cfg)
                     or (not cfg.monitoring_enabled and not cfg.dry_run)
                     or capture_policy() != policy
                 ):
@@ -213,16 +249,17 @@ async def capture_loop(cfg: AgentConfig, screenshot_queue: asyncio.Queue) -> Non
                     )
                 # Dedup remembers only frames the sink accepted. A transient
                 # broker failure must not suppress the next identical frame.
-                last_phash = shot.phash
+                last_phash = frame_phash
                 last_full_phash = shot.full_phash
-                last_sent_at = time.time()
+                last_capture_source = source
+                last_sent_at = time.monotonic()
                 sent_count += 1
             else:
                 skipped_count += 1
 
             # Roll up "skipped N identical frames" so the log isn't silent when
             # nothing changes. Liveness is signaled separately by heartbeat_loop().
-            now = time.time()
+            now = time.monotonic()
             if now - last_log_summary > 300:  # every 5 minutes
                 log.info(
                     "capture summary: sent=%d skipped=%d (skip rate=%.0f%%)",
@@ -434,8 +471,27 @@ def _apply_capture_config(cfg: AgentConfig, cc: dict) -> None:
     generation = cc.get("policy_generation")
     if isinstance(generation, str) and len(generation) <= 64:
         cfg.policy_generation = generation
-    cfg.monitoring_enabled = cc.get("monitoring_enabled") is True
+    cfg.monitoring_enabled = cc.get("monitoring_enabled") is True and cc.get("capture_allowed") is not False
     cfg.apps_and_urls_enabled = cc.get("apps_and_urls_enabled") is True
+    if "paused" in cc or "paused_until" in cc:
+        until = cc.get("paused_until")
+        deadline = None
+        try:
+            if until is not None:
+                if not isinstance(until, str):
+                    raise ValueError("paused_until must be an ISO timestamp or null")
+                parsed = datetime.fromisoformat(until)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                deadline = parsed.timestamp()
+        except ValueError:
+            # An invalid deadline cannot clear a pause or permit capture. A
+            # subsequent valid policy repairs this runtime state.
+            cfg.server_paused = True
+            cfg.server_paused_until = None
+            raise
+        cfg.server_paused = cc.get("paused") is not False and (cc.get("paused") is True or deadline is not None)
+        cfg.server_paused_until = deadline
     if isinstance(cc.get("cadence_seconds"), (int, float)):
         cfg.ocr_cadence_seconds = max(2, int(cc["cadence_seconds"]))
     if isinstance(cc.get("phash_threshold"), (int, float)):

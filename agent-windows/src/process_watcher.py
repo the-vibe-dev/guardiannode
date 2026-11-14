@@ -14,6 +14,20 @@ class ActiveProcess:
     exe: str | None
 
 
+def get_process(pid: int) -> ActiveProcess | None:
+    """Resolve one sampled window's process without resampling focus."""
+    try:
+        process = psutil.Process(pid)
+        name = process.name()
+        try:
+            exe = process.exe()
+        except (psutil.AccessDenied, OSError):
+            exe = None
+        return ActiveProcess(pid=pid, name=name, exe=exe)
+    except (psutil.Error, OSError):
+        return None
+
+
 def _windows_foreground() -> ActiveProcess | None:
     try:
         import win32gui  # type: ignore
@@ -27,8 +41,7 @@ def _windows_foreground() -> ActiveProcess | None:
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         if not pid:
             return None
-        p = psutil.Process(pid)
-        return ActiveProcess(pid=pid, name=p.name(), exe=p.exe() if p else None)
+        return get_process(pid)
     except Exception:
         return None
 

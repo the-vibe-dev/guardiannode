@@ -5,6 +5,23 @@ automatic cleanup status, the configured policy, and any unfinished evidence
 deletion requested during consent withdrawal. Counts never include image
 contents, capture tokens, paths, window titles, URLs, or raw transport errors.
 
+## Accepted work and restart recovery
+
+The pending replay budget bounds one recovery pass. Valid accepted frames beyond
+that budget remain encrypted on disk and are discovered on later refills; the
+budget does not delete the rest of the backlog. Replay retains the current
+newest-first policy and per-device queue fairness.
+
+The pending-frame maximum age is a separate processing policy. An unreviewed
+frame that expires before replay or classification moves to `pending_dead_letter`
+with reason `capture_expired_before_review`. It is not presented as a completed
+AI review. Normal quarantine housekeeping then applies. Settings exposes queue
+and quarantine counts; individual quarantine inspection or reprocessing is still
+an operator workflow, not a dashboard review feature.
+
+Consent withdrawal, explicit evidence deletion and invalid authority still use
+their deletion/discard paths. Recovery must not revive data after those actions.
+
 ## Quarantine policy
 
 Normal housekeeping applies to `pending_dead_letter`, where failed captures

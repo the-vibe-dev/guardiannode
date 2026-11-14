@@ -34,11 +34,14 @@ def resolve_profile(
     device_id: str | None = None,
     payload_profile_id: str | None = None,
     payload_age_group: str | None = None,
+    defer_audit: bool = False,
 ) -> ResolvedProfile:
     """Resolve the effective child profile for an authenticated device.
 
     ``payload_age_group`` is accepted only for API compatibility and is not
     authoritative for paired devices.
+    ``defer_audit`` keeps the audit row pending until the caller's final write
+    transaction, so slow screenshot analysis does not hold SQLite's write lock.
     """
     if device is None and device_id:
         device = session.get(Device, device_id)
@@ -60,6 +63,7 @@ def resolve_profile(
                 "assigned_profile_id": device.profile_id if device is not None else None,
                 "payload_profile_id": payload_profile_id,
             },
+            flush=not defer_audit,
         )
 
     profile: ChildProfile | None = None

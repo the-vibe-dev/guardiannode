@@ -422,7 +422,7 @@ def _ready_tokens() -> list[str]:
 
 
 def requeue_pending(q: Any | None = None) -> int:
-    """Requeue viable pending frames newest-first and discard stale backlog."""
+    """Replay a bounded batch; retain the rest and quarantine expired frames."""
     queue = q or get_queue()
     replay_limit = int(
         getattr(settings_mod.settings, "pending_replay_max_frames", _MAX_PENDING) or _MAX_PENDING
@@ -437,13 +437,15 @@ def requeue_pending(q: Any | None = None) -> int:
     replayed = 0
     for token in sorted(_ready_tokens(), key=_mtime, reverse=True):
         meta = _load_meta(token)
-        if meta is None or _is_stale(meta):
-            _discard(token)
+        if meta is None:
+            continue
+        if _is_stale(meta):
+            _quarantine(token, "capture_expired_before_review")
             continue
         if replayed >= replay_limit:
-            log.info("pending replay limit reached; discarding backlog frame %s", token)
-            _discard(token)
-            continue
+            # The budget bounds one replay pass, not accepted durable work.
+            # The worker's next refill will discover these remaining frames.
+            break
         try:
             queue.put_nowait(token)
             replayed += 1
@@ -466,8 +468,8 @@ async def _classify_token(token: str) -> None:
         _quarantine(token, "missing pending metadata")
         return
     if _is_stale(meta):
-        log.info("pending frame %s is stale; discarding before classification", token)
-        _discard(token)
+        log.info("pending frame %s expired before review; quarantining", token)
+        _quarantine(token, "capture_expired_before_review")
         return
     timestamp = _parse_timestamp(meta.get("timestamp")) or datetime.now(UTC)
 
@@ -478,6 +480,11 @@ async def _classify_token(token: str) -> None:
         if (
             not screenshot_ingest._monitoring_active(session, device)
             or policy.generation != meta.get("policy_generation")
+            or (
+                "assigned_profile_id" in meta
+                and device is not None
+                and device.profile_id != meta["assigned_profile_id"]
+            )
         ):
             _discard(token)
             session.commit()
@@ -506,6 +513,12 @@ async def _classify_token(token: str) -> None:
             mime_type=meta.get("mime_type", "image/jpeg"),
             timestamp=timestamp,
             source_ip=meta.get("source_ip"),
+            capture_authority=screenshot_ingest.CaptureAuthority(
+                policy_generation=meta.get("policy_generation"),
+                assigned_profile_id=meta.get("assigned_profile_id"),
+                # Older pending files did not bind a receipt-time assignment.
+                assignment_bound="assigned_profile_id" in meta,
+            ),
         )
         session.commit()
         _discard(token)

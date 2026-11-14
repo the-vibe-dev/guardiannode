@@ -20,7 +20,7 @@ def _pending_file(tmp_path, token: str, *, stored_at: datetime, mtime: float) ->
     os.utime(pending / f"{token}.enc", (mtime, mtime))
 
 
-def test_requeue_pending_newest_first_and_discards_stale_backlog(monkeypatch, tmp_path):
+def test_requeue_budget_retains_fresh_backlog_and_quarantines_expired_frames(monkeypatch, tmp_path):
     monkeypatch.setattr(screenshot_async.settings_mod.settings, "data_dir", tmp_path)
     monkeypatch.setattr(screenshot_async.settings_mod.settings, "pending_frame_max_age_seconds", 600)
     monkeypatch.setattr(screenshot_async.settings_mod.settings, "pending_replay_max_frames", 2)
@@ -37,7 +37,60 @@ def test_requeue_pending_newest_first_and_discards_stale_backlog(monkeypatch, tm
     assert q.get_nowait() == "newest"
     assert q.get_nowait() == "newer"
     assert not (tmp_path / "pending" / "stale.json").exists()
-    assert not (tmp_path / "pending" / "old-fresh.json").exists()
+    assert (tmp_path / "pending" / "old-fresh.json").exists()
+    assert (tmp_path / "pending" / "old-fresh.enc").exists()
+    dead_meta = json.loads((tmp_path / "pending_dead_letter" / "stale.json").read_text())
+    assert dead_meta["dead_letter_reason"] == "capture_expired_before_review"
+    assert (tmp_path / "pending_dead_letter" / "stale.enc").exists()
+
+
+@pytest.mark.asyncio
+async def test_more_than_fifty_accepted_frames_survive_replay_rounds_and_restart(monkeypatch):
+    monkeypatch.setattr(screenshot_async.settings_mod.settings, "pending_replay_max_frames", 50)
+    tokens = []
+    for index in range(70):
+        device_id = f"child-{index % 2}"
+        assert screenshot_async.can_accept(device_id, 15)[0] is True
+        tokens.append(screenshot_async.store_pending(b"synthetic frame", {"device_id": device_id}))
+
+    first_queue = screenshot_async.FairDeviceQueue(maxsize=500)
+    assert screenshot_async.requeue_pending(first_queue) == 50
+    assert screenshot_async.pending_count() == 70
+    first_batch = [await first_queue.get() for _ in range(50)]
+    for token in first_batch:
+        screenshot_async.discard(token)
+    assert screenshot_async.pending_count() == 20
+
+    # A fresh queue models a service restart; every accepted remaining token is
+    # still discoverable and is only removed after its processing completes.
+    restarted_queue = screenshot_async.FairDeviceQueue(maxsize=500)
+    assert screenshot_async.requeue_pending(restarted_queue) == 20
+    second_batch = [await restarted_queue.get() for _ in range(20)]
+    assert set(first_batch).isdisjoint(second_batch)
+    assert set(first_batch + second_batch) == set(tokens)
+    for token in second_batch:
+        screenshot_async.discard(token)
+    assert screenshot_async.pending_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_expired_retry_is_quarantined_with_its_encrypted_frame(monkeypatch):
+    from app.services import encryption
+
+    monkeypatch.setattr(screenshot_async.settings_mod.settings, "pending_frame_max_age_seconds", 600)
+    token = screenshot_async.store_pending(b"synthetic frame", {"device_id": "child-a"})
+    metadata = screenshot_async._load_meta(token)
+    metadata.update(stored_at=(datetime.now(UTC) - timedelta(hours=1)).isoformat(), attempts=4)
+    screenshot_async._write_meta(token, metadata)
+
+    await screenshot_async._classify_token(token)
+
+    assert screenshot_async._load_meta(token) is None
+    dead = screenshot_async._dead_letter_dir()
+    metadata = json.loads((dead / f"{token}.json").read_text())
+    assert metadata["dead_letter_reason"] == "capture_expired_before_review"
+    assert metadata["attempts"] == 4
+    assert encryption.decrypt_blob_from_disk(dead / f"{token}.enc", aad=token.encode("ascii")) == b"synthetic frame"
 
 
 @pytest.mark.asyncio

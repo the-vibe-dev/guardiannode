@@ -84,6 +84,7 @@ class GuardianReviewAssessment(StrictModel):
 
 
 class GuardianReviewContext(StrictModel):
+    expected_risk_id: str | None = Field(default=None, min_length=1, max_length=64)
     relationship_context: Literal[
         "unknown_person", "known_peer", "known_adult", "family_member",
         "school_or_activity_contact", "other", "unknown",

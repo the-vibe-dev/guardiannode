@@ -11,11 +11,11 @@
 
 # GuardianNode Alpha / Developer Preview
 
-> **Screenshot and AI review edition - 13 November 2026, review.3.** This copy
-> is based on the supplied `guardiannode-main (6).zip` and focuses on capture,
+> **Screenshot and AI review edition - 13 November 2026, review.4.** This copy
+> is based on the supplied `guardiannode-main (9).zip` and focuses on capture,
 > AI-assisted assessment and parent review. Screen-time limits, app/website
 > blocking and exception approvals are outside this edition. See
-> [START_HERE.md](START_HERE.md) and the [integration record](docs/release-validation/screenshot-review-2026-11-13.md)
+> [START_HERE.md](START_HERE.md) and the [integration record](docs/release-validation/screenshot-review4-2026-11-13.md)
 > for changes, validation and upgrade guidance. This remains an alpha source
 > evaluation; historical release records do not qualify this changed build.
 

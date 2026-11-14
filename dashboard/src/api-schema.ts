@@ -1777,6 +1777,8 @@ export interface components {
             action: string;
             /** Note */
             note?: string | null;
+            /** Expected Risk Id */
+            expected_risk_id?: string | null;
         };
         /** AlertDTO */
         AlertDTO: {
@@ -2179,6 +2181,8 @@ export interface components {
             action: string;
             /** Confirmed Preview */
             confirmed_preview?: string | null;
+            /** Expected Risk Id */
+            expected_risk_id?: string | null;
         };
         /** ConsentChoices */
         ConsentChoices: {
@@ -2435,6 +2439,8 @@ export interface components {
         };
         /** GuardianReviewContext */
         GuardianReviewContext: {
+            /** Expected Risk Id */
+            expected_risk_id?: string | null;
             /**
              * Relationship Context
              * @default unknown
@@ -3039,6 +3045,8 @@ export interface components {
             status: string;
             /** Notes */
             notes?: string | null;
+            /** Expected Risk Id */
+            expected_risk_id?: string | null;
         };
         /** ReviewResult */
         ReviewResult: {
@@ -3345,6 +3353,8 @@ export interface components {
             feedback_type: string;
             /** Notes */
             notes?: string | null;
+            /** Expected Risk Id */
+            expected_risk_id?: string | null;
         };
         /** FeedbackRequest */
         app__api__risks__FeedbackRequest: {

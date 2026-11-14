@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -13,6 +14,8 @@ from uuid import uuid4
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+log = logging.getLogger("guardiannode.agent.queue")
 
 
 def default_queue_path() -> Path:
@@ -87,7 +90,14 @@ def _encode_payload(payload: dict) -> bytes:
 
 def _decode_payload(data: bytes) -> dict:
     payload = json.loads(data.decode("utf-8"))
-    payload["image_bytes"] = base64.b64decode(payload.pop("image_bytes_b64"))
+    if not isinstance(payload, dict):
+        raise ValueError("invalid queue payload")
+    encoded = payload.pop("image_bytes_b64")
+    if not isinstance(encoded, str):
+        raise ValueError("invalid queue image")
+    payload["image_bytes"] = base64.b64decode(encoded, validate=True)
+    if not payload["image_bytes"]:
+        raise ValueError("empty queue image")
     return payload
 
 
@@ -209,7 +219,7 @@ class DurableScreenshotQueue:
             except TimeoutError:
                 continue
 
-    def _get_ready(self) -> dict | None:
+    def _claim_ready(self) -> tuple | None:
         now = time.time()
         with closing(self._connect()) as conn:
             with conn:
@@ -250,13 +260,24 @@ class DurableScreenshotQueue:
                     """,
                     (item_id, self.lease_owner),
                 ).fetchone()
-        if row is None:
-            return None
-        item_id, nonce, ciphertext = row
-        payload = _decode_payload(AESGCM(self._key).decrypt(nonce, ciphertext, item_id.encode("ascii")))
-        payload["_queue_id"] = item_id
-        payload["_queue_lease_owner"] = self.lease_owner
-        return payload
+        return row
+
+    def _get_ready(self) -> dict | None:
+        while (row := self._claim_ready()) is not None:
+            item_id, nonce, ciphertext = row
+            try:
+                payload = _decode_payload(AESGCM(self._key).decrypt(nonce, ciphertext, item_id.encode("ascii")))
+            except (InvalidTag, ValueError, TypeError, KeyError):
+                # A damaged row cannot recover by retrying the same encrypted
+                # bytes. Release it once, without logging private evidence, and
+                # continue to a healthy frame instead of cycling its lease.
+                self.ack_payload({"_queue_id": item_id, "_queue_lease_owner": self.lease_owner})
+                log.warning("discarded unreadable queued screenshot")
+                continue
+            payload["_queue_id"] = item_id
+            payload["_queue_lease_owner"] = self.lease_owner
+            return payload
+        return None
 
     def ack_payload(self, payload: dict) -> None:
         item_id = payload.get("_queue_id")

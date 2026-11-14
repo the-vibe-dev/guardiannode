@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import multiprocessing
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.durable_queue import DurableScreenshotQueue
 from src.main import screenshot_sender_loop
@@ -66,6 +69,48 @@ def test_durable_queue_encrypts_payload_and_acks(tmp_path):
 
     q.ack_payload(payload)
     assert q.qsize() == 0
+
+
+@pytest.mark.parametrize("damage", ["authentication", "json", "payload_type", "base64", "empty_image"])
+def test_unreadable_queue_row_does_not_cycle_or_delay_healthy_evidence(tmp_path, caplog, damage):
+    q = _queue(tmp_path)
+    q.put_nowait({"image_bytes": b"private damaged evidence"})
+    with closing(sqlite3.connect(q.path)) as conn:
+        item_id = conn.execute("SELECT item_id FROM screenshot_queue").fetchone()[0]
+        nonce = os.urandom(12)
+        plaintext = {
+            "authentication": b"unused", "json": b"not-json-private-evidence",
+            "payload_type": b"[]", "base64": json.dumps({"image_bytes_b64": "%%%"}).encode(),
+            "empty_image": json.dumps({"image_bytes_b64": ""}).encode(),
+        }[damage]
+        ciphertext = AESGCM(q._key).encrypt(nonce, plaintext, item_id.encode("ascii"))
+        if damage == "authentication":
+            ciphertext = ciphertext[:-1] + bytes([ciphertext[-1] ^ 1])
+        with conn:
+            conn.execute("UPDATE screenshot_queue SET payload_nonce=?, payload_ciphertext=?", (nonce, ciphertext))
+    q.put_nowait({"image_bytes": b"healthy evidence", "idempotency_key": "healthy-frame"})
+    payload = q._get_ready()
+    assert payload["image_bytes"] == b"healthy evidence"
+    assert payload["idempotency_key"] == "healthy-frame"
+    assert q.qsize() == 1
+    q.ack_payload(payload)
+    assert _queue(tmp_path).qsize() == 0
+    assert caplog.messages == ["discarded unreadable queued screenshot"]
+
+
+def test_transient_queue_read_error_preserves_pending_evidence(tmp_path, monkeypatch):
+    q = _queue(tmp_path)
+    q.put_nowait({"image_bytes": b"retry after storage recovers"})
+
+    def storage_unavailable():
+        raise sqlite3.OperationalError("temporary I/O failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(q, "_connect", storage_unavailable)
+        with pytest.raises(sqlite3.OperationalError):
+            q._get_ready()
+    assert q.qsize() == 1
+    assert q._get_ready()["image_bytes"] == b"retry after storage recovers"
 
 
 def test_durable_queue_survives_process_restart_and_retry_delay(tmp_path):

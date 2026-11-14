@@ -289,6 +289,7 @@ async def ingest_screenshot(
     db.refresh(device)
     if not device.paired or not consent.collection_allowed(db, screenshots=True):
         return ScreenshotIngestResponse(event_id="", status="privacy_disabled", queued=False)
+    assigned_profile_id = device.profile_id
     if not image_bytes:
         raise HTTPException(400, "Empty image")
     if age_group not in {"under_10", "10_13", "14_17"}:
@@ -320,6 +321,9 @@ async def ingest_screenshot(
             "window_title": window_title if policy.apps_and_urls else None,
             "url": url if policy.apps_and_urls else None,
             "profile_id": profile_id,
+            # The device-supplied profile remains a compatibility hint. Bind
+            # queued work to the server's assignment at acceptance instead.
+            "assigned_profile_id": assigned_profile_id,
             "age_group": age_group,
             "capture_scope": capture_scope,
             "policy_id": policy_id,
@@ -339,6 +343,12 @@ async def ingest_screenshot(
     if not device.paired or not consent.collection_allowed(db, screenshots=True):
         screenshot_async.discard(token)
         return ScreenshotIngestResponse(event_id="", status="privacy_disabled", queued=False)
+    if consent.effective_policy(db).generation != policy.generation:
+        screenshot_async.discard(token)
+        raise HTTPException(409, "Capture policy changed; discard this older frame")
+    if device.profile_id != assigned_profile_id:
+        screenshot_async.discard(token)
+        raise HTTPException(409, "Device assignment changed; discard this older frame")
     if is_device_paused(device):
         screenshot_async.discard(token)
         return ScreenshotIngestResponse(event_id="", status="paused", queued=False)

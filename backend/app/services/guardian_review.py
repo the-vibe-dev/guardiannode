@@ -38,7 +38,11 @@ from app.guardian_review_models import (
 from app.services import consent, encryption
 from app.services import guardian_review_codex_auth as codex_auth
 from app.services.audit import log_action
-from app.services.guardian_review_minimization import InvalidIncidentError, build_minimized_incident
+from app.services.guardian_review_minimization import (
+    IncidentEvidenceChangedError,
+    InvalidIncidentError,
+    build_minimized_incident,
+)
 from app.services.guardian_review_providers import ProviderError, provider_for
 
 RETENTION_NOTICES = {
@@ -201,6 +205,8 @@ def create_preview(
             provider=provider,
             model=configured_model(provider),
         )
+    except IncidentEvidenceChangedError as exc:
+        raise WorkflowError("evidence_changed", status_code=409) from exc
     except InvalidIncidentError as exc:
         status_code = 413 if "size limit" in str(exc) else 404
         code = "payload_too_large" if status_code == 413 else "not_found"
@@ -655,6 +661,7 @@ def _error_message(code: str) -> str:
         "review_in_progress": "Wait for this Guardian Review to finish before deleting it.",
         "payload_too_large": "The minimized incident is still too large to send safely.",
         "feedback_unavailable": "Feedback is available after a completed Guardian Review.",
+        "evidence_changed": "This alert has newer evidence. Review the updated evidence before trying again.",
         "database_busy": "GuardianNode is busy saving another update. Your incident is safe; try again shortly.",
         "external_ai_consent_required": "Enable optional external AI review in Privacy & consent before sending this request.",
     }.get(code, "Guardian Review failed safely.")

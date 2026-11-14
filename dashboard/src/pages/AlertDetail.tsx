@@ -22,6 +22,8 @@ function AlertIncident({ id }: { id: string | undefined }) {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deletionReceipt, setDeletionReceipt] = useState<DeviceAction | null>(null);
+  const [loadVersion, setLoadVersion] = useState(0);
+  const [evidenceChanged, setEvidenceChanged] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -31,7 +33,30 @@ function AlertIncident({ id }: { id: string | undefined }) {
         .catch((reason: Error) => { if (!disposed) setError(reason.message); });
     }
     return () => { disposed = true; };
-  }, [id]);
+  }, [id, loadVersion]);
+
+  function invalidateIncidentQueries() {
+    for (const queryKey of [["alerts"], ["overview"], ["capture-status"]]) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
+  }
+
+  async function refreshChangedEvidence() {
+    // Unmount all old evidence, screenshot reveal, outbound preview and results.
+    // Draft notes stay local, but no mutation is replayed against the new risk.
+    setDetail(null);
+    setError(null);
+    setActionMsg(null);
+    setEvidenceChanged(true);
+    invalidateIncidentQueries();
+    setLoadVersion((current) => current + 1);
+  }
+
+  async function handleActionFailure(reason: unknown, prefix: string) {
+    if (reason instanceof ApiError && reason.status === 409 && (reason.body?.detail?.code || reason.body?.error?.code) === "evidence_changed") {
+      await refreshChangedEvidence();
+    } else setError(`${prefix}: ${reason instanceof Error ? reason.message : String(reason)}`);
+  }
 
   async function review(status: string) {
     if (!id) return;
@@ -39,7 +64,9 @@ function AlertIncident({ id }: { id: string | undefined }) {
     setActionMsg(null);
     setError(null);
     try {
-      await api.reviewAlert(id, status, notes || undefined);
+      await api.reviewAlert(id, status, notes || undefined, detail.alert.risk_id);
+      setEvidenceChanged(false);
+      invalidateIncidentQueries();
       const d = await api.alert(id);
       setDetail(d);
       const friendly: Record<string, string> = {
@@ -49,9 +76,8 @@ function AlertIncident({ id }: { id: string | undefined }) {
         dismissed: "Dismissed",
       };
       setActionMsg(`✓ ${friendly[status] || status}`);
-      setTimeout(() => setActionMsg(null), 3000);
     } catch (e: any) {
-      setError(`Action failed: ${e.message || e}`);
+      await handleActionFailure(e, "Action failed");
     } finally {
       setBusy(false);
     }
@@ -63,13 +89,14 @@ function AlertIncident({ id }: { id: string | undefined }) {
     setActionMsg(null);
     setError(null);
     try {
-      await api.feedbackAlert(id, feedback_type, notes || undefined);
+      await api.feedbackAlert(id, feedback_type, notes || undefined, detail.alert.risk_id);
+      setEvidenceChanged(false);
+      invalidateIncidentQueries();
       const d = await api.alert(id);
       setDetail(d);
       setActionMsg("✓ Feedback recorded");
-      setTimeout(() => setActionMsg(null), 3000);
     } catch (e: any) {
-      setError(`Feedback failed: ${e.message || e}`);
+      await handleActionFailure(e, "Feedback failed");
     } finally {
       setBusy(false);
     }
@@ -80,14 +107,14 @@ function AlertIncident({ id }: { id: string | undefined }) {
     setBusy(true);
     setError(null);
     setActionMsg(null);
-    const body = { action: "delete_evidence" as const };
+    const body = { action: "delete_evidence" as const, expected_risk_id: detail.alert.risk_id };
     try {
       const result = await api.confirmedAlertAction(id, body);
       recordDeletion(result);
     } catch (error) {
       const preview = error instanceof ApiError ? error.body?.detail?.preview : null;
       if (!preview) {
-        setError(`Action failed: ${(error as Error).message}`);
+        await handleActionFailure(error, "Action failed");
         setBusy(false);
         return;
       }
@@ -99,7 +126,7 @@ function AlertIncident({ id }: { id: string | undefined }) {
         const result = await api.confirmedAlertAction(id, { ...body, confirmed_preview: preview });
         recordDeletion(result);
       } catch (secondError) {
-        setError(`Action failed: ${(secondError as Error).message}`);
+        await handleActionFailure(secondError, "Action failed");
       }
     } finally {
       setBusy(false);
@@ -121,7 +148,7 @@ function AlertIncident({ id }: { id: string | undefined }) {
     <Link to="/risks" className="inline-flex min-h-11 items-center font-semibold text-[#275e3d] underline">Return to alerts</Link>
   </section>;
 
-  if (error && !detail) return <div role="alert" className="text-red-700 p-4">{error}</div>;
+  if (error && !detail) return <div role="alert" className="text-red-700 p-4">{error} <button className="font-semibold underline" onClick={() => { setError(null); setLoadVersion((current) => current + 1); }}>Retry alert</button></div>;
   if (!detail) return <div role="status" className="text-gray-500 p-4">Loading…</div>;
 
   const eventId = detail.event?.event_id;
@@ -146,8 +173,9 @@ function AlertIncident({ id }: { id: string | undefined }) {
         </div>
       )}
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>}
-      {actionMsg && <div className="bg-green-50 border border-green-200 text-green-700 rounded p-3 text-sm">{actionMsg}</div>}
+      {evidenceChanged && <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">This alert has newer evidence. Your previous action was not applied. Review the updated screenshot and findings before trying again. Any draft notes are still below.</div>}
+      {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>}
+      {actionMsg && <div role="status" className="bg-green-50 border border-green-200 text-green-700 rounded p-3 text-sm">{actionMsg}</div>}
 
       {/* Summary */}
       <div className="bg-white shadow rounded p-4">
@@ -162,7 +190,7 @@ function AlertIncident({ id }: { id: string | undefined }) {
             Screenshot
             <span className="text-xs font-normal text-gray-500">(encrypted at rest; viewing logs an audit entry)</span>
           </h2>
-          {hasScreenshot ? <ScreenshotViewer eventId={eventId} /> : <p role={detail.event.screenshot_status === "missing" ? "alert" : "status"} className="text-sm text-slate-600">{detail.event.screenshot_status === "missing" ? "The screenshot record exists, but its image is unavailable. Check storage diagnostics." : detail.event.screenshot_status === "pending_delete" ? "This screenshot is pending deletion and cannot be displayed." : detail.event.screenshot_status === "not_retained" ? "No screenshot is retained for this alert." : "Screenshot availability has not been reported."}</p>}
+          {hasScreenshot ? <ScreenshotViewer key={eventId} eventId={eventId} /> : <p role={detail.event.screenshot_status === "missing" ? "alert" : "status"} className="text-sm text-slate-600">{detail.event.screenshot_status === "missing" ? "The screenshot record exists, but its image is unavailable. Check storage diagnostics." : detail.event.screenshot_status === "pending_delete" ? "This screenshot is pending deletion and cannot be displayed." : detail.event.screenshot_status === "not_retained" ? "No screenshot is retained for this alert." : "Screenshot availability has not been reported."}</p>}
         </div>
       )}
 
@@ -190,7 +218,7 @@ function AlertIncident({ id }: { id: string | undefined }) {
         )}
       </div>
 
-      <GuardianReviewPanel alertId={id!} detail={detail} />
+      <GuardianReviewPanel key={detail.alert.risk_id} alertId={id!} detail={detail} onEvidenceChanged={refreshChangedEvidence} />
 
       <div className="bg-white shadow rounded p-4">
         <h2 className="font-semibold mb-2">Conversation & next steps</h2>
@@ -240,6 +268,7 @@ function AlertIncident({ id }: { id: string | undefined }) {
       <div className="bg-white shadow rounded p-4">
         <h3 className="font-semibold mb-2">Review</h3>
         <textarea
+          aria-label="Review notes"
           placeholder="Optional notes…"
           className="w-full border rounded p-2 text-sm"
           rows={3}

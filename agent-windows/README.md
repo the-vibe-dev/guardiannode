@@ -21,7 +21,8 @@ The source builds on Linux (for dev/testing), but production deployment is Windo
 - `src/main.py` — entrypoint
 - `src/config.py` — config loading
 - `src/process_watcher.py` — psutil-based active process detection
-- `src/window_tracker.py` — pywin32 active window detection (Windows only)
+- `src/window_tracker.py` — one foreground-window/process snapshot and focus checks
+- `src/display_coordinates.py` — temporary per-monitor DPI context for physical pixel bounds
 - `src/screenshot_capture.py` — mss-based capture
 - `src/ocr_engine.py` — optional local OCR helpers
 - `src/broker_service.py` — credentialed Windows broker and parent-policy cache
@@ -64,6 +65,9 @@ Offline screenshot storage remains bounded by the configured age, item, and
 byte limits. Expired frames are pruned on startup, before dequeue, and when
 reporting backlog, even when no new capture arrives. This is bounded buffering,
 not an indefinite archive or a guarantee that every offline frame is retained.
+An authenticated-decryption or payload-decoding failure retires only the unreadable
+row and lets healthy queued frames continue. Storage/permission failures preserve
+pending rows for recovery; discarded evidence contents are never logged.
 
 ## Screenshot capture and review
 
@@ -85,10 +89,28 @@ accepted by the local capture sink; a failed broker submission does not suppress
 the next identical frame. The broker must explicitly acknowledge `queued` before
 the session agent treats a screenshot as admitted.
 
+Primary-display selection uses the display's primary flag when available and never
+falls back to capturing the combined desktop. Window bounds and capture use physical
+pixels in a temporary per-monitor Windows DPI context. Window identity and process
+are sampled from the same foreground handle and checked again after capture. A
+changed foreground discards an app-scoped frame; primary-display frames omit stale
+or other-display app/title metadata. App-scoped frames are clipped to the visible
+desktop, including negative desktop coordinates. This mode captures a visible
+rectangle, so an overlapping window can still appear in its pixels.
+
+Display identity or capture-bound changes reset deduplication. Explicit zero change
+thresholds are honored, and maximum-interval refresh uses monotonic elapsed time so
+a clock correction cannot postpone it. JPEG encoding keeps the highest fitting
+quality under the existing broker transport bound; high-entropy frames no longer
+fail admission solely because the initial JPEG is too large.
+
 Primary-display capture remains the default. Other monitors, secure desktops, and
 unobserved user sessions must not be described as covered. Periodic captures and
 perceptual hashing can miss brief or small visual changes. The maximum interval
 refresh helps reduce that gap but is not a guarantee of complete capture.
+Portable image/API tests cover these paths with synthetic displays. Native Windows
+mixed-DPI displays, monitor hot-plugging, RDP, and focus transitions still require
+qualification on supported Windows hardware.
 
 ## Upgrading an older build with active restrictions
 

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import GuardianReviewPanel from "./GuardianReviewPanel";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 
-vi.mock("../api", () => ({
+vi.mock("../api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../api")>(),
   api: {
     guardianReviewProviders: vi.fn(),
     guardianReviewHistory: vi.fn(),
@@ -55,6 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 function renderPanel() {
@@ -155,5 +157,57 @@ describe("Guardian Review privacy flow", () => {
     fireEvent.click(screen.getByText("Save feedback"));
     await waitFor(() => expect(api.saveGuardianReviewFeedback).toHaveBeenCalledWith("review-1", ["helpful"]));
     expect(await screen.findByText(/will not automatically train/i)).toBeTruthy();
+  });
+
+  it("keeps review history available when provider status fails", async () => {
+    vi.mocked(api.guardianReviewProviders).mockRejectedValue(new Error("Provider temporarily unavailable"));
+    vi.mocked(api.guardianReviewHistory).mockResolvedValue([{ review_id: "local-review", status: "completed", created_at: "2026-07-15T12:00:00Z" }]);
+    renderPanel();
+    expect(await screen.findByRole("button", { name: "View review local-review" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry provider status" })).toBeTruthy();
+    expect(screen.queryByText("No Guardian Reviews yet.")).toBeNull();
+  });
+
+  it("scrubs a selected local assessment before attempting history refresh after deletion", async () => {
+    const row = { review_id: "local-review", status: "completed", created_at: "2026-07-15T12:00:00Z" };
+    vi.mocked(api.guardianReviewHistory).mockResolvedValueOnce([row]).mockRejectedValueOnce(new Error("Refresh failed"));
+    vi.mocked(api.guardianReview).mockResolvedValue({ ...row, assessment: { assessment: "ambiguous", severity: "medium", plain_language_summary: "Sensitive local assessment" } });
+    vi.mocked(api.deleteGuardianReview).mockResolvedValue({ ...row, status: "deleted" });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "View review local-review" }));
+    await screen.findByText("Sensitive local assessment");
+    fireEvent.click(screen.getByRole("button", { name: "Delete local assessment" }));
+    expect(await screen.findByText(/assessment and its outbound preview were deleted/)).toBeTruthy();
+    expect(screen.queryByText("Sensitive local assessment")).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry history" })).toBeTruthy();
+    expect(api.guardianReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not continue polling after unmounting with a pending result request", async () => {
+    let resolve!: (value: any) => void;
+    const pending = new Promise((success) => { resolve = success; });
+    vi.mocked(api.guardianReviewHistory).mockResolvedValue([{ review_id: "running-review", status: "running" }]);
+    vi.mocked(api.guardianReview).mockReturnValue(pending);
+    const view = renderPanel();
+    await waitFor(() => expect(api.guardianReview).toHaveBeenCalledTimes(1));
+    view.unmount();
+    vi.useFakeTimers();
+    try {
+      await act(async () => { resolve({ review_id: "running-review", status: "running" }); await pending; });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(api.guardianReview).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("asks the incident to refresh when the selected preview evidence has changed", async () => {
+    const onEvidenceChanged = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(api.guardianReviewPreview).mockRejectedValue(new ApiError("Evidence changed", 409, { error: { code: "evidence_changed" } }));
+    render(<MemoryRouter><GuardianReviewPanel alertId="alert-1" detail={{ ...detail, alert: { risk_id: "displayed-risk" } }} onEvidenceChanged={onEvidenceChanged} /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Preview what would be sent" }));
+    await waitFor(() => expect(onEvidenceChanged).toHaveBeenCalledOnce());
+    expect(api.guardianReviewPreview).toHaveBeenCalledWith("alert-1", expect.objectContaining({ expected_risk_id: "displayed-risk" }));
+    expect(screen.queryByTestId("guardian-review-outbound")).toBeNull();
+    expect(api.submitGuardianReview).not.toHaveBeenCalled();
   });
 });

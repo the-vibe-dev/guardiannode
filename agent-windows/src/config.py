@@ -82,6 +82,9 @@ class AgentConfig:
     # authoritative value; local YAML must not authorize broker collection.
     monitoring_enabled: bool = False
     apps_and_urls_enabled: bool = False
+    # Runtime-only policy state. A YAML file cannot set or clear a parent pause.
+    server_paused: bool = field(default=False, init=False, repr=False)
+    server_paused_until: float | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # PyYAML treats unquoted values like 10_13 as numeric 1013. Normalize
@@ -94,10 +97,10 @@ class AgentConfig:
             return cls()
         data = yaml.safe_load(path.read_text("utf-8")) or {}
         # accept unknown keys gracefully
-        kwargs = {k: data[k] for k in cls.__dataclass_fields__ if k in data}
+        kwargs = {k: data[k] for k, spec in cls.__dataclass_fields__.items() if spec.init and k in data}
         return cls(**kwargs)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        out = {k: getattr(self, k) for k in self.__dataclass_fields__}
+        out = {k: getattr(self, k) for k, spec in self.__dataclass_fields__.items() if spec.init}
         path.write_text(yaml.safe_dump(out, sort_keys=False), encoding="utf-8")

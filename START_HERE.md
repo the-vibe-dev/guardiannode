@@ -1,17 +1,17 @@
 # GuardianNode - screenshot capture and AI review
 
-Review source: **2026-11-13-review.3** · Application: **0.1.0-alpha.3** · Status: **alpha / developer preview**
+Review source: **2026-11-13-review.4** · Application: **0.1.0-alpha.3** · Status: **alpha / developer preview**
 
-This edition integrates the supplied 2026-11-13 review.3 package and follows the
-product direction: screenshot capture, AI-assisted assessment and
-parent evidence review. It removes new device restrictions and exception
-approvals while preserving capture consent, privacy controls and local storage
-safeguards.
+This edition integrates the supplied review.4 package, preserves its
+dependency and release-workflow updates, and follows the product direction:
+screenshot capture, AI-assisted assessment and parent evidence review. It
+improves capture correctness, processing authority and evidence review while
+preserving capture consent, privacy controls and local storage safeguards.
 
 ## Read first
 
-1. [Integration record](docs/release-validation/screenshot-review-2026-11-13.md):
-   imported changes, current gaps and verification.
+1. [Current integration record](docs/release-validation/screenshot-review4-2026-11-13.md):
+   fixes in this edition, remaining gaps and verification.
 2. [Screenshot and AI review workflow](docs/SCREENSHOT_REVIEW.md): capture,
    processing, evidence, feedback and per-device status.
 3. [Legacy restriction recovery](docs/ENFORCEMENT.md): upgrade compatibility and
@@ -27,7 +27,9 @@ sources. No newly built or signed Windows installer is included.
 
 The original licensing and historical Build Week/release records remain intact.
 Historical counts and qualifications apply to their original builds only. The
-integration record is the authority for this edition's checks.
+current validation record is the authority for this edition's checks. The earlier
+[review.3 integration record](docs/release-validation/screenshot-review-2026-11-13.md)
+remains as provenance for changes already present in the supplied ZIP.
 
 ## Evaluate from source
 
@@ -117,7 +119,7 @@ Priorities are native Windows capture qualification, explicit multi-display
 coverage, representative OCR/AI evaluation, durable capture/drop diagnostics,
 optional capture exclusions, better incident/evidence navigation, and signed
 installers with qualified updates and rollback. Read [the focused roadmap](docs/ROADMAP.md)
-and [the integration record](docs/release-validation/screenshot-review-2026-11-13.md).
+and [the current integration record](docs/release-validation/screenshot-review4-2026-11-13.md).
 
 Screen-time budgets, usage schedules, website/app blocking and exception requests
 are outside the chosen product scope. Retention, queue bounds and request-size
@@ -125,5 +127,5 @@ controls remain operational safeguards; they do not restrict a child's browsing
 or device use.
 
 No source-test result establishes real-world detection accuracy or qualifies a
-native Windows installer. The integration record separates executed checks from
+native Windows installer. The current validation record separates executed checks from
 remaining release gates.

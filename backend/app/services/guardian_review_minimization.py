@@ -75,6 +75,10 @@ class InvalidIncidentError(ValueError):
     pass
 
 
+class IncidentEvidenceChangedError(InvalidIncidentError):
+    """The selected evidence belongs to a previous occurrence of this alert."""
+
+
 @dataclass(frozen=True)
 class MinimizedIncident:
     alert: Alert
@@ -254,6 +258,8 @@ def build_minimized_incident(
     event = db.get(Event, risk.event_id) if risk else None
     if alert is None or risk is None or event is None or event.deletion_state != "active":
         raise InvalidIncidentError("Incident not found or incomplete")
+    if context.expected_risk_id is not None and risk.risk_id != context.expected_risk_id:
+        raise IncidentEvidenceChangedError("Incident evidence changed")
     profile_id = alert.profile_id or event.profile_id
     profile = db.get(ChildProfile, profile_id) if profile_id else None
     device = db.get(Device, event.device_id) if event.device_id else None

@@ -19,6 +19,7 @@ def log_action(
     target: str | None = None,
     details: dict[str, Any] | None = None,
     source_ip: str | None = None,
+    flush: bool = True,
 ) -> AuditLog:
     row = AuditLog(
         actor=actor,
@@ -28,6 +29,7 @@ def log_action(
         source_ip=source_ip,
     )
     session.add(row)
-    session.flush()
+    if flush:
+        session.flush()
     log.info("audit %s by %s on %s", action, actor, target or "-")
     return row

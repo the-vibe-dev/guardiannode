@@ -8,7 +8,8 @@ block websites or apps, suspend a child's programs, or offer exception requests.
 ## What the product does
 
 1. A visible Windows capture process samples the configured desktop region.
-   The present full-screen mode covers the primary display. App-scoped capture
+   The present full-screen mode selects the actual primary display, independent
+   of monitor enumeration order. App-scoped capture
    limits which foreground contexts are collected; it does not stop those apps
    from running.
 2. The broker stores eligible frames in an encrypted, bounded retry queue and
@@ -24,6 +25,14 @@ block websites or apps, suspend a child's programs, or offer exception requests.
 6. Optional Guardian Review offers a separate external-model second opinion on
    the exact minimized text the parent previews and explicitly approves. Raw
    screenshots are not silently sent to that provider.
+
+The matching dashboard sends the risk record it displayed with review, feedback,
+escalation, deletion and second-opinion preview requests. If a repeated capture
+has changed the alert's evidence, the server rejects that stale decision and the
+dashboard asks the parent to review the current evidence. It does not silently
+repeat the action on a different screenshot. Older API clients can omit this
+optional field for compatibility; use the matched dashboard to obtain this
+protection.
 
 The **Home** page is the capture/review overview; **Risk Feed** is the triage
 queue; an **Alert** contains the evidence and assessment. **Models** and
@@ -55,6 +64,17 @@ Small fonts, scaling, image compression, theme, language and the configured
 model affect what can be read. The first eligible frame after a monitoring pause
 or capture-scope change is sampled anew rather than suppressed as an unchanged
 pre-pause frame.
+
+New server-accepted queue entries bind the server's current child assignment;
+a later assignment change cannot move that frame onto a different child. Legacy
+pending entries without this binding keep compatible classification-time
+assignment behavior.
+
+Consent must still belong to the same generation, and the device must still be
+assigned to the same child, when processing completes. A frame being assessed
+when consent is replaced or a device is reassigned is discarded; a later active
+consent does not revive the old frame. A stronger deterministic rule changes the
+risk finding while preserving the text model's actual success or failure status.
 
 The local classifier's score and confidence are model/rule estimates. They are
 not measured accuracy percentages. Review the screenshot and surrounding

@@ -9,7 +9,7 @@ and requests to bypass restrictions are outside the product scope.
 
 This direction supersedes the earlier enforcement roadmap. Historical release
 notes remain historical evidence, not a list of current capabilities. The
-current source is **2026-11-13-review.3**, an alpha/developer preview based on
+current source is **2026-11-13-review.4**, an alpha/developer preview based on
 application version **0.1.0-alpha.3**.
 
 ## Current foundation
@@ -23,6 +23,10 @@ application version **0.1.0-alpha.3**.
   distinguished from successful AI processing.
 - Review feed, on-demand screenshot reveal, notes, feedback and optional
   explicitly approved Guardian Review second opinions.
+- Decisions tied to the evidence displayed by the matching dashboard; stale
+  decisions require a refresh when repeated captures update an open alert.
+- Final processing checks reject frames whose consent generation or assigned
+  child changed during OCR/AI processing.
 - Notification policy, retry state, metadata-only digests, retention, consent
   withdrawal, export, backup and audit history.
 - Release-only recovery of recorded restrictions from older installations.
@@ -34,7 +38,7 @@ Docker or every browser. See [release gates](RELEASE_GATES.md).
 
 1. Build and test the exact Windows server installer and Windows child-device/all-in-one installer on clean machines. Exercise install,
    pairing, capture, review, privacy pause, withdrawal, upgrade and uninstall.
-2. Qualify monitor selection and DPI/scaling; implement explicit multi-display
+2. Qualify the corrected primary-monitor selection and DPI/scaling; implement explicit multi-display
    capture with per-display provenance before claiming all-monitor coverage.
 3. Measure capture acceptance, OCR, local-model completion, queue delay and
    alert delivery on supported hardware, including sleep, restart and outage.

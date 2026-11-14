@@ -49,6 +49,7 @@ class CompletedItem:
     tier: str
     device_id: str | None = None
     succeeded: bool = True
+    discarded: bool = False
 
 
 _lock = Lock()
@@ -87,7 +88,7 @@ def set_stage(event_id: str, stage: str) -> None:
             item.stage = stage
 
 
-def finish(event_id: str, *, severity: str, succeeded: bool = True) -> None:
+def finish(event_id: str, *, severity: str, succeeded: bool = True, discarded: bool = False) -> None:
     with _lock:
         item = _in_flight.pop(event_id, None)
         if item is None:
@@ -101,7 +102,8 @@ def finish(event_id: str, *, severity: str, succeeded: bool = True) -> None:
                 severity=severity,
                 tier=item.tier,
                 device_id=item.device_id,
-                succeeded=succeeded,
+                succeeded=succeeded and not discarded,
+                discarded=discarded,
             )
         )
 
@@ -122,7 +124,7 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
     items.sort(key=lambda d: d["started_at"])
 
     completed = [c for c in recent_completed if c.succeeded]
-    failures = [c for c in recent_completed if not c.succeeded]
+    failures = [c for c in recent_completed if not c.succeeded and not c.discarded]
     latencies = sorted(c.latency_ms for c in completed)
     n = len(latencies)
     avg = sum(latencies) / n if n else 0
@@ -146,6 +148,7 @@ def snapshot(window_seconds: int = 60) -> dict[str, Any]:
         "in_flight": items,
         "window_seconds": window_seconds,
         "failed_frames_in_window": len(failures),
+        "discarded_frames_in_window": sum(c.discarded for c in recent_completed),
         "last_classified_at": (
             datetime.fromtimestamp(last_finished, tz=UTC).isoformat()
             if last_finished else None

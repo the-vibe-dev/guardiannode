@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from sqlalchemy.orm import Session
 from ulid import ULID
 
 from app.db.models import ChildProfile, Device, Event, EvidenceBlob, RiskResult
+from app.db.session import begin_immediate_if_sqlite
 from app.services import (
     classifier,
     consent,
@@ -60,6 +62,15 @@ VALID_TIERS = {"full", "vision", "text_llm", "rules_only"}
 
 class InvalidModelAssessmentError(RuntimeError):
     """Safe retry signal; the encrypted queue retains the unreviewed frame."""
+
+
+@dataclass(frozen=True)
+class CaptureAuthority:
+    """Server-observed authority bound to a durable upload receipt."""
+
+    policy_generation: str | None
+    assigned_profile_id: str | None
+    assignment_bound: bool = True
 
 
 def _classifier_status(tier: str, ocr: OcrResult, vision: dict, text: dict) -> str:
@@ -93,12 +104,12 @@ def _monitoring_active(session: Session, device: Device | None) -> bool:
     )
 
 
-def _discarded_result() -> dict[str, Any]:
+def _discarded_result(reason: str = "monitoring_disabled") -> dict[str, Any]:
     return {
         "event_id": "", "risk_id": None, "alert_id": None,
         "risk_level": "none", "score": 0, "categories": [],
         "blob_stored": False, "vision_used": False, "extracted_text_chars": 0,
-        "status": "discarded", "discard_reason": "monitoring_disabled",
+        "status": "discarded", "discard_reason": reason,
     }
 
 
@@ -152,7 +163,12 @@ def _apply_rules_floor(current: dict[str, Any], rules_result: dict[str, Any]) ->
     current_level = current.get("risk_level", "none")
     rules_level = rules_result.get("risk_level", "none")
     rules_are_higher = _SEVERITY_ORDER.get(rules_level, 0) > _SEVERITY_ORDER.get(current_level, 0)
-    base = dict(rules_result if rules_are_higher else current)
+    # A stronger deterministic finding changes the risk assessment, not the
+    # outcome of the model call. Preserve its model/status/prompt provenance so
+    # successful or malformed text reviews remain accurately represented.
+    base = dict(current)
+    if rules_are_higher:
+        base.update(rules_result)
     other = current if rules_are_higher else rules_result
 
     base["categories"] = sorted(set((base.get("categories") or []) + (other.get("categories") or [])))
@@ -224,6 +240,7 @@ async def ingest_screenshot(
     mime_type: str = "image/jpeg",
     timestamp: datetime | None = None,
     source_ip: str | None = None,
+    capture_authority: CaptureAuthority | None = None,
 ) -> dict[str, Any]:
     """Run the tiered pipeline. Returns result dict (also writes DB rows)."""
     timestamp = timestamp or datetime.now(UTC)
@@ -247,6 +264,7 @@ async def ingest_screenshot(
     )
     severity_for_metrics = "none"
     succeeded = False
+    discarded = False
     try:
         result = await _ingest_inner(
             session,
@@ -267,12 +285,14 @@ async def ingest_screenshot(
             mime_type=mime_type,
             timestamp=timestamp,
             source_ip=source_ip,
+            capture_authority=capture_authority,
         )
         severity_for_metrics = result.get("risk_level", "none")
-        succeeded = True
+        discarded = result.get("status") == "discarded"
+        succeeded = not discarded
         return result
     finally:
-        pipeline_metrics.finish(event_id, severity=severity_for_metrics, succeeded=succeeded)
+        pipeline_metrics.finish(event_id, severity=severity_for_metrics, succeeded=succeeded, discarded=discarded)
 
 
 async def _ingest_inner(
@@ -295,6 +315,7 @@ async def _ingest_inner(
     mime_type: str,
     timestamp: datetime,
     source_ip: str | None,
+    capture_authority: CaptureAuthority | None,
 ) -> dict[str, Any]:
     vision_result: dict[str, Any] = {}
     text_result: dict[str, Any] = {}
@@ -305,14 +326,22 @@ async def _ingest_inner(
     # Resolve the child profile the same way text-event ingest does. The
     # backend assignment is authoritative; device payload profile/age fields are
     # legacy hints only and may not select another child's policy.
-    device = session.get(Device, device_id)
-    if not _monitoring_active(session, device):
+    device = session.get(Device, device_id, populate_existing=True)
+    if device is None or not _monitoring_active(session, device):
         return _discarded_result()
+    policy_generation = consent.effective_policy(session).generation
+    assigned_profile_id = device.profile_id
+    if capture_authority is not None:
+        if capture_authority.policy_generation != policy_generation:
+            return _discarded_result("policy_changed")
+        if capture_authority.assignment_bound and capture_authority.assigned_profile_id != assigned_profile_id:
+            return _discarded_result("profile_changed")
     resolved = resolve_profile(
         session,
         device=device,
         payload_profile_id=profile_id,
         payload_age_group=age_group,
+        defer_audit=True,
     )
     profile_id = resolved.profile_id
     age_group = resolved.age_group
@@ -443,11 +472,18 @@ async def _ingest_inner(
     severity = merged["risk_level"]
 
     # Classification can take tens of seconds. A parent can pause, revoke, or
-    # withdraw consent while it runs; re-read current state before any evidence
-    # is persisted. No asynchronous work follows this final authorization check.
+    # withdraw consent while it runs. Reserve SQLite's write transaction before
+    # re-reading state, so a concurrent parent mutation cannot commit between
+    # this check and evidence persistence. OCR/model work stays outside the lock;
+    # the caller commits or rolls back this short final write transaction.
+    begin_immediate_if_sqlite(session)
     session.refresh(device)
     if not _monitoring_active(session, device):
         return _discarded_result()
+    if consent.effective_policy(session).generation != policy_generation:
+        return _discarded_result("policy_changed")
+    if device.profile_id != assigned_profile_id:
+        return _discarded_result("profile_changed")
     if not consent.choice_allowed(session, "apps_and_urls"):
         app_name = window_title = url = None
 

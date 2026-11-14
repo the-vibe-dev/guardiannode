@@ -12,6 +12,7 @@ from ulid import ULID
 
 from app.api.deps import get_db_dep, parent_user, require_recent_auth
 from app.db.models import Alert, DeviceCommand, Event, EvidenceBlob, RiskResult, User
+from app.db.session import begin_immediate_if_sqlite
 from app.services import encryption, purge, taxonomy
 from app.services.audit import log_action
 from app.services.evidence_paths import UnsafeEvidencePathError, resolve_stored_evidence_path
@@ -79,6 +80,25 @@ def _visible_alerts(db: Session):
 
 def _visible_alert(db: Session, alert_id: str) -> Alert | None:
     return _visible_alerts(db).filter(Alert.alert_id == alert_id).first()
+
+
+def _writable_alert(db: Session, alert_id: str, expected_risk_id: str | None) -> Alert:
+    """Keep a parent decision attached to the evidence they actually saw.
+
+    Repeated captures can replace an open alert's risk_id. Serialize the short
+    check/write transaction so a repeat cannot land between this check and the
+    mutation. Older API clients may omit the optional revision field.
+    """
+    begin_immediate_if_sqlite(db)
+    alert = _visible_alerts(db).filter(Alert.alert_id == alert_id).populate_existing().with_for_update().first()
+    if alert is None:
+        raise HTTPException(404, "Alert not found")
+    if expected_risk_id is not None and alert.risk_id != expected_risk_id:
+        raise HTTPException(409, {
+            "code": "evidence_changed",
+            "message": "This alert has newer evidence. Review the updated evidence before trying again.",
+        })
+    return alert
 
 
 @router.get("", response_model=AlertPage)
@@ -252,6 +272,7 @@ def _screenshot_status(db: Session, event: Event | None) -> str:
 class ReviewRequest(BaseModel):
     status: str = Field(pattern="^(reviewed|false_positive|escalated|dismissed)$")
     notes: str | None = Field(default=None, max_length=4096)
+    expected_risk_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 @router.post("/{alert_id}/review", response_model=AlertDTO)
@@ -261,9 +282,7 @@ def review_alert(
     db: Session = Depends(get_db_dep),
     user: User = Depends(parent_user),
 ):
-    a = _visible_alert(db, alert_id)
-    if a is None:
-        raise HTTPException(404, "Alert not found")
+    a = _writable_alert(db, alert_id, req.expected_risk_id)
     a.status = req.status
     a.reviewed_by = str(user.id)
     a.reviewed_at = datetime.now(UTC)
@@ -271,7 +290,7 @@ def review_alert(
         a.notes = req.notes
     log_action(
         db, actor=str(user.id), action="alert.review",
-        target=alert_id, details={"status": req.status},
+        target=alert_id, details={"status": req.status, "risk_id": a.risk_id},
     )
     db.commit()
     return _to_dto(a)
@@ -280,6 +299,7 @@ def review_alert(
 class FeedbackRequest(BaseModel):
     feedback_type: str = Field(pattern="^(false_positive|confirmed|too_low|too_high|missed_context)$")
     notes: str | None = Field(default=None, max_length=4096)
+    expected_risk_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 @router.post("/{alert_id}/feedback", response_model=AlertDTO)
@@ -289,9 +309,7 @@ def record_feedback(
     db: Session = Depends(get_db_dep),
     user: User = Depends(parent_user),
 ):
-    a = _visible_alert(db, alert_id)
-    if a is None:
-        raise HTTPException(404, "Alert not found")
+    a = _writable_alert(db, alert_id, req.expected_risk_id)
     r = db.get(RiskResult, a.risk_id)
     note = f"{req.feedback_type}: {req.notes or ''}".strip()
     if r is not None:
@@ -306,7 +324,7 @@ def record_feedback(
         actor=str(user.id),
         action="alert.feedback",
         target=alert_id,
-        details={"feedback_type": req.feedback_type},
+        details={"feedback_type": req.feedback_type, "risk_id": a.risk_id},
     )
     db.commit()
     return _to_dto(a)
@@ -317,6 +335,7 @@ class ActionRequest(BaseModel):
 
     action: str = Field(pattern="^(notify|escalate|delete_evidence)$")
     note: str | None = Field(default=None, max_length=4096)
+    expected_risk_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 @router.post("/{alert_id}/action", response_model=AlertDTO)
@@ -326,9 +345,7 @@ def take_action(
     db: Session = Depends(get_db_dep),
     user: User = Depends(parent_user),
 ):
-    a = _visible_alert(db, alert_id)
-    if a is None:
-        raise HTTPException(404, "Alert not found")
+    a = _writable_alert(db, alert_id, req.expected_risk_id)
     if req.action == "delete_evidence":
         raise HTTPException(
             status_code=409,
@@ -358,7 +375,7 @@ def take_action(
     a.action_taken = req.action
     log_action(
         db, actor=str(user.id), action="alert.action",
-        target=alert_id, details={"action": req.action, "note": req.note},
+        target=alert_id, details={"action": req.action, "note": req.note, "risk_id": a.risk_id},
     )
     db.commit()
     return _to_dto(a)
@@ -371,6 +388,7 @@ class ConfirmedActionRequest(BaseModel):
 
     action: str = Field(pattern="^delete_evidence$")
     confirmed_preview: str | None = Field(default=None, max_length=2048)
+    expected_risk_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ActionExecutionDTO(BaseModel):
@@ -493,9 +511,7 @@ def create_confirmed_action(
     user: User = Depends(parent_user),
     _: None = Depends(require_recent_auth),
 ):
-    alert = _visible_alert(db, alert_id)
-    if alert is None:
-        raise HTTPException(404, "Alert not found")
+    alert = _writable_alert(db, alert_id, req.expected_risk_id)
     if not alert.device_id:
         raise HTTPException(409, "This alert is not linked to a child device")
     payload, preview = _action_payload(req)

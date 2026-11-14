@@ -193,11 +193,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ labels }),
     }),
-  reviewAlert: (id: string, status: string, notes?: string) =>
-    request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes }) }),
-  feedbackAlert: (id: string, feedback_type: string, notes?: string) =>
-    request<any>(`/alerts/${id}/feedback`, { method: "POST", body: JSON.stringify({ feedback_type, notes }) }),
-  confirmedAlertAction: (id: string, body: { action: "delete_evidence"; confirmed_preview?: string | null }) =>
+  reviewAlert: (id: string, status: string, notes?: string, expected_risk_id?: string) =>
+    request<any>(`/alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes, expected_risk_id }) }),
+  feedbackAlert: (id: string, feedback_type: string, notes?: string, expected_risk_id?: string) =>
+    request<any>(`/alerts/${id}/feedback`, { method: "POST", body: JSON.stringify({ feedback_type, notes, expected_risk_id }) }),
+  confirmedAlertAction: (id: string, body: { action: "delete_evidence"; confirmed_preview?: string | null; expected_risk_id?: string }) =>
     request<DeviceAction>(`/alerts/${id}/actions`, { method: "POST", body: JSON.stringify(body) }),
   alertActions: (id: string) => request<DeviceAction[]>(`/alerts/${encodeURIComponent(id)}/actions?limit=50`),
   undoAction: (action_id: string) => request<DeviceAction>(`/actions/${encodeURIComponent(action_id)}/undo`, { method: "POST" }),

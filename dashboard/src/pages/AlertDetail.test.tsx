@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, api } from "../api";
@@ -7,7 +7,7 @@ import AlertDetail from "./AlertDetail";
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
-  return { ...actual, api: { alert: vi.fn(), confirmedAlertAction: vi.fn() } };
+  return { ...actual, api: { alert: vi.fn(), confirmedAlertAction: vi.fn(), reviewAlert: vi.fn(), feedbackAlert: vi.fn() } };
 });
 vi.mock("../components/GuardianReviewPanel", () => ({ default: () => <div>Review panel</div> }));
 vi.mock("../components/ActionHistory", () => ({ default: () => <div>Action history</div> }));
@@ -19,7 +19,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 function detail(id: string) {
-  return { alert: { alert_id: id, severity: "low", status: "open" }, risk: { summary: `Evidence for ${id}`, score: 10, confidence: 1, categories: [], evidence: [], rules_triggered: [] }, event: { event_id: null }, redacted_text: null };
+  return { alert: { alert_id: id, risk_id: `risk-${id}`, severity: "low", status: "open" }, risk: { risk_id: `risk-${id}`, summary: `Evidence for ${id}`, score: 10, confidence: 1, categories: [], evidence: [], rules_triggered: [] }, event: { event_id: null }, redacted_text: null };
 }
 function Navigate() { const navigate = useNavigate(); return <button onClick={() => navigate("/alerts/current")}>Next alert</button>; }
 function show() { const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }); clients.push(client); render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/alerts/previous"]}><Navigate /><Routes><Route path="/alerts/:id" element={<AlertDetail />} /></Routes></MemoryRouter></QueryClientProvider>); }
@@ -102,10 +102,42 @@ describe("screenshot review focus", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reveal screenshot" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview evidence deletion…" }));
     expect(await screen.findByText("The retained evidence for this alert has been deleted.")).toBeTruthy();
-    expect(api.confirmedAlertAction).toHaveBeenLastCalledWith("previous", { action: "delete_evidence", confirmed_preview: preview });
+    expect(api.confirmedAlertAction).toHaveBeenLastCalledWith("previous", { action: "delete_evidence", confirmed_preview: preview, expected_risk_id: "risk-previous" });
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.queryByText("Evidence for previous")).toBeNull();
     expect(api.alert).toHaveBeenCalledTimes(1);
+    confirmation.mockRestore();
+  });
+
+  it.each([ ["Mark reviewed", "reviewAlert", "reviewed"], ["Confirm useful", "feedbackAlert", "confirmed"] ] as const)("binds %s to visible evidence and requires another decision after a conflict", async (label, method, value) => {
+    const refreshed = deferred<any>();
+    vi.mocked(api.alert).mockResolvedValueOnce({ ...detail("previous"), event: { event_id: "frame-1", has_screenshot: true } }).mockReturnValueOnce(refreshed.promise);
+    vi.mocked(api[method]).mockRejectedValueOnce(new ApiError("Evidence changed", 409, { detail: { code: "evidence_changed" } }));
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal screenshot" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Review notes" }), { target: { value: "Draft parent context" } });
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(api[method]).toHaveBeenCalledWith("previous", value, "Draft parent context", "risk-previous"));
+    await waitFor(() => expect(screen.queryByRole("img")).toBeNull());
+    const next = { ...detail("updated"), alert: { ...detail("updated").alert, alert_id: "previous" }, event: { event_id: "frame-2", has_screenshot: true } };
+    await act(async () => { refreshed.resolve(next); await refreshed.promise; });
+    expect(await screen.findByText("Evidence for updated")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("previous action was not applied");
+    expect((screen.getByRole("textbox", { name: "Review notes" }) as HTMLTextAreaElement).value).toBe("Draft parent context");
+    expect(screen.getByRole("button", { name: "Reveal screenshot" })).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(api[method]).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask for deletion confirmation or replay deletion on an evidence conflict", async () => {
+    vi.mocked(api.alert).mockResolvedValueOnce(detail("previous")).mockResolvedValueOnce(detail("updated"));
+    vi.mocked(api.confirmedAlertAction).mockRejectedValueOnce(new ApiError("Evidence changed", 409, { detail: { code: "evidence_changed" } }));
+    const confirmation = vi.spyOn(window, "confirm");
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview evidence deletion…" }));
+    expect(await screen.findByText("Evidence for updated")).toBeTruthy();
+    expect(confirmation).not.toHaveBeenCalled();
+    expect(api.confirmedAlertAction).toHaveBeenCalledTimes(1);
     confirmation.mockRestore();
   });
 });
