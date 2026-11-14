@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = REPO_ROOT / "installer/server-linux/install.sh"
@@ -198,6 +200,43 @@ def test_linux_installer_lan_mode_requires_child_reachable_url(tmp_path: Path) -
 
     assert result.returncode != 0
     assert "LAN/VPN mode requires GN_ADVERTISED_SERVER_URL" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("bind_host", "expected_host"),
+    [
+        ("192.168.1.44", "192.168.1.44"),
+        ("0.0.0.0", "127.0.0.1"),
+        ("::1", "[::1]"),
+        ("::", "[::1]"),
+        ("2001:db8::44", "[2001:db8::44]"),
+    ],
+)
+def test_linux_installer_checks_the_address_it_binds(
+    tmp_path: Path, bind_host: str, expected_host: str
+) -> None:
+    captured_url = tmp_path / "health-url.txt"
+    result = _run_bash(
+        f"""
+        source {INSTALLER}
+        GN_BIND_HOST="{bind_host}"
+        GN_HEALTH_TIMEOUT_SECONDS=1
+        mkdir -p "$GN_DATA/tls"
+        touch "$GN_DATA/tls/family-ca.pem"
+        curl() {{ printf '%s\\n' "${{@: -1}}" > "{captured_url}"; return 0; }}
+        wait_for_health
+        print_done
+        """,
+        tmp_path,
+    )
+
+    expected_url = f"https://{expected_host}:8787/api/health/ready"
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert captured_url.read_text(encoding="utf-8").strip() == expected_url
+    assert f"https://{expected_host}:8787" in result.stdout
+    if bind_host == "::1":
+        assert "First-run setup is loopback-only" in result.stdout
+        assert "Child installers on your private LAN/VPN" not in result.stdout
 
 
 def test_linux_installer_rollback_stops_service_before_moving_paths(tmp_path: Path) -> None:

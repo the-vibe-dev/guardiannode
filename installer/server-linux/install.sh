@@ -467,12 +467,24 @@ EOF
   green "Service installed and started."
 }
 
+local_dashboard_url() {
+  local host="$GN_BIND_HOST"
+  case "$host" in
+    0.0.0.0|localhost) host="127.0.0.1" ;;
+    ::|\[::\]|::1|\[::1\]) host="[::1]" ;;
+    *:*) host="[$host]" ;;
+  esac
+  printf 'https://%s:%s' "$host" "$GN_BIND_PORT"
+}
+
 wait_for_health() {
   local tries=0
+  local health_url
+  health_url="$(local_dashboard_url)/api/health/ready"
   blue "Waiting for backend health check..."
   while [ "$tries" -lt "$GN_HEALTH_TIMEOUT_SECONDS" ]; do
     if [ -f "$GN_DATA/tls/family-ca.pem" ] && \
-       curl --cacert "$GN_DATA/tls/family-ca.pem" -sf "https://127.0.0.1:$GN_BIND_PORT/api/health/ready" >/dev/null; then
+       curl --cacert "$GN_DATA/tls/family-ca.pem" -sf "$health_url" >/dev/null; then
       green "Backend is healthy."
       return 0
     fi
@@ -510,6 +522,10 @@ run_release_transaction() {
 }
 
 print_done() {
+  local loopback_only=0
+  case "$GN_BIND_HOST" in
+    127.0.0.1|localhost|::1|\[::1\]) loopback_only=1 ;;
+  esac
   echo
   green "=========================================="
   green "GuardianNode installed and running."
@@ -517,8 +533,8 @@ print_done() {
   echo
   echo "Open the parent dashboard at:"
   echo
-  echo "    https://127.0.0.1:${GN_BIND_PORT}"
-  if [ "$GN_BIND_HOST" != "127.0.0.1" ]; then
+  echo "    $(local_dashboard_url)"
+  if [ "$loopback_only" -eq 0 ]; then
     echo
     echo "Child installers on your private LAN/VPN can use:"
     echo
@@ -533,10 +549,10 @@ print_done() {
   echo
   echo "    ${GN_SETUP_TOKEN:-read $GN_DATA/keys/setup_token.json}"
   echo
-  if [ "$GN_BIND_HOST" = "127.0.0.1" ]; then
-    echo "First-run setup is loopback-only. To pair child PCs later, rerun or"
-    echo "override systemd with GN_BIND_HOST=0.0.0.0 plus an explicit"
-    echo "GN_ALLOWED_HOSTS list for the LAN IP/hostname child agents will use."
+  if [ "$loopback_only" -eq 1 ]; then
+    echo "First-run setup is loopback-only. To pair child PCs later, rerun"
+    echo "the installer with GN_BIND_HOST set to the LAN IP, an explicit"
+    echo "GN_ALLOWED_HOSTS list, and GN_ADVERTISED_SERVER_URL."
     echo "Add a firewall rule only for a trusted LAN/VPN."
   else
     echo "LAN/VPN access was enabled because GN_BIND_HOST=$GN_BIND_HOST."

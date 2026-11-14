@@ -35,21 +35,22 @@ complete first-run setup (admin account, recovery phrase, and consent). Fresh
 installs do not bind to the LAN. The service creates a private family CA and
 server certificate on first start; trust only that CA on parent-managed
 browsers that need dashboard access.
-For this alpha, enabling a separated-server deployment is a manual admin task:
-set `GUARDIANNODE_BIND_HOST=0.0.0.0`, an explicit
-`GUARDIANNODE_ALLOWED_HOSTS` list, and
-`GUARDIANNODE_ADVERTISED_SERVER_URL` with the exact child-reachable HTTPS
-origin in the systemd environment override. Restart `guardiannode-backend` and
-add an explicit firewall rule only for your trusted LAN or VPN.
+For a separated server on a private LAN or VPN, set the bind address, allowed
+hosts, and exact child-reachable HTTPS origin when running the installer. It
+writes these settings into the service unit and checks readiness at the bound
+address. Add a firewall rule only for trusted child PCs.
 
-```text
-GUARDIANNODE_BIND_HOST=0.0.0.0
-GUARDIANNODE_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost
-GUARDIANNODE_ADVERTISED_SERVER_URL=https://192.168.1.42:8787
+```bash
+sudo GN_BIND_HOST=192.168.1.42 \
+  GN_ALLOWED_HOSTS=192.168.1.42,guardian-server,127.0.0.1,localhost \
+  GN_ADVERTISED_SERVER_URL=https://192.168.1.42:8787 \
+  bash install.sh
 ```
 
 Replace the example IP/hostname with the exact LAN address/name child agents
-will use.
+will use. A Linux host may also use `GN_BIND_HOST=0.0.0.0`; the readiness probe
+then uses loopback. A server bound to one LAN IP uses that IP for the probe and
+the printed dashboard URL.
 
 ## B) Docker Compose (recommended for home-server enthusiasts)
 
