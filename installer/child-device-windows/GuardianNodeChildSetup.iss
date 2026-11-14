@@ -66,6 +66,7 @@ Source: "..\build\stage\winsw\Backend.xml";     DestDir: "{app}"; DestName: "Gua
 ; ---- Scheduled-task registration helper ----
 Source: "register_agent_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "qualify_acls.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "relocate_server.ps1"; Flags: dontcopy
 
 ; ---- Brand icons (shortcuts + tray runtime icon) ----
 Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -465,6 +466,22 @@ end;
 function ValidateInstallInputs(var ErrorMessage: String): Boolean; forward;
 function RunOllamaSetup(ScriptPath: String): Boolean; forward;
 function RunTesseractOnlySetup(ScriptPath: String): Boolean; forward;
+function RunServerRelocation(ValidateOnly: Boolean): Boolean;
+var
+  Params: String;
+  ResultCode: Integer;
+begin
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\relocate_server.ps1') + '" -DataRoot "' +
+    ExpandConstant('{commonappdata}\GuardianNode') + '" -ServerUrl "' +
+    InstallerParam('SERVERURL') + '"';
+  if ValidateOnly then
+    Params := Params + ' -ValidateOnly';
+  if not Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := False
+  else
+    Result := ResultCode = 0;
+end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -475,6 +492,14 @@ begin
   if not ValidateInstallInputs(ErrorMessage) then begin
     Result := ErrorMessage;
     Exit;
+  end;
+
+  if WasExistingInstall and (InstallerParam('SERVERURL') <> '') then begin
+    ExtractTemporaryFile('relocate_server.ps1');
+    if not RunServerRelocation(True) then begin
+      Result := 'The replacement server did not verify with this child''s enrolled family CA. The current installation remains active.';
+      Exit;
+    end;
   end;
 
   // Complete potentially slow downloads before disabling the currently
@@ -737,10 +762,29 @@ var
   Mode, ServerUrl, PairCode, PairBundle: String;
 begin
   // Repair/upgrade installs retain their established mode, endpoint, and
-  // credentials. Requiring a new pairing code here would make unattended
-  // upgrades impossible and could accidentally replace a working identity.
+  // credentials unless the parent explicitly supplies a new same-family
+  // server URL. A new pairing code would replace the working device identity.
   if IsExistingInstall then begin
     ErrorMessage := '';
+    ServerUrl := Trim(InstallerParam('SERVERURL'));
+    if ServerUrl <> '' then begin
+      if IsAllInOne then begin
+        ErrorMessage := '/SERVERURL cannot relocate an all-in-one installation.';
+        Result := False;
+        Exit;
+      end;
+      if (Pos('https://', Lowercase(ServerUrl)) <> 1) or
+         (not IsValidServerUrl(ServerUrl)) then begin
+        ErrorMessage := '/SERVERURL must be the exact HTTPS origin of the replacement server.';
+        Result := False;
+        Exit;
+      end;
+      if (InstallerParam('PAIRCODE') <> '') or (InstallerParam('PAIRBUNDLE') <> '') then begin
+        ErrorMessage := 'Server relocation uses the existing family CA and device identity; omit /PAIRCODE and /PAIRBUNDLE.';
+        Result := False;
+        Exit;
+      end;
+    end;
     Result := True;
     Exit;
   end;
@@ -947,6 +991,10 @@ begin
         JsonEscape(Trim(ServerConnectionPage.Values[2])) + '"}';
     SaveStringsAtomic(PairPath, PairFile);
   end;
+
+  if WasExistingInstall and (InstallerParam('SERVERURL') <> '') then
+    if not RunServerRelocation(False) then
+      RaiseException('Could not update the child server address. The pre-upgrade backup is retained.');
 end;
 
 procedure WriteRuntimeConfigBeforeStart;

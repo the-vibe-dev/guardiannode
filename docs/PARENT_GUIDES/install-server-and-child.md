@@ -48,6 +48,7 @@ IPs before installation:
 ```bash
 sudo GN_BIND_HOST=0.0.0.0 \
   GN_ALLOWED_HOSTS=127.0.0.1,localhost,192.168.1.42,guardiannode.local \
+  GN_ADVERTISED_SERVER_URL=https://192.168.1.42:8787 \
   bash install.sh
 ```
 
@@ -104,6 +105,24 @@ GuardianNodeChildSetup-0.1.0-alpha.3.exe /VERYSILENT /MODE=child /SERVERURL=http
 
 Plain LAN HTTP is rejected. The only HTTP exception is an explicit loopback
 source-development configuration, which must never carry family data.
+
+### Move an existing family server
+
+Restore the existing server database, keys, and family CA on the new server.
+Configure its HTTPS certificate and advertised URL for the new child-reachable
+address, then confirm `/api/health/ready` succeeds. On each already-paired
+child PC, run the child installer as administrator with the new URL:
+
+```powershell
+GuardianNodeChildSetup-0.1.0-alpha.3.exe /VERYSILENT /MODE=child /SERVERURL=https://192.168.1.42:8787
+```
+
+The repair verifies the new server using the child's enrolled family CA before
+stopping the old installation. It updates the endpoint in the child
+configuration and protected device credential while preserving the device ID,
+token, and CA pin. Do not provide a new pairing code or bundle for this move.
+If the new server has a different family CA, pair the child as a new device
+through the dashboard instead.
 
 ## 4. Verify the complete path
 
