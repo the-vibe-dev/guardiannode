@@ -23,6 +23,7 @@ REQUIRED_FILES = (
     "THIRD_PARTY_NOTICES.md",
     ".env.example",
     "BUILD_WEEK.md",
+    "docs/archive/build-week-2026-readme.md",
     "docs/build-week/BASELINE.md",
     "docs/build-week/CHANGELOG.md",
     "docs/build-week/DEVPOST_DRAFT.md",
@@ -38,7 +39,13 @@ REQUIRED_FILES = (
     "docs/build-week/video/YOUTUBE_COPY.md",
 )
 
-README_EVIDENCE = (
+CURRENT_README_EVIDENCE = (
+    "Current screenshot and AI-review scope",
+    "docs/archive/build-week-2026-readme.md",
+    "License",
+)
+
+ARCHIVED_README_EVIDENCE = (
     "What GuardianNode is",
     "What Guardian Review adds",
     "Existing-project disclosure",
@@ -51,7 +58,6 @@ README_EVIDENCE = (
     "Live mode",
     "Tests and evaluation",
     "Supported platforms",
-    "License",
 )
 
 DEVPOST_EVIDENCE = (
@@ -132,9 +138,15 @@ def validate() -> dict[str, object]:
             failures.append(f"missing required file: {relative}")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    for phrase in README_EVIDENCE:
+    for phrase in CURRENT_README_EVIDENCE:
         if phrase not in readme:
-            failures.append(f"README missing required evidence: {phrase}")
+            failures.append(f"README missing current scope or archive link: {phrase}")
+
+    archive_path = ROOT / "docs/archive/build-week-2026-readme.md"
+    archive = archive_path.read_text(encoding="utf-8") if archive_path.is_file() else ""
+    for phrase in ARCHIVED_README_EVIDENCE:
+        if phrase not in archive:
+            failures.append(f"archived Build Week README missing required evidence: {phrase}")
 
     devpost = (ROOT / "docs/build-week/DEVPOST_DRAFT.md").read_text(encoding="utf-8")
     for phrase in DEVPOST_EVIDENCE:
