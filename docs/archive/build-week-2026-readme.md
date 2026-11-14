@@ -45,7 +45,7 @@ and 353 passing unique tests.
 The repository owner describes the existing dashboard/visual UI as
 Claude-assisted and the existing agent, backend, security, installer, and
 platform hardening as Codex-built. Git metadata cannot independently verify the
-complete historical split. See the [baseline evidence](../../docs/build-week/BASELINE.md)
+complete historical split. See the [baseline evidence](../build-week/BASELINE.md)
 and the [Build Week comparison](https://github.com/the-vibe-dev/guardiannode/compare/pre-build-week-2026...main).
 
 ### How Codex is being used
@@ -54,7 +54,7 @@ Codex is being used to preserve and audit the baseline, trace the actual
 application flow, run verification, define the Guardian Review schema/privacy
 contract, and implement reviewed Build Week changes. No production child data
 is used for this collaboration. Details are recorded in the
-[collaboration log](../../docs/build-week/CODEX_COLLABORATION.md).
+[collaboration log](../build-week/CODEX_COLLABORATION.md).
 
 GPT-5.6-powered Codex accelerated repository analysis, implementation, testing,
 adversarial review, and submission preparation. Human decisions remained
@@ -77,11 +77,11 @@ synthetic data. The July 18 security review found that a coding agent's local
 tools create the wrong capability boundary for family incident evidence, so
 that transport is disabled pending enforceable zero-tool isolation. Mock mode
 and all local detection remain functional without a live provider.
-See the [technical specification](../../docs/build-week/GUARDIAN_REVIEW_SPEC.md)
-and [privacy model](../../docs/build-week/PRIVACY_MODEL.md). Reproducible evidence is
-in the [evaluation results](../../docs/build-week/EVALUATION_RESULTS.md),
-[Build Week changelog](../../docs/build-week/CHANGELOG.md), and
-[Codex collaboration record](../../docs/build-week/CODEX_COLLABORATION.md).
+See the [technical specification](../build-week/GUARDIAN_REVIEW_SPEC.md)
+and [privacy model](../build-week/PRIVACY_MODEL.md). Reproducible evidence is
+in the [evaluation results](../build-week/EVALUATION_RESULTS.md),
+[Build Week changelog](../build-week/CHANGELOG.md), and
+[Codex collaboration record](../build-week/CODEX_COLLABORATION.md).
 
 ### Architecture and privacy flow
 
@@ -106,7 +106,7 @@ flowchart LR
 Local detection and evidence persistence happen before Guardian Review and do
 not depend on an external provider. Screenshots remain local. Only the exact
 minimized JSON shown in the preview is eligible for a live request, and a
-cancel action sends nothing. See the full [data-flow and privacy model](../../docs/build-week/PRIVACY_MODEL.md).
+cancel action sends nothing. See the full [data-flow and privacy model](../build-week/PRIVACY_MODEL.md).
 
 ### Demo mode
 
@@ -135,30 +135,30 @@ advanced server configuration; no API key is committed or exposed to the
 browser. The coding-agent/ChatGPT subscription transport is intentionally on a
 security hold as described above.
 
-See [Guardian Review configuration](../../docs/build-week/CONFIGURATION.md) and
-[judge troubleshooting](../../docs/build-week/TROUBLESHOOTING.md). Submission copy
+See [Guardian Review configuration](../build-week/CONFIGURATION.md) and
+[judge troubleshooting](../build-week/TROUBLESHOOTING.md). Submission copy
 and the functional 2:48 shot plan are in the
-[Devpost draft](../../docs/build-week/DEVPOST_DRAFT.md) and
-[video script](../../docs/build-week/VIDEO_SCRIPT.md). The
-[synthetic screenshot gallery](../../docs/build-week/screenshots/README.md) was
+[Devpost draft](../build-week/DEVPOST_DRAFT.md) and
+[video script](../build-week/VIDEO_SCRIPT.md). The
+[synthetic screenshot gallery](../build-week/screenshots/README.md) was
 captured from the real disposable mock workflow, not a design mockup.
 
-The recording package includes the [2:48 script](../../docs/build-week/VIDEO_SCRIPT.md),
-[Codex computer prompt](../../docs/build-week/video/CODEX_COMPUTER_PROMPT.md),
-[production runbook](../../docs/build-week/video/VIDEO_PRODUCTION_RUNBOOK.md), captions,
+The recording package includes the [2:48 script](../build-week/VIDEO_SCRIPT.md),
+[Codex computer prompt](../build-week/video/CODEX_COMPUTER_PROMPT.md),
+[production runbook](../build-week/video/VIDEO_PRODUCTION_RUNBOOK.md), captions,
 voiceover, and a machine-readable shot manifest. The final 2:48 recording uses
 only labelled synthetic evidence and visibly demonstrates a Windows client,
 server-side local detection, exact outbound preview and consent, a live GPT-5.6
 Guardian Review, communication guidance, local feedback, and the human decision
 boundary. Its qualification record and checksum are in the
-[Windows release report](../../docs/release-validation/windows-build-week-2026-07-21.md).
+[Windows release report](../release-validation/windows-build-week-2026-07-21.md).
 
 ### Live mode
 
 Live mode is an advanced backend-only configuration. It requires an OpenAI API
 project explicitly approved for the operator's required retention controls, a
 server-side key, and deliberate enablement. The browser never receives the key.
-See [Guardian Review configuration](../../docs/build-week/CONFIGURATION.md). The
+See [Guardian Review configuration](../build-week/CONFIGURATION.md). The
 ChatGPT/Codex subscription transport is intentionally unavailable in this
 candidate; it is not a parent-friendly replacement for the direct API yet.
 
@@ -170,12 +170,12 @@ and 19 dashboard tests. Lint, type checks, production builds, dependency audits,
 repository controls, a 196-case rules benchmark, strict documentation build,
 and tracked-history secret scanning also passed. A final targeted submission and
 release-documentation run added 40 passing tests. See the exact final results and
-environment in the [July 21 report](../../docs/build-week/DAILY_2026-07-21.md).
+environment in the [July 21 report](../build-week/DAILY_2026-07-21.md).
 
 The 55-case Guardian Review evaluation is wholly synthetic and checks explicit
 properties. Mock mode achieved 55/55 schema-compliant completions but only
 45.45% assessment-category agreement, which is disclosed rather than presented
-as model accuracy. See [evaluation results](../../docs/build-week/EVALUATION_RESULTS.md).
+as model accuracy. See [evaluation results](../build-week/EVALUATION_RESULTS.md).
 
 ### Supported platforms and limitations
 
@@ -191,10 +191,10 @@ explicit properties, not clinical or universal accuracy. Earlier Windows 11
 installers were qualified with synthetic data, but that evidence does not
 qualify this changed build. Windows 10 and current-build qualification, code signing, a
 complete clean uninstall/reinstall cycle, and unattended local Ollama recovery
-remain before general beta promotion. See [Known limitations](../../KNOWN_LIMITATIONS.md),
-the [Windows release report](../../docs/release-validation/windows-build-week-2026-07-21.md),
-the [evaluation results](../../docs/build-week/EVALUATION_RESULTS.md), and the
-[submission checklist](../../docs/build-week/SUBMISSION_CHECKLIST.md).
+remain before general beta promotion. See [Known limitations](https://github.com/the-vibe-dev/guardiannode/blob/main/KNOWN_LIMITATIONS.md),
+the [Windows release report](../release-validation/windows-build-week-2026-07-21.md),
+the [evaluation results](../build-week/EVALUATION_RESULTS.md), and the
+[submission checklist](../build-week/SUBMISSION_CHECKLIST.md).
 
 ### Build Week commits and evidence
 
@@ -202,12 +202,12 @@ the [evaluation results](../../docs/build-week/EVALUATION_RESULTS.md), and the
 - Frozen Build Week release: [`guardian-node-build-week-2026-final`](https://github.com/the-vibe-dev/guardiannode/tree/guardian-node-build-week-2026-final)
 - Windows-qualified candidate: [`guardian-node-build-week-2026-qualified`](https://github.com/the-vibe-dev/guardiannode/tree/guardian-node-build-week-2026-qualified)
 - Baseline-to-current comparison: [Build Week diff](https://github.com/the-vibe-dev/guardiannode/compare/pre-build-week-2026...main)
-- Evidence index: [Build Week 2026](../../BUILD_WEEK.md)
-- Daily reports: [July 14](../../docs/build-week/DAILY_2026-07-14.md),
-  [July 15](../../docs/build-week/DAILY_2026-07-15.md),
-  [July 16](../../docs/build-week/DAILY_2026-07-16.md),
-  [July 17](../../docs/build-week/DAILY_2026-07-17.md),
-  [July 18](../../docs/build-week/DAILY_2026-07-18.md),
-  [July 19](../../docs/build-week/DAILY_2026-07-19.md),
-  [July 20](../../docs/build-week/DAILY_2026-07-20.md), and
-  [July 21](../../docs/build-week/DAILY_2026-07-21.md)
+- Evidence index: [Build Week 2026](https://github.com/the-vibe-dev/guardiannode/blob/main/BUILD_WEEK.md)
+- Daily reports: [July 14](../build-week/DAILY_2026-07-14.md),
+  [July 15](../build-week/DAILY_2026-07-15.md),
+  [July 16](../build-week/DAILY_2026-07-16.md),
+  [July 17](../build-week/DAILY_2026-07-17.md),
+  [July 18](../build-week/DAILY_2026-07-18.md),
+  [July 19](../build-week/DAILY_2026-07-19.md),
+  [July 20](../build-week/DAILY_2026-07-20.md), and
+  [July 21](../build-week/DAILY_2026-07-21.md)
